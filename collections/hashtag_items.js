@@ -18,11 +18,19 @@ module.exports = HashtagItems = Backbone.Collection.extend({
 
   url: function() {
     // /v1/tags/snow/media/recent?access_token=ACCESS-TOKEN
-    return sd.API_URL + '/tags/' + this.hashtag + '/media/recent?client_id' + IG_CLIENT_ID;
+    var url = sd.API_URL + '/tags/' + this.hashtag + '/media/recent?client_id=' + sd.IG_CLIENT_ID;
+    return url;
   },
 
   initialize: function(models, options) {
     this.hashtag = options.hashtag;
-  }
+  },
+
+  parse: function (response) {
+      this.pagination = response.pagination || {};
+      this.meta = response.meta || {};
+      return response.data;
+  },
+
 
 });

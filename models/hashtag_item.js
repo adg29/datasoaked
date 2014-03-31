@@ -14,6 +14,7 @@ var Backbone = require('backbone')
 module.exports = HashtagItem = Backbone.Model.extend({
 
   url: function() {
-    return sd.API_URL + '/media/' + this.get('uid') + '?client_id' + IG_CLIENT_ID;
+    var url = sd.API_URL + '/media/' + this.get('uid') + '?client_id=' + sd.IG_CLIENT_ID;
+    return url;
   }
 });
