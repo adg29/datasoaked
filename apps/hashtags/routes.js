@@ -2,11 +2,11 @@
 // Routes file that exports route handlers for ease of testing.
 // 
 
-var Hashtags = require('../../collections/hashtags');
+var Hashtags = require('../../collections/hashtag_items');
 
 exports.index = function(req, res, next) {
   var hashtags = new HashtagItems(null, {
-    tag: 'mextures',
+    hashtag: 'mextures',
   });
   hashtags.fetch({
     success: function() {

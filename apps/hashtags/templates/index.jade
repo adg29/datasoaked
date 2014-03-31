@@ -4,6 +4,8 @@ html
     title #hashtag
   body
     h1 #hashtag  
-    ul#hashtag-items
+    ol#hashtag-items
+      include list
     #scripts
       != sharify.script()
+      script( src='/assets/hashtags' + sd.JS_EXT )
