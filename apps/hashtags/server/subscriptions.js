@@ -62,19 +62,20 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
         media.meta = {};
         media.meta.location = channelName;
         var redis_length;
-          helpers.debug('INFO len ' + redisClient.server_info.used_memory_human);
-          //helpers.debug(redisClient.server_info);
-        // redisClient.llen('media:'+channelName,function(err,len){
-        //   redis_length = len;
-        //   helpers.debug('redis_len ' + redis_length);
-        //   if(redis_length>200||parseInt(redisClient.server_info.used_memory_human)>4){
-        //     redisClient.ltrim("media:"+channelName,0,200,function (err, didSucceed) {
-        //       helpers.debug('ltrimDidSucceed'); // true
-        //       helpers.debug(JSON.stringify(err)); // true
-        //       helpers.debug(didSucceed); // true
-        //     });
-        //   }
-        // });
+        helpers.debug('INFO len ' + redisClient.server_info.used_memory_human);
+        //helpers.debug(redisClient.server_info);
+        redisClient.zcount('media:'+channelName,'-inf', '+inf',function(err,len){
+          redis_length = len;
+          helpers.debug('redis_len ' + redis_length);
+          helpers.debug(err);
+          if(redis_length>20||parseInt(redisClient.server_info.used_memory_human)>4){
+            redisClient.zremrangebyrank("media:"+channelName,0,200,function (err, didSucceed) {
+              helpers.debug('zrem didSucceed'); // true
+              helpers.debug(err); // true
+              helpers.debug(didSucceed); // true
+            });
+          }
+        });
         redisClient.zadd('media:'+channelName, media.created_time, JSON.stringify(media),function(err,result){
             // helpers.debug('lpushResult'); // true
             // helpers.debug(JSON.stringify(err)); // true
