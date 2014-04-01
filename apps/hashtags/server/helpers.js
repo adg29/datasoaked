@@ -2,6 +2,7 @@ var redis = require('redis')
   , sd = require('sharify').data
   , settings = require('../settings')
   , http = require('request')
+  , subscriptions = require('./subscriptions')
   , redisClient;
 
 
@@ -24,6 +25,7 @@ function hashtag_media_get(hashtag,callback){
     // This function gets the most recent media stored in redis
   redisClient.lrange('media:'+hashtag, 0, sd.hashtag_items-1, function(error, media){
       // debug("getMedia: got " + media.length + " items");
+      // debug(error);
       // Parse each media JSON to send to callback
       media = media.map(function(json){return JSON.parse(json);});
       if(media.length < sd.hashtag_items){
