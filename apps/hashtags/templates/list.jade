@@ -10,3 +10,4 @@ for item in hashtags
     .media
       img(src=item.get('images').thumbnail.url)
     .tags= item.get('tags')
+    .created= moment.unix(parseInt(item.get('created_time'))).fromNoww()

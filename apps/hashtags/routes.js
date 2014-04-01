@@ -4,7 +4,8 @@
 
 var 
   Hashtags = require('../../collections/hashtag_items')
-  , helpers = require('./server/helpers');
+  , helpers = require('./server/helpers')
+  , helpers_view = require('./templates/helpers');
 
 exports.index = function(req, res, next) {
   var hashtags = new HashtagItems(null, {
@@ -19,6 +20,7 @@ exports.index = function(req, res, next) {
     // }
     hashtags.set(media);
 
+    res.locals.moment = helpers_view.moment;
     res.locals.sd.HASHTAGS = hashtags.toJSON();
     res.render('index', { 
       hashtag: hashtags.hashtag
