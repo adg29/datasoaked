@@ -33,19 +33,24 @@ twit = new Twit({
 
 function hashtag_media_get(hashtag,callback){
     // This function gets the most recent media stored in redis
-  redisClient.lrange('media:'+hashtag, 0, sd.hashtag_items-1, function(error, media){
-      // debug("getMedia: got " + media.length + " items");
-      // debug(error);
-      // Parse each media JSON to send to callback
-      media = media.map(function(json){return JSON.parse(json);});
-      if(media.length < sd.hashtag_items){
-        hashtag_process(hashtag,"manual",function(media){
-          callback(error,media);
-        });
+  redisClient.zrevrange('media:'+hashtag, 0, sd.hashtag_items-1, function(error, media){
+      debug('zrange callback')
+      if(error===null){
+        debug("getMedia: got " + media.length + " items");
+        // Parse each media JSON to send to callback
+        media = media.map(function(json){return JSON.parse(json);});
+        if(media.length < sd.hashtag_items){
+          hashtag_process(hashtag,"manual",function(media){
+            callback(error,media);
+          });
+        }else{
+          debug('media_get via zrange')
+          callback(error, media.reverse());
+          //callback(error, media);
+        }
       }else{
-        debug('media_get via lrange')
-        callback(error, media.reverse());
-        //callback(error, media);
+        debug('zrange error')
+        debug(error);
       }
   });
 }
