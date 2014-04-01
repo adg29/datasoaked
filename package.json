@@ -11,7 +11,8 @@
     "backbone": "*",
     "backbone-super-sync": "*",
     "redis": "*",
-    "request": "*"
+    "request": "*",
+    "twit": "*"
   },
   "devDependencies": {
     "jquery": "*",

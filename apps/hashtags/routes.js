@@ -13,8 +13,6 @@ exports.index = function(req, res, next) {
 
 
   helpers.hashtag_media_get(hashtags.hashtag,function(error, media){
-    console.log(error);
-    console.log(media);
     media_res = typeof media !== 'undefined' ? media : [].reverse();
     // for(var m in media_res){
     //   media_res[m].images.low_resolution.url = "/proxied_image/" + encodeURIComponent(media_res[m].images.low_resolution.url);

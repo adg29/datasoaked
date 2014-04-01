@@ -2,7 +2,9 @@ var redis = require('redis')
   , sd = require('sharify').data
   , settings = require('../settings')
   , http = require('request')
+  , Twit = require('twit')
   , subscriptions = require('./subscriptions')
+  , twit
   , redisClient;
 
 
@@ -21,6 +23,14 @@ redisClient.on("error", function (err) {
 });
 
 
+twit = new Twit({
+    consumer_key:         'YSlfYB1TZrfdTOYFZO1C7vNlM'
+  , consumer_secret:      'RSeYd37CTb1pzdfNXPjrkTmSpdLNHaghxItQCVF3TiRdDIkxNK'
+  , access_token:         '6506472-iUZUCHc98lS3kpvWKbrZsCT1bljImPEiXVuXg5xs97'
+  , access_token_secret:  'jlFVXEHc1BNXmypi13VhAhVJ1MGo4aUkVuXqV8f5zPiWv'
+})
+
+
 function hashtag_media_get(hashtag,callback){
     // This function gets the most recent media stored in redis
   redisClient.lrange('media:'+hashtag, 0, sd.hashtag_items-1, function(error, media){
@@ -33,6 +43,7 @@ function hashtag_media_get(hashtag,callback){
           callback(error,media);
         });
       }else{
+        debug('media_get via lrange')
         callback(error, media.reverse());
         //callback(error, media);
       }
@@ -44,6 +55,36 @@ function hashtag_media_get(hashtag,callback){
 function hashtag_process(tag, update, callback){
   var path = '/tags/' + tag + '/media/recent/';
   var queryString = "?client_id="+ sd.IG_CLIENT_ID;
+
+
+  // _hashtag_process_twitter
+  // twit.get('search/tweets', { q: tag, count: sd.hashtag_items}, function(err, reply) {
+  //   try {
+  //     debug('twitter parsedResponse');
+  //     debug(err);
+  //     debug(reply);
+  //   } catch (parse_exception) {
+  //     debug('Twitter: Couldn\'t parse data. Malformed?');
+  //     debug(parse_exception);
+  //     return;
+  //   }
+  //   try{
+  //     // redisClient.publish('channel:' + tag , data);
+  //     // debug("*********Published: " + tag );
+  //     // debug("*********Published: " + data.length);
+  //     // if(update=="manual") {
+  //     //   debug(parsedResponse);
+  //     //   debug("*******manual: " + tag);
+  //     //   debug("*********manual: " + data.length);
+  //     //   debug("*********manual: " + parsedResponse.data.length);
+  //     //   callback(parsedResponse.data);
+  //     // }
+  //   }catch(e){
+  //     debug("REDIS ERROR: redisClient.publish channel '" + tag);
+  //     debug(e);
+  //   }
+  // });
+
   hashtag_minid_get(tag, function(error,minID){
     if(minID){
       queryString += '&min_id=' + minID;
@@ -52,6 +93,7 @@ function hashtag_process(tag, update, callback){
       queryString += '&count='+sd.hashtag_items;
     }
 
+
     var options = {
       url: sd.API_URL + path + queryString,
       //url: sd.API_URL + sd.API_BASE_PATH + path + queryString,
@@ -59,15 +101,11 @@ function hashtag_process(tag, update, callback){
       // For internal APIs this is often not true ;)
     };
 
-    console.log('hashtag process options')
-    console.log(options)
-
     // Asynchronously ask the Instagram API for new media for a given
     // tag.
     http.get(options, function(e,i,response){
       var data = response;
       try {
-        console.log(data);
         var parsedResponse = JSON.parse(data);
       } catch (parse_exception) {
         console.log('Couldn\'t parse data. Malformed?');
@@ -87,7 +125,6 @@ function hashtag_process(tag, update, callback){
         debug("*********Published: " + tag );
         debug("*********Published: " + data.length);
         if(update=="manual") {
-          debug(parsedResponse);
           debug("*******manual: " + tag);
           debug("*********manual: " + data.length);
           debug("*********manual: " + parsedResponse.data.length);
