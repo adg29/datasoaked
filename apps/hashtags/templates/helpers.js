@@ -1,4 +1,5 @@
 var moment = require('moment');
+var _ = require('underscore');
 
 
 moment.fn.fromNoww = function (a) {
@@ -12,3 +13,4 @@ moment.fn.fromNoww = function (a) {
 }
 
 exports.moment = moment;
+exports._ = _;
