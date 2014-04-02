@@ -32,20 +32,20 @@ twit = new Twit({
 
 
 function hashtag_media_get(hashtag,callback){
-    // This function gets the most recent media stored in redis
+  // This function gets the most recent media stored in redis
   redisClient.zrevrange('media:'+hashtag, 0, sd.hashtag_items-1, function(error, media){
       debug('zrange callback')
       if(error===null){
         debug("getMedia: got " + media.length + " items");
         // Parse each media JSON to send to callback
         media = media.map(function(json){return JSON.parse(json);});
-        if(true||media.length < sd.hashtag_items){
+        if(media.length < sd.hashtag_items){
           hashtag_process(hashtag,"manual",function(media){
             callback(error,media);
           });
         }else{
           debug('media_get via zrange')
-          callback(error, media.reverse());
+          callback(error, media);
         }
       }else{
         debug('zrange error')
@@ -112,13 +112,13 @@ function hashtag_process(tag, update, callback){
       try {
         var parsedResponse = JSON.parse(data);
       } catch (parse_exception) {
-        console.log('Couldn\'t parse data. Malformed?');
-        console.log(parse_exception);
+        debug('Couldn\'t parse data. Malformed?');
+        debug(parse_exception);
         return;
       }
       if(!parsedResponse || !parsedResponse['data']){
-        console.log('Did not receive data for ' + tag +':');
-        console.log(data);
+        debug('Did not receive data for ' + tag +':');
+        debug(data);
         return;
       }
       hashtag_minid_set(tag, parsedResponse['data']);
@@ -151,8 +151,8 @@ function hashtag_minid_set(obj_id, data){
       nextMinID = parseInt(sorted[0].id);
       redisClient.set('min-id:channel:' + obj_id, nextMinID);
   } catch (e) {
-      console.log('Error parsing min ID');
-      console.log(sorted);
+      debug('Error parsing min ID');
+      debug(sorted);
   }
 }
 
