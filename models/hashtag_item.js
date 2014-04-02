@@ -9,12 +9,31 @@
 //
 
 var Backbone = require('backbone')
-  , sd = require('sharify').data;
+  , sd = require('sharify').data
+  , models = {};
 
-module.exports = HashtagItem = Backbone.Model.extend({
+models.HashtagItem = HashtagItem = Backbone.Model.extend({
 
   url: function() {
     var url = sd.API_URL + '/media/' + this.get('uid') + '?client_id=' + sd.IG_CLIENT_ID;
     return url;
   }
 });
+
+models.TwitterItem = HashtagItem.extend({
+
+  url: function() {
+    var url = sd.API_URL + '/media/' + this.get('uid') + '?client_id=' + sd.IG_CLIENT_ID;
+    return url;
+  }
+});
+
+models.InstagramItem = HashtagItem.extend({
+
+  url: function() {
+    var url = sd.API_URL + '/media/' + this.get('uid') + '?client_id=' + sd.IG_CLIENT_ID;
+    return url;
+  }
+});
+
+module.exports = models;

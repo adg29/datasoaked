@@ -4,6 +4,7 @@
 
 var 
   Hashtags = require('../../collections/hashtag_items')
+  models = require('../../models/hashtag_item')
   , helpers = require('./server/helpers')
   , helpers_view = require('./templates/helpers');
 
@@ -14,14 +15,19 @@ exports.index = function(req, res, next) {
 
 
   helpers.hashtag_media_get(hashtags.hashtag,function(error, media){
+    helpers.debug('hashtag_media_get error')
+    helpers.debug(error);
     media_res = typeof media !== 'undefined' ? media : [].reverse();
     // for(var m in media_res){
     //   media_res[m].images.low_resolution.url = "/proxied_image/" + encodeURIComponent(media_res[m].images.low_resolution.url);
     // }
     hashtags.set(media);
 
+    res.locals.models = models;
     res.locals.moment = helpers_view.moment;
+    res.locals._ = helpers_view._;
     res.locals.sd.HASHTAGS = hashtags.toJSON();
+    helpers.debug('render index')
     res.render('index', { 
       hashtag: hashtags.hashtag
       , hashtags: hashtags.models 

@@ -7,7 +7,12 @@
 
 for item in hashtags
   li
-    .media
-      img(src=item.get('images').thumbnail.url)
-    .tags= item.get('tags')
-    .created= moment.unix(parseInt(item.get('created_time'))).fromNoww()
+    if item instanceof models.InstagramItem	 
+      .media
+        img(src=item.get('images').thumbnail.url)
+      .tags= item.get('tags')
+      .created= moment.unix(parseInt(item.get('created_time'))).fromNoww()
+    if item instanceof models.TwitterItem	 
+      .tweet= item.get('text')
+      .tags= _.map(item.get('entities').hashtags, function(h){ return h.text; })
+      .created= moment(item.get('created_at')).fromNoww()

@@ -1,5 +1,6 @@
 var helpers = require('./helpers')
     , redis = require('redis')
+    , moment = require('moment')
     , sd = require('sharify').data
     , subscriptionPattern = 'channel:*'
     , pubSubClient
@@ -37,14 +38,25 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
      the subscription pattern. If it does, then go ahead and parse it. */
 
   helpers.debug('pmessage from ' + pattern + " against " + subscriptionPattern)
+  var channel_split = channel.split(':')
+    , data;
   if(true||pattern == subscriptionPattern){
       try {
-        var data = JSON.parse(message)['data'];
-        
+        // this is where the pmessage comes in
+        // the data from different apis will be structured differently
+        // account for this in the json parse message data
+        if(channel_split[1]=="twitter"){
+          helpers.debug('twitter')
+          data = JSON.parse(message).statuses;
+        }else{
+          data = JSON.parse(message).data;
+        }
+
         // Channel name is really just a 'humanized' version of a slug
         // san-francisco turns into san francisco. Nothing fancy, just
         // works.
-        var channelName = channel.split(':')[1].replace(/-/g, ' ');
+        var channelName = channel_split[2].replace(/-/g, ' ');
+        helpers.debug(channelName);
       } catch (e) {
           helpers.debug('catch channel parse');
           helpers.debug(e);
@@ -53,12 +65,17 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
     
     // Store individual media JSON for retrieval by homepage later
     helpers.debug('Store individual media JSON for retrieval by homepage later');
-    helpers.debug(channelName);
-    //helpers.debug(data);
+    helpers.debug(data);
     for(index in data){
-        var media = data[index];
-        // helpers.debug('indexmedia');
-        // helpers.debug(media);
+        var media = data[index]
+          , media_weight;
+        if(channel_split[1]=="twitter"){
+          media_weight = moment(media.created_at).unix();
+        }else{
+          media_weight = media.created_time;
+        }
+        helpers.debug('indexmedia');
+        helpers.debug(media_weight);
         media.meta = {};
         media.meta.location = channelName;
         var redis_length;
@@ -68,7 +85,8 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
           redis_length = len;
           helpers.debug('redis_len ' + redis_length);
           helpers.debug(err);
-          if(redis_length>20||parseInt(redisClient.server_info.used_memory_human)>4){
+          // #TODO redis trimming length should be a setting
+          if(redis_length>200||parseInt(redisClient.server_info.used_memory_human)>4){
             redisClient.zremrangebyrank("media:"+channelName,0,200,function (err, didSucceed) {
               helpers.debug('zrem didSucceed'); // true
               helpers.debug(err); // true
@@ -76,10 +94,10 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
             });
           }
         });
-        redisClient.zadd('media:'+channelName, media.created_time, JSON.stringify(media),function(err,result){
-            // helpers.debug('lpushResult'); // true
-            // helpers.debug(JSON.stringify(err)); // true
-            // helpers.debug(result); // true
+        redisClient.zadd('media:'+channelName, media_weight, JSON.stringify(media),function(err,result){
+            helpers.debug('zaddResult'); // true
+            helpers.debug(err); // true
+            helpers.debug(result); // true
           });
     }
     

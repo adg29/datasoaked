@@ -10,11 +10,22 @@
 
 var Backbone = require('backbone')
   , sd = require('sharify').data
-  , HashtagItem = require('../models/hashtag_item');
+  , models = require('../models/hashtag_item');
 
 module.exports = HashtagItems = Backbone.Collection.extend({
   
-  model: HashtagItem,
+  model: function(attrs,options){
+    var m = null;
+    if(attrs.retweet_count!=null){
+        m = new models.TwitterItem(attrs, options);
+    }
+    //else if(attrs.filters!=null){
+    else{
+        m = new models.InstagramItem(attrs, options);
+    }
+
+    return m;
+  },
 
   url: function() {
     // /v1/tags/snow/media/recent?access_token=ACCESS-TOKEN

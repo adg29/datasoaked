@@ -62,32 +62,30 @@ function hashtag_process(tag, update, callback){
 
 
   // _hashtag_process_twitter
-  // twit.get('search/tweets', { q: tag, count: sd.hashtag_items}, function(err, reply) {
-  //   try {
-  //     debug('twitter parsedResponse');
-  //     debug(err);
-  //     debug(reply);
-  //   } catch (parse_exception) {
-  //     debug('Twitter: Couldn\'t parse data. Malformed?');
-  //     debug(parse_exception);
-  //     return;
-  //   }
-  //   try{
-  //     // redisClient.publish('channel:' + tag , data);
-  //     // debug("*********Published: " + tag );
-  //     // debug("*********Published: " + data.length);
-  //     // if(update=="manual") {
-  //     //   debug(parsedResponse);
-  //     //   debug("*******manual: " + tag);
-  //     //   debug("*********manual: " + data.length);
-  //     //   debug("*********manual: " + parsedResponse.data.length);
-  //     //   callback(parsedResponse.data);
-  //     // }
-  //   }catch(e){
-  //     debug("REDIS ERROR: redisClient.publish channel '" + tag);
-  //     debug(e);
-  //   }
-  // });
+  twit.get('search/tweets', { q: tag, count: sd.hashtag_items}, function(err, reply) {
+    try {
+      debug('twitter parsedResponse');
+      debug(err);
+      // debug(reply.statuses);
+    } catch (parse_exception) {
+      debug('Twitter: Couldn\'t parse data. Malformed?');
+      debug(parse_exception);
+      return;
+    }
+    try{
+      redisClient.publish('channel:twitter:' + tag , JSON.stringify(reply));
+      debug("*********Published: " + tag );
+      debug("*********Published: " + reply.length);
+      if(update=="manual") {
+        debug("*******manual: " + tag);
+        debug("*********manual: " + reply.statuses.length);
+        callback(reply.statuses);
+      }
+    }catch(e){
+      debug("REDIS ERROR: redisClient.publish twitter channel " + tag);
+      debug(e);
+    }
+  });
 
   debug('hashtag_minid_get');
   hashtag_minid_get(tag, function(error,minID){
@@ -169,6 +167,8 @@ function hashtag_minid_process(error,minID){
 function debug(msg) {
   if (sd.debug) {
     console.log(msg);
+    if (msg instanceof Error)
+      console.log(msg.stack)
   }
 }
 exports.debug = debug;
