@@ -13,7 +13,8 @@
     "redis": "*",
     "request": "*",
     "twit": "*",
-    "moment": "*"
+    "moment": "*",
+    "underscore": "*"
   },
   "devDependencies": {
     "jquery": "*",
