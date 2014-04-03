@@ -10,7 +10,7 @@ var
 
 exports.index = function(req, res, next) {
   var hashtags = new HashtagItems(null, {
-    hashtag: 'mextures',
+    hashtag: 'ootd',
   });
 
 
