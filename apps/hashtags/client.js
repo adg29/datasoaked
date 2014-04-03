@@ -36,6 +36,6 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 module.exports.init = function() {
   new HashtagsView({
     el: $('body'),
-    collection: new Hashtags(sd.HASHTAGS, { hashtag: 'ootd' })
+    collection: new Hashtags(sd.HASHTAGS, { hashtag: sd.hashtag })
   });
 };

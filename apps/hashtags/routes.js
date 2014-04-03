@@ -4,13 +4,14 @@
 
 var 
   Hashtags = require('../../collections/hashtag_items')
-  models = require('../../models/hashtag_item')
+  , models = require('../../models/hashtag_item')
   , helpers = require('./server/helpers')
-  , helpers_view = require('./templates/helpers');
+  , helpers_view = require('./templates/helpers')
+  , sd = require('sharify').data;
 
 exports.index = function(req, res, next) {
   var hashtags = new HashtagItems(null, {
-    hashtag: 'ootd',
+    hashtag: sd.hashtag,
   });
 
 
@@ -23,9 +24,9 @@ exports.index = function(req, res, next) {
     // }
     hashtags.set(media);
 
-    res.locals.models = models;
-    res.locals.moment = helpers_view.moment;
-    res.locals._ = helpers_view._;
+    res.locals.models = models; // include access to models
+    res.locals.moment = helpers_view.moment; // include moment lib
+    res.locals._ = helpers_view._; // include underscore lib
     res.locals.sd.HASHTAGS = hashtags.toJSON();
     helpers.debug('render index')
     res.render('index', { 
