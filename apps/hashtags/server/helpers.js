@@ -2,6 +2,7 @@ var redis = require('redis')
   , sd = require('sharify').data
   , settings = require('../settings')
   , http = require('request')
+  , async = require('async')
   , Twit = require('twit')
   , subscriptions = require('./subscriptions')
   , twit
@@ -56,90 +57,102 @@ function hashtag_media_get(hashtag,callback){
 
 
 
-function hashtag_process(tag, update, callback){
+function hashtag_process(tag, update, process_callback){
   var path = '/tags/' + tag + '/media/recent/';
   var queryString = "?client_id="+ sd.IG_CLIENT_ID;
 
 
-  // _hashtag_process_twitter
-  twit.get('search/tweets', { q: tag, count: sd.hashtag_items}, function(err, reply) {
-    try {
-      debug('twitter parsedResponse');
-      debug(err);
-      // debug(reply.statuses);
-    } catch (parse_exception) {
-      debug('Twitter: Couldn\'t parse data. Malformed?');
-      debug(parse_exception);
-      return;
-    }
-    try{
-      redisClient.publish('channel:twitter:' + tag , JSON.stringify(reply));
-      debug("*********Published: " + tag );
-      debug("*********Published: " + reply.length);
-      if(update=="manual") {
-        debug("*******manual: " + tag);
-        debug("*********manual: " + reply.statuses.length);
-        callback(reply.statuses);
+  async.parallel({
+      twitter: function(callback) {
+          // _hashtag_process_twitter
+          twit.get('search/tweets', { q: tag, count: sd.hashtag_items}, function(err, reply) {
+            try {
+              debug('twitter parsedResponse');
+              debug(err);
+              // debug(reply.statuses);
+            } catch (parse_exception) {
+              debug('Twitter: Couldn\'t parse data. Malformed?');
+              debug(parse_exception);
+              return;
+            }
+            try{
+              redisClient.publish('channel:twitter:' + tag , JSON.stringify(reply));
+              debug("*********Published: " + tag );
+              debug("*********Published: " + reply.length);
+              if(update=="manual") {
+                debug("*******manual: " + tag);
+                debug("*********manual: " + reply.statuses.length);
+                callback(null,reply.statuses);
+              }
+            }catch(e){
+              debug("REDIS ERROR: redisClient.publish twitter channel " + tag);
+              debug(e);
+            }
+          });
+
+
+      },
+      instagram: function(callback) {
+        debug('hashtag_minid_get');
+        hashtag_minid_get(tag, function(error,minID){
+          debug(minID);
+          if(minID){
+            queryString += '&min_id=' + minID;
+          } else {
+              // If this is the first update, just grab the most recent.
+            queryString += '&count='+sd.hashtag_items;
+          }
+
+
+          var options = {
+            url: sd.API_URL + path + queryString,
+            //url: sd.API_URL + sd.API_BASE_PATH + path + queryString,
+            // Note that in all implementations, basePath will be ''. 
+            // For internal APIs this is often not true ;)
+          };
+
+          // Asynchronously ask the Instagram API for new media for a given
+          // tag.
+          http.get(options, function(e,i,response){
+            var data = response;
+            try {
+              var parsedResponse = JSON.parse(data);
+            } catch (parse_exception) {
+              debug('Couldn\'t parse data. Malformed?');
+              debug(parse_exception);
+              return;
+            }
+            if(!parsedResponse || !parsedResponse['data']){
+              debug('Did not receive data for ' + tag +':');
+              debug(data);
+              return;
+            }
+            hashtag_minid_set(tag, parsedResponse['data']);
+              
+            // Let all the redis listeners know that we've got new media.
+            try{
+              redisClient.publish('channel:instagram:' + tag , data);
+              debug("*********Published: " + tag );
+              debug("*********Published: " + data.length);
+              if(update=="manual") {
+                debug("*******manual: " + tag);
+                debug("*********manual: " + data.length);
+                debug("*********manual: " + parsedResponse.data.length);
+                callback(null,parsedResponse.data);
+              }
+            }catch(e){
+              debug("REDIS ERROR: redisClient.publish channel '" + tag);
+              debug(e);
+            }
+          });
+        });
       }
-    }catch(e){
-      debug("REDIS ERROR: redisClient.publish twitter channel " + tag);
-      debug(e);
-    }
+  }, function(err, results) {
+      // results is now equals to: {one: 'abc\n', two: 'xyz\n'}
+      debug('async results')
+      process_callback(results.twitter.concat(results.instagram));
   });
 
-  debug('hashtag_minid_get');
-  hashtag_minid_get(tag, function(error,minID){
-    debug(minID);
-    if(minID){
-      queryString += '&min_id=' + minID;
-    } else {
-        // If this is the first update, just grab the most recent.
-      queryString += '&count='+sd.hashtag_items;
-    }
-
-
-    var options = {
-      url: sd.API_URL + path + queryString,
-      //url: sd.API_URL + sd.API_BASE_PATH + path + queryString,
-      // Note that in all implementations, basePath will be ''. 
-      // For internal APIs this is often not true ;)
-    };
-
-    // Asynchronously ask the Instagram API for new media for a given
-    // tag.
-    http.get(options, function(e,i,response){
-      var data = response;
-      try {
-        var parsedResponse = JSON.parse(data);
-      } catch (parse_exception) {
-        debug('Couldn\'t parse data. Malformed?');
-        debug(parse_exception);
-        return;
-      }
-      if(!parsedResponse || !parsedResponse['data']){
-        debug('Did not receive data for ' + tag +':');
-        debug(data);
-        return;
-      }
-      hashtag_minid_set(tag, parsedResponse['data']);
-        
-      // Let all the redis listeners know that we've got new media.
-      try{
-        redisClient.publish('channel:' + tag , data);
-        debug("*********Published: " + tag );
-        debug("*********Published: " + data.length);
-        if(update=="manual") {
-          debug("*******manual: " + tag);
-          debug("*********manual: " + data.length);
-          debug("*********manual: " + parsedResponse.data.length);
-          callback(parsedResponse.data);
-        }
-      }catch(e){
-        debug("REDIS ERROR: redisClient.publish channel '" + tag);
-        debug(e);
-      }
-    });
-  });
 }
 
 function hashtag_minid_set(obj_id, data){

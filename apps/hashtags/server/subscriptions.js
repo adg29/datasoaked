@@ -46,9 +46,10 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
         // the data from different apis will be structured differently
         // account for this in the json parse message data
         if(channel_split[1]=="twitter"){
-          helpers.debug('twitter')
+          helpers.debug('twitter pmessage')
           data = JSON.parse(message).statuses;
         }else{
+          helpers.debug('insta pmessage')
           data = JSON.parse(message).data;
         }
 
@@ -65,7 +66,7 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
     
     // Store individual media JSON for retrieval by homepage later
     helpers.debug('Store individual media JSON for retrieval by homepage later');
-    helpers.debug(data);
+    // helpers.debug(data);
     for(index in data){
         var media = data[index]
           , media_weight;
@@ -79,18 +80,18 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
         media.meta = {};
         media.meta.location = channelName;
         var redis_length;
-        helpers.debug('INFO len ' + redisClient.server_info.used_memory_human);
+        // helpers.debug('INFO len ' + redisClient.server_info.used_memory_human);
         //helpers.debug(redisClient.server_info);
         redisClient.zcount('media:'+channelName,'-inf', '+inf',function(err,len){
           redis_length = len;
-          helpers.debug('redis_len ' + redis_length);
-          helpers.debug(err);
+          // helpers.debug('redis_len ' + redis_length);
+          // helpers.debug(err);
           // #TODO redis trimming length should be a setting
           if(redis_length>200||parseInt(redisClient.server_info.used_memory_human)>4){
             redisClient.zremrangebyrank("media:"+channelName,0,200,function (err, didSucceed) {
-              helpers.debug('zrem didSucceed'); // true
-              helpers.debug(err); // true
-              helpers.debug(didSucceed); // true
+              // helpers.debug('zrem didSucceed'); // true
+              // helpers.debug(err); // true
+              // helpers.debug(didSucceed); // true
             });
           }
         });
