@@ -1,13 +1,12 @@
 doctype html
 html
   head
-    title #hashtag
+    title= '#'+sd.hashtag + ' Realtime Updates'
     link( type='text/css', rel='stylesheet', href=('/assets/hashtags' + sd.CSS_EXT) )
   body
-    h1 #hashtag  
-    #headerLabel
-    #demo
-    #footerLabel
+    h1= '#'+sd.hashtag
+    #demo.viz-block
+    #headerLabel.viz-block
     ol#hashtag-items
       include list
     #scripts
