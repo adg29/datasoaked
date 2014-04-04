@@ -6,5 +6,5 @@ sd['httpClient'] = require('http');
 sd['REDIS_PORT'] = 6486;
 sd['REDIS_HOST'] = '127.0.0.1';
 sd['hashtag'] = 'liveaudio';
-sd['hashtag_items'] = 24;
+sd['hashtag_items'] = 60;
 

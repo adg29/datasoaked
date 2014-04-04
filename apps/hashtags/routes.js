@@ -11,6 +11,7 @@ var
   , sd = require('sharify').data;
 
 exports.index = function(req, res, next) {
+  sd.hashtag = req.params.tag || sd.hashtag;
   var hashtags = new HashtagItems(null, {
     hashtag: sd.hashtag,
   });
@@ -24,6 +25,7 @@ exports.index = function(req, res, next) {
     res.locals.models = models; // include access to models
     res.locals.moment = helpers_view.moment; // include moment lib
     res.locals._ = helpers_view._; // include underscore lib
+    res.locals.sd.hashtag = sd.hashtag;
     res.locals.sd.HASHTAGS = hashtags.toJSON();
     helpers.debug('render index')
     res.render('index', { 
