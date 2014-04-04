@@ -12,6 +12,7 @@
 
 var Backbone = require('backbone'),
     $ = require('jquery'), 
+    _ = require('underscore'),
     io = require('socket.io-browserify')
     socket = io.connect(window.location.origin),
     sd = require('sharify').data,
@@ -69,19 +70,24 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
     var data=[
               {
                 label:"Twitter",
-                value:1.3237,
+                value:parseFloat(_.random(1,11))+.3237,
                 unit:oneDay,
                 old:null
                 , ttl:0.993
               },
               {
                 label:"Instagram",
-                value:11.1618,
+                value:parseFloat(_.random(1,11))+.1618,
                 unit:oneDay,
                 old:null
                 , ttl:0.993
               }
       ]
+
+      console.log('twitter')
+      console.log(data[0].value)
+      console.log('insta')
+      console.log(data[1].value)
 
 
 
@@ -158,7 +164,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
                                   data[i].old = data[i].now
                                 };
                                }
-                               , 500); 
+                               , 1); 
 
     // add legends 
     var labeling =function(setting,container){
@@ -180,7 +186,7 @@ module.exports.init = function() {
     collection: new Hashtags(null, { hashtag: sd.hashtag })
   });
 };
-},{"../../collections/hashtag_items.js":5,"./templates/list.jade":3,"backbone":7,"jquery":11,"sharify":12,"socket.io-browserify":13}],2:[function(require,module,exports){
+},{"../../collections/hashtag_items.js":5,"./templates/list.jade":3,"backbone":7,"jquery":11,"sharify":12,"socket.io-browserify":13,"underscore":14}],2:[function(require,module,exports){
 /*
  * Visual Sedimentation Library v0.01
  * http://www.visualsedimentation.org/
