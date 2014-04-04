@@ -43,7 +43,7 @@ exports.index = function(req, res, next) {
   // });
 };
 
-exports.challenge_callback_instagram = function(req, res){
+exports.challenge_callback_instagram = function(req, res, next){
     // The GET callback for each subscription verification.
   helpers.debug("GET " + req.url); 
   var params = url.parse(req.url, true).query;
@@ -52,27 +52,27 @@ exports.challenge_callback_instagram = function(req, res){
   res.send(challenge);
 };
 
-exports.subscription_callback_instagram = function(req, res){
+exports.subscription_callback_instagram = function(req, res, next){
   helpers.debug("/callbacks/instagram/tag/" + req.params.tag);
   // The POST callback for Instagram to call every time there's an update
   // to one of our subscriptions.
     
+  var tag = req.params.tag;
+  helpers.debug('tag')
+  helpers.debug(tag)
   // Go through and process each update. Note that every update doesn't
   // include the updated data - we use the data in the update to query
   // the  API to get the data we want.
   helpers.debug('subscription_callback_instagram rawwww')
   helpers.debug(req.rawBody);
   var updates = JSON.parse(req.rawBody);
-  var tag = req.params.tag;
-  // helpers.debug('tag')
-  // helpers.debug(tag)
   for(index in updates){
     var update = updates[index];
-    // helpers.debug('updateLoop')
-    // helpers.debug(update)
+    helpers.debug('updateLoop')
+    helpers.debug(update)
     if(false){
     }
-    else if(update['object'] == "tag"){
+    else if(true||update['object'] == "tag"){
       helpers.debug('subscription_callback_instagram tag process')
       helpers.hashtag_process(tag, update);
     }

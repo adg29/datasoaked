@@ -6,23 +6,16 @@
 
 var c = require('./config')
   , express = require('express')
-  , setup = require('./lib/setup');
+  , setup = require('./lib/setup')
+  , setup_sockets = require('./lib/setup_sockets');
 
-var app = module.exports = express();
+var app = exports.app = express();
 setup(app);
 
 
 var http = require('http')
-	, server = http.createServer(app)
-	, io = require('socket.io').listen(server); // need to find a way of requiring this in the hashtag app
-
-io.set('log level', 1); // reduce logging
-
-// assuming io is the Socket.IO server object
-io.configure(function () { 
-  io.set("transports", ["xhr-polling"]); 
-  io.set("polling duration", 10); 
-});
+	, server = exports.server = http.createServer(app)
+setup_sockets(server);
 
 
 // Start the server and send a message to IPC for the integration test 

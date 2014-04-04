@@ -17,6 +17,7 @@
     "http": "*",
     "socket.io": "*",
     "socket.io-browserify": "*",
+    "socket.io-client": "*",
     "msgpack": "*",
     "hiredis": "*"
   },

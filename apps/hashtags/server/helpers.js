@@ -61,9 +61,14 @@ function hashtag_process(tag, update, process_callback){
   var path = '/tags/' + tag + '/media/recent/';
   var queryString = "?client_id="+ sd.IG_CLIENT_ID;
 
+ debug('hashtag_process') 
+ debug(tag)
+ debug(update)
+ debug(process_callback)
 
   async.parallel({
       twitter: function(callback) {
+          debug('twitter');
           // _hashtag_process_twitter
           twit.get('search/tweets', { q: tag, count: sd.hashtag_items}, function(err, reply) {
             try {
@@ -148,9 +153,8 @@ function hashtag_process(tag, update, process_callback){
         });
       }
   }, function(err, results) {
-      // results is now equals to: {one: 'abc\n', two: 'xyz\n'}
       debug('async results')
-      process_callback(results.twitter.concat(results.instagram));
+      if(update=="manual") process_callback(results.twitter.concat(results.instagram));
   });
 
 }

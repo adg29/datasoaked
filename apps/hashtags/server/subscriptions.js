@@ -1,8 +1,9 @@
-var helpers = require('./helpers')
+var c = require('../../../config')
+    , helpers = require('./helpers')
     , redis = require('redis')
     , moment = require('moment')
     , sd = require('sharify').data
-    , subscriptionPattern = 'channel:*'
+    , subscriptionPattern = '*:*:*'
     , pubSubClient
     , redisClient;
 
@@ -108,6 +109,19 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
       'media': data,
       'channelName': channelName
     };
+    for(sessionId in c.io_clients){
+      try{
+        helpers.debug('try socket clients send') 
+        helpers.debug(sessionId) 
+        var client = c.io_clients[sessionId];
+        client.send(JSON.stringify(update));
+      }catch (e) {
+        helpers.debug('catch socket clients send') 
+        helpers.debug(sessionId) 
+        helpers.debug(update) 
+        helpers.debug(e) 
+      }
+    }
   }
 });
 
