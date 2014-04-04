@@ -18,10 +18,6 @@ exports.index = function(req, res, next) {
   helpers.hashtag_media_get(hashtags.hashtag,function(error, media){
     helpers.debug('hashtag_media_get error')
     helpers.debug(error);
-    media_res = typeof media !== 'undefined' ? media : [].reverse();
-    // for(var m in media_res){
-    //   media_res[m].images.low_resolution.url = "/proxied_image/" + encodeURIComponent(media_res[m].images.low_resolution.url);
-    // }
     hashtags.set(media);
 
     res.locals.models = models; // include access to models
@@ -33,11 +29,6 @@ exports.index = function(req, res, next) {
       hashtag: hashtags.hashtag
       , hashtags: hashtags.models 
     });
-
-    // res.render('index', {
-    //       images: media_res,
-    //       hashtag: hashtags.hashtag
-    // });
   });
 
   // hashtags.fetch({
