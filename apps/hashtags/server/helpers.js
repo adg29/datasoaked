@@ -40,7 +40,7 @@ function hashtag_media_get(hashtag,callback){
         debug("getMedia: got " + media.length + " items");
         // Parse each media JSON to send to callback
         media = media.map(function(json){return JSON.parse(json);});
-        if(media.length < sd.hashtag_items){
+        if(true || media.length < sd.hashtag_items){
           hashtag_process(hashtag,"manual",function(media){
             callback(error,media);
           });
