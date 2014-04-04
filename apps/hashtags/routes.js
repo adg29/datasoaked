@@ -18,7 +18,7 @@ exports.index = function(req, res, next) {
   helpers.hashtag_media_get(hashtags.hashtag,function(error, media){
     helpers.debug('hashtag_media_get error')
     helpers.debug(error);
-    hashtags.set(media);
+    hashtags.reset(media);
 
     res.locals.models = models; // include access to models
     res.locals.moment = helpers_view.moment; // include moment lib

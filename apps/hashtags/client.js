@@ -21,6 +21,7 @@ Backbone.$ = $;
 module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
   initialize: function() {
+    this.collection.reset(sd.HASHTAGS);
     this.render_viz();
     this.collection.on('sync', this.render, this);
   },
@@ -84,7 +85,8 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
     // create column by datas  
     for (var i = data.length - 1; i >= 0; i--) {
       sceneSetting.data.model.push({label:data[i].label})
-      sceneSetting.data.strata.push([{initValue: 20, label: data[i].label + " Strata " + i}])
+      var source_value_init = this.collection.count_source[(data[i].label).toLowerCase()];
+      sceneSetting.data.strata.push([{initValue: source_value_init, label: data[i].label + " Strata " + i}])
     };
 
     // customize tokens before create it  
@@ -150,6 +152,6 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 module.exports.init = function() {
   new HashtagsView({
     el: $('body'),
-    collection: new Hashtags(sd.HASHTAGS, { hashtag: sd.hashtag })
+    collection: new Hashtags(null, { hashtag: sd.hashtag })
   });
 };
