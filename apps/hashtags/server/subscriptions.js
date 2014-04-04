@@ -11,7 +11,7 @@ var pubSubClient;
 
 if (process.env.REDISTOGO_URL) {
   // inside if statement
-  var rtg   = require("url").parse(sd.REDISTOGO_URL);
+  var rtg   = require("url").parse(process.env.REDISTOGO_URL);
   pubSubClient = redis.createClient(rtg.port, rtg.hostname);
   pubSubClient.auth(rtg.auth.split(":")[1]); 
 } else {
@@ -20,7 +20,7 @@ if (process.env.REDISTOGO_URL) {
 
 if (process.env.REDISTOGO_URL) {
   // inside if statement
-  var rtg   = require("url").parse(sd.REDISTOGO_URL);
+  var rtg   = require("url").parse(process.env.REDISTOGO_URL);
   redisClient = redis.createClient(rtg.port, rtg.hostname);
   redisClient.auth(rtg.auth.split(":")[1]); 
 } else {
