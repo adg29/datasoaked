@@ -70,14 +70,14 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
     var data=[
               {
                 label:"Twitter",
-                value:parseFloat(_.random(1,11))+.3237,
+                value:parseFloat(_.random(1,8))+.3237,
                 unit:oneDay,
                 old:null
                 , ttl:0.993
               },
               {
                 label:"Instagram",
-                value:parseFloat(_.random(1,11))+.1618,
+                value:parseFloat(_.random(1,8))+.1618,
                 unit:oneDay,
                 old:null
                 , ttl:0.993
