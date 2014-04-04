@@ -8,11 +8,13 @@
 for item in hashtags
   li
     if item instanceof models.InstagramItem	 
+      .created= moment.unix(parseInt(item.get('created_time'))).fromNoww()
       .media
         img(src=item.get('images').thumbnail.url)
       .tags= item.get('tags')
-      .created= moment.unix(parseInt(item.get('created_time'))).fromNoww()
+      .created= moment.unix(parseInt(item.get('created_time'))).format("dddd, MMMM Do YYYY, h:mm:ss a") 
     if item instanceof models.TwitterItem	 
+      .created= moment(item.get('created_at')).fromNoww()
       .tweet= item.get('text')
       .tags= _.map(item.get('entities').hashtags, function(h){ return h.text; })
-      .created= moment(item.get('created_at')).fromNoww()
+      .created= moment(item.get('created_at')).format("dddd, MMMM Do YYYY, h:mm:ss a") 

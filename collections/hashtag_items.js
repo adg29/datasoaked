@@ -27,6 +27,14 @@ module.exports = HashtagItems = Backbone.Collection.extend({
     return m;
   },
 
+  comparator: function(a, b) {
+        var a_created = (a instanceof models.InstagramItem ? 'created_time' : 'created_at');
+        var b_created = (b instanceof models.InstagramItem ? 'created_time' : 'created_at');
+        var a_unix = (a_created=="created_time" ? a.get(a_created): (new Date(a.get(a_created)).getTime()/1000 ) );
+        var b_unix = (b_created=="created_time" ? b.get(b_created): (new Date(b.get(b_created)).getTime()/1000 ) );
+        return parseFloat( b_unix ) - parseFloat( a_unix );
+  } ,
+
   url: function() {
     // /v1/tags/snow/media/recent?access_token=ACCESS-TOKEN
     var url = sd.API_URL + '/tags/' + this.hashtag + '/media/recent?client_id=' + sd.IG_CLIENT_ID;
