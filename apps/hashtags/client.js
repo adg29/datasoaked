@@ -11,6 +11,7 @@
 
 var Backbone = require('backbone'),
     $ = require('jquery'), 
+    _ = require('underscore'),
     io = require('socket.io-browserify')
     socket = io.connect(window.location.origin),
     sd = require('sharify').data,
@@ -68,19 +69,24 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
     var data=[
               {
                 label:"Twitter",
-                value:1.3237,
+                value:parseFloat(_.random(1,11))+.3237,
                 unit:oneDay,
                 old:null
                 , ttl:0.993
               },
               {
                 label:"Instagram",
-                value:11.1618,
+                value:parseFloat(_.random(1,11))+.1618,
                 unit:oneDay,
                 old:null
                 , ttl:0.993
               }
       ]
+
+      console.log('twitter')
+      console.log(data[0].value)
+      console.log('insta')
+      console.log(data[1].value)
 
 
 
@@ -157,7 +163,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
                                   data[i].old = data[i].now
                                 };
                                }
-                               , 500); 
+                               , 1); 
 
     // add legends 
     var labeling =function(setting,container){
