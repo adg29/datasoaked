@@ -75,8 +75,8 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
         }else{
           media_weight = media.created_time;
         }
-        helpers.debug('indexmedia');
-        helpers.debug(media_weight);
+        // helpers.debug('indexmedia');
+        // helpers.debug(media_weight);
         media.meta = {};
         media.meta.location = channelName;
         var redis_length;
@@ -96,9 +96,9 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
           }
         });
         redisClient.zadd('media:'+channelName, media_weight, JSON.stringify(media),function(err,result){
-            helpers.debug('zaddResult'); // true
-            helpers.debug(err); // true
-            helpers.debug(result); // true
+            // helpers.debug('zaddResult'); // true
+            // helpers.debug(err); // true
+            // helpers.debug(result); // true
           });
     }
     
