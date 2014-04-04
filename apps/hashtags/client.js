@@ -125,8 +125,8 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
           category:i,
           callback:{
            draw:function(token){
-             // var size = token.attr("size")
-             // token.attr("size",size*data.ttl)
+             var size = token.attr("size")
+             token.attr("size",size*data.ttl)
            }
           }
         }
