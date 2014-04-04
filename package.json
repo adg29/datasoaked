@@ -15,7 +15,8 @@
     "twit": "*",
     "moment": "*",
     "underscore": "*",
-    "async": "*"
+    "async": "*",
+    "url": "*"
   },
   "devDependencies": {
     "jquery": "*",

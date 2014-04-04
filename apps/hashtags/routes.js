@@ -7,6 +7,7 @@ var
   , models = require('../../models/hashtag_item')
   , helpers = require('./server/helpers')
   , helpers_view = require('./templates/helpers')
+  , url = require('url')
   , sd = require('sharify').data;
 
 exports.index = function(req, res, next) {
@@ -39,3 +40,20 @@ exports.index = function(req, res, next) {
   //   error: function(m, err) { next(err.text); }
   // });
 };
+
+exports.challenge_callback_instagram = function(req, res){
+    // The GET callback for each subscription verification.
+  helpers.debug("GET " + req.url); 
+  var params = url.parse(req.url, true).query;
+  res.send(params['hub.challenge'] || 'No hub.challenge present');
+};
+
+exports.subscription_callback_instagram = function(req, res){
+  helpers.debug("/callbacks/instagram/tag/" + req.params.tag);
+   // The POST callback for Instagram to call every time there's an update
+   // to one of our subscriptions.
+    
+   // Go through and process each update. Note that every update doesn't
+   // include the updated data - we use the data in the update to query
+   // the  API to get the data we want.
+}
