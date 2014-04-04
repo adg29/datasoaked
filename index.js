@@ -11,9 +11,15 @@ var c = require('./config')
 var app = module.exports = express();
 setup(app);
 
+
+var http = require('http')
+	, server = http.createServer(app)
+	, io = require('socket.io').listen(server); // need to find a way of requiring this in the hashtag app
+
+
 // Start the server and send a message to IPC for the integration test 
 // helper to hook into. 
-app.listen(c.PORT, function() {
+server.listen(c.PORT, function() {
   console.log('Listening on port ' + c.PORT);
   if(process.send) process.send('listening');
 });
