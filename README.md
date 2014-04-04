@@ -14,7 +14,7 @@ This app is intended to aggregate and visualize volume of instagram and twitter 
 * Finetuning D3 visualization
 * Polishing the front end interactivity and layout
 
-The app is based on Ezel by @artsy
+The app utilizes the Ezel framework by @artsy
 
 # Ezel
 
