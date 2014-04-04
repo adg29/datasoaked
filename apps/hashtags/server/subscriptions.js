@@ -9,7 +9,7 @@ var helpers = require('./helpers')
 
 var pubSubClient;
 
-if (sd.REDISTOGO_URL) {
+if (process.env.REDISTOGO_URL) {
   // inside if statement
   var rtg   = require("url").parse(sd.REDISTOGO_URL);
   pubSubClient = redis.createClient(rtg.port, rtg.hostname);
@@ -18,7 +18,7 @@ if (sd.REDISTOGO_URL) {
   pubSubClient = redis.createClient(sd.REDIS_PORT, sd.REDIS_HOST);
 }
 
-if (sd.REDISTOGO_URL) {
+if (process.env.REDISTOGO_URL) {
   // inside if statement
   var rtg   = require("url").parse(sd.REDISTOGO_URL);
   redisClient = redis.createClient(rtg.port, rtg.hostname);

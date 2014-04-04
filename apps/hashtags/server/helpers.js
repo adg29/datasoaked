@@ -10,7 +10,7 @@ var redis = require('redis')
 
 
 
-if (sd.REDISTOGO_URL) {
+if (process.env.REDISTOGO_URL) {
   var rtg   = require("url").parse(process.env.REDISTOGO_URL);
   redisClient =redis.createClient(rtg.port, rtg.hostname);
   redisClient.auth(rtg.auth.split(":")[1]); 
