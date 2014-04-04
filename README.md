@@ -1,3 +1,21 @@
+# Datasoaked
+
+This app is intended to aggregate and visualize volume of instagram and twitter updates in realtime. Choose any hashtag (preferably a brand related one such as Jawbone's LiveAudio or  even a generic one like TGIF) and access the tag's dashboard at http://datasoaked.herokuapp.com/tag/liveaudio
+
+Main components include:
+
+Redis sorted set store
+Instagram API integration
+Twitter API integration
+Backbone + Node + Browserify Framework
+
+Main components in progress:
+Completing Socket.io callback flow
+Finetuning D3 visualization
+Polishing the front end interactivity and layout
+
+The app is based on Ezel by @artsy
+
 # Ezel
 
 ![image](https://f.cloud.github.com/assets/555859/1462363/5ce5d010-44f4-11e3-99cd-e7a2f4f0c06d.png)
