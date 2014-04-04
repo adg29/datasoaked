@@ -5,7 +5,7 @@
     "start": "make s"
   },
   "dependencies": {
-    "express": "*",
+    "express": "3.x",
     "jade": "*",
     "sharify": "*",
     "backbone": "*",
@@ -16,7 +16,11 @@
     "moment": "*",
     "underscore": "*",
     "async": "*",
-    "url": "*"
+    "url": "*",
+    "http": "*",
+    "socket.io-browserify": "*",
+    "msgpack": "*",
+    "hiredis": "*"
   },
   "devDependencies": {
     "jquery": "*",
