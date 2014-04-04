@@ -10,6 +10,7 @@
 
 var Backbone = require('backbone')
   , sd = require('sharify').data
+  , _ = require('underscore')
   , models = require('../models/hashtag_item');
 
 module.exports = HashtagItems = Backbone.Collection.extend({
@@ -19,7 +20,6 @@ module.exports = HashtagItems = Backbone.Collection.extend({
     if(attrs.retweet_count!=null){
         m = new models.TwitterItem(attrs, options);
     }
-    //else if(attrs.filters!=null){
     else{
         m = new models.InstagramItem(attrs, options);
     }
@@ -35,6 +35,14 @@ module.exports = HashtagItems = Backbone.Collection.extend({
         return parseFloat( b_unix ) - parseFloat( a_unix );
   } ,
 
+  countBySource: function(e){
+    console.log('countBySource')
+    this.count_source = _.countBy(this.models,function(m){
+      return ( (m instanceof models.InstagramItem) ? 'instagram' : 'twitter');
+    })
+    console.log(this.count_source)
+  },
+
   url: function() {
     // /v1/tags/snow/media/recent?access_token=ACCESS-TOKEN
     var url = sd.API_URL + '/tags/' + this.hashtag + '/media/recent?client_id=' + sd.IG_CLIENT_ID;
@@ -43,6 +51,9 @@ module.exports = HashtagItems = Backbone.Collection.extend({
 
   initialize: function(models, options) {
     this.hashtag = options.hashtag;
+    this.count_source = {},
+    this.on('reset', this.countBySource, this);
+    this.on('add', this.countBySource, this);
   },
 
   parse: function (response) {
