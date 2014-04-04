@@ -68,8 +68,8 @@ exports.subscription_callback_instagram = function(req, res, next){
   var updates = JSON.parse(req.rawBody);
   for(index in updates){
     var update = updates[index];
-    helpers.debug('updateLoop')
-    helpers.debug(update)
+    // helpers.debug('updateLoop')
+    // helpers.debug(update)
     if(false){
     }
     else if(true||update['object'] == "tag"){
