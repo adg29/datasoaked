@@ -10,13 +10,37 @@
 //
 
 var Backbone = require('backbone'),
-    $ = require('jquery'),
+    $ = require('jquery'), 
+    io = require('socket.io-browserify')
+    socket = io.connect(window.location.origin),
     sd = require('sharify').data,
     Hashtags = require('../../collections/hashtag_items.js'),
     listTemplate = function() {
       return require('./templates/list.jade').apply(null, arguments)
     };
 Backbone.$ = $;
+
+
+console.log(window.location.origin)
+
+socket.on('message', function(update){ 
+  var data,tmp;
+  try{
+    tmp = update;
+  }catch(e){
+    console.log('ERROR message socket');
+    console.log(e);
+  }
+  //try{
+    console.log('message')
+    console.log(tmp);
+    data = $.parseJSON(tmp);
+    $(document).trigger(data);
+  // }catch(e){
+  //   //console.log(tmp);
+  //   console.log(e);
+  // }
+});
 
 module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
