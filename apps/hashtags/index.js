@@ -10,17 +10,20 @@ var express = require('express')
 
 var app = module.exports = express();
 
-// For Express 3 (won't work with express 2.x)
-app.use(function(req, res, next) {
-    //console.log('mw collecting data');
-    var data = '';
-    req.setEncoding('utf8');
-    req.on('data', function(chunk) { 
-       data += chunk;
-    });
-    req.on('end', function() {
-        req.rawBody = data;
-        next();
+app.configure(function(){
+    app.use(express.methodOverride());
+    // For Express 3 (won't work with express 2.x)
+    app.use(function(req, res, next) {
+        //console.log('mw collecting data');
+        var data = '';
+        req.setEncoding('utf8');
+        req.on('data', function(chunk) { 
+           data += chunk;
+        });
+        req.on('end', function() {
+            req.rawBody = data;
+            next();
+        });
     });
 });
 
