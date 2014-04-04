@@ -1,14 +1,16 @@
 export IG_APP_PORT="4567"
 export IG_CALLBACK_HOST="http://galan.ngrok.com"
 export WHO_CALLBACK_HOST="http://datasoaked.herokuapp.com"
-# export IG_CLIENT_ID="87f4400b663c4c568ac2bd9a36b87b67"
-# export IG_CLIENT_SECRET="ace1dd176b674b75879a14d4fd175962"
-export IG_CLIENT_ID="602782ce658f4577b7950bea45e510cd"
-export IG_CLIENT_SECRET="8f64948615734619a8d847646152048d"
+export IG_CLIENT_ID="87f4400b663c4c568ac2bd9a36b87b67"
+export IG_CLIENT_SECRET="ace1dd176b674b75879a14d4fd175962"
+# export IG_CLIENT_ID="602782ce658f4577b7950bea45e510cd"
+# export IG_CLIENT_SECRET="8f64948615734619a8d847646152048d"
 alias sub_delete='curl -X DELETE  "https://api.instagram.com/v1/subscriptions?object=all&client_id=$IG_CLIENT_ID&client_secret=$IG_CLIENT_SECRET"'
 alias sub_list='curl "https://api.instagram.com/v1/subscriptions?client_id=$IG_CLIENT_ID&client_secret=$IG_CLIENT_SECRET"'
 
 
+alias sub_moma='curl -F "client_id=$IG_CLIENT_ID"      -F "client_secret=$IG_CLIENT_SECRET"      -F "object=tag"      -F "aspect=media"      -F "object_id=moma"      -F "callback_url=$IG_CALLBACK_HOST/callbacks/tag/moma/"      https://api.instagram.com/v1/subscriptions/'
+alias sub_tgif='curl -F "client_id=$IG_CLIENT_ID"      -F "client_secret=$IG_CLIENT_SECRET"      -F "object=tag"      -F "aspect=media"      -F "object_id=tgif"      -F "callback_url=$IG_CALLBACK_HOST/callbacks/tag/tgif/"      https://api.instagram.com/v1/subscriptions/'
 alias sub_sxswwhat='curl -F "client_id=$IG_CLIENT_ID"      -F "client_secret=$IG_CLIENT_SECRET"      -F "object=tag"      -F "aspect=media"      -F "object_id=SXSWhathappenedlastnight"      -F "callback_url=$IG_CALLBACK_HOST/callbacks/tag/SXSWhathappenedlastnight/"      https://api.instagram.com/v1/subscriptions/'
 alias sub_sxsw='curl -F "client_id=$IG_CLIENT_ID"      -F "client_secret=$IG_CLIENT_SECRET"      -F "object=tag"      -F "aspect=media"      -F "object_id=sxsw"      -F "callback_url=$IG_CALLBACK_HOST/callbacks/tag/sxsw/"      https://api.instagram.com/v1/subscriptions/'
 alias sub_armorydream='curl -F "client_id=$IG_CLIENT_ID"      -F "client_secret=$IG_CLIENT_SECRET"      -F "object=tag"      -F "aspect=media"      -F "object_id=armorydreampiece"      -F "callback_url=$IG_CALLBACK_HOST/callbacks/tag/armorydreampiece/"      https://api.instagram.com/v1/subscriptions/'
