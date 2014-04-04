@@ -15,6 +15,7 @@
     "async": "*",
     "url": "*",
     "http": "*",
+    "socket.io": "*",
     "socket.io-browserify": "*",
     "msgpack": "*",
     "hiredis": "*"
