@@ -16,6 +16,14 @@ var http = require('http')
 	, server = http.createServer(app)
 	, io = require('socket.io').listen(server); // need to find a way of requiring this in the hashtag app
 
+io.set('log level', 1); // reduce logging
+
+// assuming io is the Socket.IO server object
+io.configure(function () { 
+  io.set("transports", ["xhr-polling"]); 
+  io.set("polling duration", 10); 
+});
+
 
 // Start the server and send a message to IPC for the integration test 
 // helper to hook into. 
