@@ -1,0 +1,709 @@
+.isotope-item
+  z-index 2
+
+.isotope-hidden
+  &.isotope-item
+    pointer-events none
+    z-index 1
+
+.isotope,
+.isotope .isotope-item
+  -webkit-transition-duration 0.8s
+  -moz-transition-duration 0.8s
+  -ms-transition-duration 0.8s
+  -o-transition-duration 0.8s
+  transition-duration 0.8s
+
+.isotope
+  -webkit-transition-property height, width
+  -moz-transition-property height, width
+  -ms-transition-property height, width
+  -o-transition-property height, width
+  transition-property height, width
+  .isotope-item
+    -webkit-transition-property -webkit-transform, opacity
+    -moz-transition-property -moz-transform, opacity
+    -ms-transition-property -ms-transform, opacity
+    -o-transition-property -o-transform, opacity
+    transition-property transform, opacity
+  &.infinite-scrolling
+    -webkit-transition none
+    -moz-transition none
+    -ms-transition none
+    -o-transition none
+    transition none
+
+.isotope.no-transition,
+.isotope.no-transition .isotope-item,
+.isotope .isotope-item.no-transition
+  -webkit-transition-duration 0s
+  -moz-transition-duration 0s
+  -ms-transition-duration 0s
+  -o-transition-duration 0s
+  transition-duration 0s
+
+html, body, div, span, object, iframe,
+h1, h2, h3, h4, h5, h6, p, blockquote, pre,
+abbr, address, cite, code, del, dfn, em, img, ins, kbd, q, samp,
+small, strong, sub, sup, var, b, i, dl, dt, dd, ol, ul, li,
+fieldset, form, label, legend,
+table, caption, tbody, tfoot, thead, tr, th, td,
+article, aside, canvas, details, figcaption, figure,
+footer, header, hgroup, menu, nav, section, summary,
+time, mark, audio, video
+  margin 0
+  padding 0
+  border 0
+  font-size 100%
+  font inherit
+  vertical-align baseline
+
+article, aside, details, figcaption, figure,
+footer, header, hgroup, menu, nav, section
+  display block
+
+body
+  font-family 'Lucida Sans', 'Lucida Sans Regular', 'Lucida Grande', 'Lucida Sans Unicode', Arial, sans-serif
+  font-size 13px
+  line-height 1.7em
+  background #1F1E1D
+  color #FFF
+
+h1, h2, h3, p, ul, ol, pre, dl
+  margin-bottom 1.0em
+
+h1, h2, #super-list, .element, .tagline, #index-list, 
+.super-list .link
+  font-family 'Helvetica Neue', Arial, sans-serif
+
+h1, h2, h3
+  font-weight bold
+
+h1
+  font-size 32px
+  line-height 1.1em
+
+h2
+  font-size 24px
+  line-height 1.1em
+
+ul, ol
+  margin-left 1.5em
+
+a,
+a code
+  color #FB4
+  text-decoration none
+
+a:hover,
+a:hover code
+  color #4BF
+
+a:active,
+a:active code
+  color #1FB
+  background black
+
+a
+  img
+    border none
+
+em
+  font-style italic
+
+strong
+  font-weight bold
+
+blockquote
+  padding-left 1.0em
+  margin-left 1.0em
+  border-left 1px solid #333
+  font-style italic
+
+html,
+body
+  height 100%
+
+#container
+  border 1px solid #666
+  padding 5px
+  margin-bottom 20px
+
+.element
+  width 306px
+  height 306px
+  margin 4px
+  float left
+  overflow hidden
+  position relative
+  background #222
+  color #fff
+  -webkit-border-top-right-radius 1.2em
+  -moz-border-radius-topright 1.2em
+  border-top-right-radius 1.2em
+  &.alkali
+    background #F00
+    background hsl(   0, 100%, 50%)
+  &.alkaline-earth
+    background #F80
+    background hsl(  36, 100%, 50%)
+  &.lanthanoid
+    background #FF0
+    background hsl(  72, 100%, 50%)
+  &.actinoid
+    background #0F0
+    background hsl( 108, 100%, 50%)
+  &.transition
+    background #0F8
+    background hsl( 144, 100%, 50%)
+  &.post-transition
+    background #0FF
+    background hsl( 180, 100%, 50%)
+  &.metalloid
+    background #08F
+    background hsl( 216, 100%, 50%)
+  &.other
+    &.nonmetal
+      background #00F
+      background hsl( 252, 100%, 50%)
+  &.halogen
+    background #F0F
+    background hsl( 288, 100%, 50%)
+  &.noble-gas
+    background #F08
+    background hsl( 324, 100%, 50%)
+  .symbol
+    left 0.2em
+    top 0.4em
+    font-size 3.8em
+    line-height 1.0em
+    color #FFF
+  &.large
+    .symbol
+      font-size 4.5em
+  &.fake
+    .symbol
+      color #000
+  .name
+    left 0.5em
+    bottom 1.6em
+    font-size 1.05em
+  .weight
+    font-size 0.9em
+    left 0.5em
+    bottom 0.5em
+  .number
+    font-size 1.25em
+    font-weight bold
+    color hsla(0,0%,0%,.5)
+    right 0.5em
+    top 0.5em
+
+.variable-sizes
+  .element
+    &.width2
+      width 230px
+      &.height2
+        font-size 2.0em
+    &.height2
+      height 230px
+
+.element.large,
+.variable-sizes .element.large,
+.variable-sizes .element.large.width2.height2
+  font-size 3.0em
+  width 350px
+  height 350px
+  z-index 100
+
+.clickable
+  .element
+    &:hover
+      cursor pointer
+      h3
+        text-shadow 0 0 10px white,
+    0 0 10px white
+      h2
+        color white
+
+#options
+  padding-bottom 1.0em
+  h3
+    margin-bottom 0.2em
+    font-size 15px
+  h4
+    font-weight bold
+  ul
+    margin 0
+    list-style none
+    ul
+      margin-left 1.5em
+  li
+    float left
+    margin-bottom 0.2em
+    a
+      display block
+      padding 0.4em 0.5em
+      background-color #DDD
+      color #222
+      font-weight bold
+      text-shadow 0 1px hsla( 0, 0%, 100%, 0.5 )
+      background-image -webkit-linear-gradient( top, hsla( 0, 0%, 100%, 0.5 ), hsla( 0, 0%, 100%, 0.0 ) )
+      background-image -moz-linear-gradient( top, hsla( 0, 0%, 100%, 0.5 ), hsla( 0, 0%, 100%, 0.0 ) )
+      background-image -ms-linear-gradient( top, hsla( 0, 0%, 100%, 0.5 ), hsla( 0, 0%, 100%, 0.0 ) )
+      background-image -o-linear-gradient( top, hsla( 0, 0%, 100%, 0.5 ), hsla( 0, 0%, 100%, 0.0 ) )
+      background-image linear-gradient( top, hsla( 0, 0%, 100%, 0.5 ), hsla( 0, 0%, 100%, 0.0 ) )
+      border-left 1px solid hsla( 0, 0%, 100%, 0.3 )
+      border-right 1px solid hsla( 0, 0%,   0%, 0.2 )
+      &:hover
+        background-color #5BF
+      &:active
+        background-color #39D
+        -webkit-box-shadow inset 0 2px 8px hsla( 0, 0%, 0%, 0.6 )
+        -moz-box-shadow inset 0 2px 8px hsla( 0, 0%, 0%, 0.6 )
+        -o-box-shadow inset 0 2px 8px hsla( 0, 0%, 0%, 0.6 )
+        box-shadow inset 0 2px 8px hsla( 0, 0%, 0%, 0.6 )
+      &.selected
+        background-color #13F
+        text-shadow none
+        color white
+    &:first-child
+      a
+        border-radius 7px 0 0 7px
+        border-left none
+    &:last-child
+      a
+        border-radius 0 7px 7px 0
+  .option-combo
+    display inline-block
+    float left
+    margin-right 10px
+    ul
+      margin-right 20px
+      display inline-block
+
+#options .option-combo h2,
+#options .option-combo h4
+  line-height 34px
+  margin-bottom 0
+  margin-right 5px
+  display inline-block
+  vertical-align top
+
+.color-shape
+  width 70px
+  height 70px
+  margin 5px
+  float left
+  &.round
+    -webkit-border-radius 35px
+    -moz-border-radius 35px
+    border-radius 35px
+  &.big
+    &.round
+      -webkit-border-radius 75px
+      -moz-border-radius 75px
+      border-radius 75px
+  &.red
+    background red
+  &.blue
+    background blue
+  &.yellow
+    background yellow
+  a
+    display block
+    height 100%
+    &:hover
+      background white
+      background hsla( 0, 0%, 100%, 0.5 )
+
+.color-shape.wide, .color-shape.big
+  width 150px
+
+.color-shape.tall, .color-shape.big
+  height 150px
+
+.horizontal
+  #container
+    height 80%
+
+#copy
+  max-width 640px
+
+.photos
+  .photo
+    width 320px
+    margin 5px
+    float left
+    img
+      display block
+      width 100%
+
+#content
+  margin-left 210px
+  code
+    font-size 12px
+  pre
+    line-height 1.6em
+
+.demos
+  #content
+    height 100%
+
+.docs
+  #content
+    max-width 640px
+    a
+      &:hover
+        border-bottom 1px dotted
+    h2
+      border-top 1px solid #333
+      padding-top 0.8em
+      margin-bottom 0.8em
+      &:target
+        padding 10px
+        background white
+        color #222
+    h3
+      color #FEC
+      background hsla( 0, 0%, 75%, 0.05 )
+      padding 2px 0.5em
+      margin-bottom 0.5em
+      font-size 1.15em
+    h4
+      margin-bottom 0.5em
+      font-size 14px
+  .tagline
+    font-size 22px
+    font-weight 300
+  .as-is
+    font-size 95%
+  #commercial
+    background white
+    padding 10px
+    font-size 14px
+    color #1F1F1D
+    a
+      font-weight bold
+
+#site-nav
+  width 200px
+  position absolute
+  left 10px
+  top 60px
+  padding-top 20px
+  font-size 12px
+  h1
+    font-size 24px
+    margin-bottom 0.5em
+    margin-top 0
+    font-weight bold
+    font-family 'Helvetica Neue', Arial, sans-serif
+    a
+      color #4FB
+      &:hover
+        color #4BF
+  h2
+    font-size 17px
+    font-weight normal
+    margin 0 0 0.3em
+    border-top none
+  ul
+    list-style none
+    margin 0 0 1.0em
+    font-weight bold
+    ul
+      margin-bottom 0
+    a
+      display block
+      border none
+      padding 1px 5px
+    .current
+      a
+        background hsla( 0, 0%, 0%, 0.3 )
+        color #1BF
+      .toc
+        a
+          font-size 12px
+          padding-left 1.2em
+          font-weight normal
+
+#site-nav ul a:hover,
+#site-nav ul .current a:hover
+  color white
+
+footer
+  font-size 12px
+  font-style italic
+  border-top 1px solid #333
+  padding 0.8em 0
+
+pre
+  padding 10px
+
+pre, code
+  background black
+  color white
+  font-family 'Monaco', monospace, sans-serif
+
+h3#options
+  padding-bottom 0
+
+.option-def dl dt,
+.option-def dl dd
+  float left
+  padding 0 1.2em
+  background #161616
+  line-height 36px
+  height 36px
+
+.option-def dl.header dt,
+.option-def dl.header dd
+  background #444
+
+.option-def
+  dl
+    .option-type
+      font-size 13px
+      color #AAA
+      font-style italic
+    dd
+      border-left 1px solid #222
+
+code .s1,
+code .s
+  color #78BD55
+
+code .mi, 
+code .cp, 
+code .kc
+  color #5298D4
+
+code
+  .k
+    color #E39B79
+  .p
+    color #EDB
+  .o
+    color #F63
+  .nb
+    color #AA97AC
+  .nt
+    color #A0C8FC
+  .nf
+    color #9EA8B8
+  .nc
+    color #A78352
+  .m
+    color #DE8E50
+  .nd
+    color #9FAD7E
+
+code .kd, 
+code .na
+  color #A9D866
+
+code .c,
+code .c1
+  color #666
+  font-style italic
+
+#sites
+  h2
+    display none
+    padding 0.4em
+    line-height 32px
+    margin-bottom 0.4em
+    -webkit-transition background-color 0.8s
+    -moz-transition background-color 0.8s
+    -o-transition background-color 0.8s
+    transition background-color 0.8s
+    img
+      display inline-block
+      margin-right 0.4em
+      vertical-align bottom
+    &.loading
+      background white
+      color #222
+    &.error
+      background red
+      color #222
+  ul
+    margin 0
+
+.super-list
+  .example
+    list-style none
+    float left
+    width 230px
+    margin 5px
+    img
+      width 100%
+    a
+      background #1F1E1D
+      &:hover
+        background white
+        color #111
+    b
+      font-weight bold
+      line-height 1.3em
+      padding 3px
+      padding-top 8px
+  .link
+    float left
+    position relative
+    font-size 24px
+    line-height 1.2em
+    font-weight 300
+    margin 5px
+    width 230px
+    height 110px
+    a
+      display block
+      padding 10px
+      padding-left 65px
+      height 90px
+      background #1F1E1D
+      color #FE5
+      -webkit-border-radius 14px
+      -moz-border-radius 14px
+      border-radius 14px
+      &:before
+        content 'âž”'
+        font-size 70px
+        position absolute
+        top 30px
+        left 5px
+        -webkit-transform rotate(90deg)
+        -moz-transform rotate(90deg)
+        -ms-transform rotate(90deg)
+        -o-transform rotate(90deg)
+        transform rotate(90deg)
+      &:hover
+        background #E58
+        color white
+    &.away
+      a
+        &:before
+          top 25px
+          left 0px
+          -webkit-transform rotate(-45deg)
+          -moz-transform rotate(-45deg)
+          -ms-transform rotate(-45deg)
+          -o-transform rotate(-45deg)
+          transform rotate(-45deg)
+  .feature
+    .name
+      bottom auto
+      top 140px
+      left 18px
+      font-size 20px
+
+.super-list .example a,
+.super-list .example b,
+.super-list .example img
+  display block
+
+.big-graph
+  background white
+  height 600px
+  margin 20px auto
+  .project
+    width 45px
+    height 45px
+    float left
+    .icon
+      pointer-events none
+      width 31px
+      height 31px
+      background white
+      margin-left 7px
+      -webkit-transition -webkit-transform 0.25s
+      -moz-transition -moz-transform    0.25s
+      -ms-transition -ms-transform     0.25s
+      -o-transition -o-transform      0.25s
+      transition transform         0.25s
+    &:hover
+      z-index 5
+      .icon
+        -webkit-transform scale(3)
+        -moz-transform scale(3)
+        -ms-transform scale(3)
+        -o-transform scale(3)
+        transform scale(3)
+    &.commercial
+      .icon
+        background #6B6B6B
+    &.urbanism
+      .icon
+        background #00CF00
+    &.public-space
+      .icon
+        background #FF8D00
+    &.culture
+      .icon
+        background #D61919
+    &.body-culture
+      .icon
+        background #00ECFF
+    &.health
+      .icon
+        background #FF2251
+    &.education
+      .icon
+        background #00A700
+    &.housing
+      .icon
+        background #FF02FF
+    &.hotel
+      .icon
+        background #0000C3
+    &.media
+      .icon
+        background #292929
+    p
+      line-height 14px
+      font-size 10.5px
+      color black
+      margin-left 7px
+
+#infscr-loading
+  position fixed
+  text-align center
+  bottom 30px
+  left 42%
+  z-index 100
+  background white
+  background hsla( 0, 0%, 100%, 0.9 )
+  padding 20px
+  color #222
+  font-size 15px
+  font-weight bold
+  -webkit-border-radius 10px
+  -moz-border-radius 10px
+  border-radius 10px
+
+#top-banner
+  a
+    display block
+    background #FF0
+    color #06F
+    padding 0.5em
+    font-family Helvetica Neue, Arial, sans-serif
+    font-weight bold
+    font-size 20px
+    border-radius 4px
+    text-align center
+    &:hover
+      background white
+      color #F06
+
+.clearfix:before, .clearfix:after
+  content ""
+  display table
+
+.clearfix
+  zoom 1
+  &:after
+    clear both
+

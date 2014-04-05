@@ -1,0 +1,325 @@
+
+#wrap
+  margin 0 auto
+  width 100%
+  figure
+    -webkit-transform-style preserve-3d
+    -moz-transform-style preserve-3d
+    transform-style preserve-3d
+    width 100%
+    height 100%
+    img
+      max-width 100%
+      display block
+      position relative
+      -webkit-transition -webkit-transform 0.4s
+    & > div
+      overflow hidden
+    .tweet
+      color #fff
+      font-size 1.3em
+      max-width 100%
+      display block
+      position relative
+      -webkit-transition -webkit-transform 0.4s
+      padding 10px
+  figcaption
+    &.item-time
+      position absolute
+      bottom 0
+      right 0
+      padding 7px
+      background transparent
+      color #ed4e6e
+      font-size .8em
+      line-height 10px
+      height 10%
+      width 30%
+      opacity 100
+      -webkit-backface-visibility hidden
+    &.item-meta
+      position absolute
+      top 0
+      left 0
+      padding 20px
+      background #2c3f52
+      color #ed4e6e
+      height 100%
+      width 50%
+      opacity 0
+      -webkit-backface-visibility hidden
+      -webkit-transform-origin 0 0
+      -webkit-transform rotateY(-90deg)
+      -webkit-transition -webkit-transform 0.4s, opacity 0.1s 0.3s
+    h3
+      margin 0
+      padding 0
+      color #fff
+    span
+      &:before
+        content 'by '
+    a
+      text-align center
+      padding 5px 10px
+      border-radius 2px
+      display inline-block
+      background #ed4e6e
+      color #fff
+  .element
+    -webkit-perspective 1700px
+    -webkit-perspective-origin 0 50%
+
+#wrapper
+  margin 0 auto
+  clear both
+  width 90%
+
+.container
+  -webkit-transition background 0.3s
+  -moz-transition background 0.3s
+  transition background 0.3s
+  &.paused
+    -webkit-transition background 0.3s
+    -moz-transition background 0.3s
+    transition background 0.3s
+  & > section
+    p
+      color #fff
+      font-size 1.3em
+      font-weight 300
+      a
+        color #fff
+        font-weight 700
+        &:hover
+          color #0c69a4
+  & > section#update-status
+    text-align center
+
+.grid-sizer
+  width 20%
+
+  #wrap
+    figure
+      margin 0
+      position relative
+
+#wrap figure:hover img,
+#wrap figure.cs-hover img
+#wrap figure:hover .tweet,
+#wrap figure.cs-hover .tweet 
+  -webkit-transform translateX(25%)
+
+#wrap figure:hover figcaption.item-meta,
+#wrap figure.cs-hover figcaption.item-meta
+  opacity 1
+  -webkit-transform rotateY(0deg)
+  -webkit-transition -webkit-transform 0.4s, opacity 0.1s
+
+.cs-style-4
+  figcaption
+    a
+      position absolute
+      bottom 20px
+      right 20px
+
+.stamp
+  height 300px
+  overflow hidden
+  color #333
+  width 306px
+  height 296px
+  padding 10px
+  position absolute
+  top 0px
+  right 114px
+  background #222
+  color white
+  -webkit-border-radius 5px
+  -moz-border-radius 5px
+  border-radius 5px
+
+.loading
+  height 150px
+  background-color #0fb
+  .tag
+    color #000
+    text-align center
+    line-height 29px
+    margin-bottom 0px
+
+.icon-loading
+  width 8rem
+  height 8rem
+
+.min-h100
+  min-height 100%
+
+.center
+  text-align center
+
+.table
+  display table
+  width 100%
+
+.table-cell
+  display table-cell
+  vertical-align middle
+
+h3
+  small
+    font-size .85em
+    margin-bottom 1px
+    font-weight lighter
+    clear both
+
+.small
+  font-size .6em
+  line-height 18px
+  margin-bottom 1px
+
+section#update-status
+  clear both
+  margin 0 auto
+  nav
+    a
+      position relative
+      display inline-block
+      margin 15px 25px
+      outline none
+      color #fff
+      text-decoration none
+      text-transform uppercase
+      letter-spacing 1px
+      font-weight 400
+      text-shadow 0 0 1px rgba(255,255,255,0.3)
+      font-size 1.35em
+
+a
+  &.updates-tag
+    z-index 2000
+
+.scrollmagic-pin-spacer
+  z-index 2000
+
+.cl-effect-2
+  a
+    line-height 44px
+    -webkit-perspective 1000px
+    -moz-perspective 1000px
+    perspective 1000px
+    span
+      position relative
+      display inline-block
+      padding 0 14px
+      background #2195de
+      -webkit-transition -webkit-transform 0.3s
+      -moz-transition -moz-transform 0.3s
+      transition transform 0.3s
+      -webkit-transform-origin 50% 0
+      -moz-transform-origin 50% 0
+      transform-origin 50% 0
+      -webkit-transform-style preserve-3d
+      -moz-transform-style preserve-3d
+      transform-style preserve-3d
+
+.csstransforms3d
+  .cl-effect-2
+    a
+      span
+        &::before
+          position absolute
+          top 100%
+          left 0
+          width 100%
+          height 100%
+          background #222
+          content attr(data-hover)
+          -webkit-transition background 0.3s
+          -moz-transition background 0.3s
+          transition background 0.3s
+          -webkit-transform rotateX(-90deg)
+          -moz-transform rotateX(-90deg)
+          transform rotateX(-90deg)
+          -webkit-transform-origin 50% 0
+          -moz-transform-origin 50% 0
+          transform-origin 50% 0
+
+.cl-effect-2 a.hover span,
+.cl-effect-2 a:hover span,
+.cl-effect-2 a:focus span
+  -webkit-transform rotateX(90deg) translateY(-22px)
+  -moz-transform rotateX(90deg) translateY(-22px)
+  transform rotateX(90deg) translateY(-22px)
+
+.csstransforms3d .cl-effect-2 a.hover span::before,
+.csstransforms3d .cl-effect-2 a:hover span::before,
+.csstransforms3d .cl-effect-2 a:focus span::before
+  background #28a2ee
+
+.color-1
+  background #435a6b
+
+.color-2
+  background #f39c12
+
+.color-3
+  background #2ac56c
+
+.color-4
+  background #0e83cd
+
+.color-5
+  background #cd4436
+
+.color-6
+  background #f19f0f
+
+.color-7
+  background #3fa46a
+
+.color-8
+  background #ecf0f1
+
+.color-9
+
+.color-10
+  background #16a085
+
+.color-11
+  background #aab7b7
+
+section#update-status *,
+section#update-status *:after,
+section#update-status *::before
+  -webkit-box-sizing border-box
+  -moz-box-sizing border-box
+  box-sizing border-box
+
+section#update-status 
+nav a:hover,
+section#update-status 
+nav a:focus
+  outline none
+
+p
+  font-size .8125em
+  line-height 18px
+  color #aaa
+  font-weight lighter
+  margin-bottom 18px
+
+h1
+  text-align center
+  img
+    margin-top 18px
+    margin-bottom 15px
+
+h2
+  color #eee
+  font-size 1.25em
+  font-weight 100
+  letter-spacing 1px
+  line-height 27px
+  margin-bottom 9px
+
+
