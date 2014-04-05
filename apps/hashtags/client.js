@@ -34,7 +34,7 @@ socket.on('message', function(update){
   }
   //try{
     console.log('message')
-    console.log(tmp);
+    // console.log(tmp);
     data = $.parseJSON(tmp);
     $(document).trigger(data);
   // }catch(e){
