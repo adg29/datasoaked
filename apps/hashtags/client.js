@@ -9,38 +9,39 @@
 // composable in general.
 //
 
-var Backbone = require('backbone'),
-    $ = require('jquery'), 
-    _ = require('underscore'),
-    io = require('socket.io-browserify')
-    socket = io.connect(window.location.origin),
-    sd = require('sharify').data,
-    Hashtags = require('../../collections/hashtag_items.js'),
-    listTemplate = function() {
+var _ = require('underscore')
+    , $ = require('jquery')
+    , v = require('./templates/helpers')
+    , sd = require('sharify').data
+    , io = require('socket.io-browserify')
+    , socket = io.connect(window.location.origin)
+    , Backbone = require('backbone')
+    , Hashtags = require('../../collections/hashtag_items.js')
+    , listTemplate = function() {
       return require('./templates/list.jade').apply(null, arguments)
     };
 Backbone.$ = $;
 
 
-console.log(window.location.origin)
+v.debug(window.location.origin)
 
 socket.on('message', function(update){ 
   var data,tmp;
   try{
     tmp = update;
   }catch(e){
-    console.log('ERROR message socket');
-    console.log(e);
+    v.debug('ERROR message socket');
+    v.debug(e);
   }
-  //try{
-    console.log('message')
-    // console.log(tmp);
+  try{
+    v.debug('message')
+    // v.debug(tmp);
     data = $.parseJSON(tmp);
     $(document).trigger(data);
-  // }catch(e){
-  //   //console.log(tmp);
-  //   console.log(e);
-  // }
+  }catch(e){
+    v.debug(tmp);
+    v.debug(e);
+  }
 });
 
 module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
@@ -83,10 +84,10 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
               }
       ]
 
-      console.log('twitter')
-      console.log(data[0].value)
-      console.log('insta')
-      console.log(data[1].value)
+      v.debug('twitter')
+      v.debug(data[0].value)
+      v.debug('insta')
+      v.debug(data[1].value)
 
 
 
@@ -142,7 +143,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
     // setup the scene
     var scene    = this.$("#demo").vs(sceneSetting).data('visualSedimentation');
-    //console.log(scene)
+    //v.debug(scene)
 
     // setup the clock 
     var time     = new Date(),secondsToday
@@ -153,7 +154,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
                                  time = new Date()
                                  previousYear = new Date(2010,12,0,06,0,0,00)
                                  diffPreviousYear = time.getTime()-previousYear.getTime()
-                                 //console.log(diffPreviousYear)
+                                 //v.debug(diffPreviousYear)
                                  secondsToday = (time.getHours()*60*60) + (time.getMinutes()*60) + time.getSeconds()
                                  milliSecondsToday= (time.getHours()*60*60*1000) + (time.getMinutes()*60*1000) + time.getSeconds()*1000+time.getMilliseconds() 
                                 
