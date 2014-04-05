@@ -1,15 +1,22 @@
 doctype html
-html
+html.csstransforms3d
   head
+    meta(name="viewport",content="width=device-width, initial-scale=1.0")
     title= '#'+sd.hashtag + ' Realtime Updates'
     link( type='text/css', rel='stylesheet', href=('/assets/hashtags' + sd.CSS_EXT) )
   body
-    h1= '#'+sd.hashtag
-    #demo.viz-block
-    #headerLabel.viz-block
-    ol#hashtag-items
-      include list
-    #scripts
-      != sharify.script()
-      script( src='/assets/hashtags' + sd.JS_EXT )
-      script( src='/socket.io/socket.io.js', type="text/javascript")
+    #wrap.container
+      section#update-status
+        nav#cl-effect-2.cl-effect-2
+          a.updates-tag
+            span(data-hover="Live") ##{hashtag}
+          a.updates-toggle(href="#updates-toggle")
+            span(data-hover="Updates Off") Updates On
+      #demo.viz-block
+      #headerLabel.viz-block
+      div#wrapper
+        include list
+  #scripts
+    != sharify.script()
+    script( src='/assets/hashtags' + sd.JS_EXT )
+    script( src='/socket.io/socket.io.js', type="text/javascript")

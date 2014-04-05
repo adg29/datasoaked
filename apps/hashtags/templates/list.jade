@@ -6,15 +6,34 @@
 //-
 
 for item in hashtags
-  li
-    if item instanceof models.InstagramItem	 
-      .created= moment.unix(parseInt(item.get('created_time'))).fromNoww()
-      .media
-        img(src=item.get('images').thumbnail.url)
-      .tags= item.get('tags')
-      .created= moment.unix(parseInt(item.get('created_time'))).format("dddd, MMMM Do YYYY, h:mm:ss a") 
-    if item instanceof models.TwitterItem	 
-      .created= moment(item.get('created_at')).fromNoww()
-      .tweet= item.get('text')
-      .tags= _.map(item.get('entities').hashtags, function(h){ return h.text; })
-      .created= moment(item.get('created_at')).format("dddd, MMMM Do YYYY, h:mm:ss a") 
+  .grid-sizer 
+  if item instanceof models.InstagramItem	 
+    .element
+      figure
+        div
+          img(src=item.get('images').low_resolution.url)
+        figcaption.item-time
+          h4
+            a(href=(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'),title=(item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username,target="_blank")
+              != moment.unix(parseInt(item.get('created_time'))).fromNoww()
+        figcaption.item-meta
+          h3!= (item.get('caption')!=null && item.get('tags').length < 7 ? item.get('tags').join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : item.get('tags').join(' ')) 
+          span #{item.get('user').username}
+          div
+            a(href=(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'),title=(item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username,target="_blank") Take a Look
+  if item instanceof models.TwitterItem	 
+    - tags = _.map(item.get('entities').hashtags, function(h){ return h.text; })
+    .element
+      figure
+        div
+          .tweet= item.get('text')
+        figcaption.item-time
+          h4
+            a(href=(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/statuses/'+item.get('id'),title=(item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name,target="_blank")
+              != moment(item.get('created_at')).fromNoww()
+        figcaption.item-meta
+          h3!= (item.get('caption')!=null && tags.length < 7 ? tags.join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : tags.join(' ')) 
+          span #{item.get('user').screen_name}
+          div
+            a(href=(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/statuses/'+item.get('id'),title=(item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name,target="_blank") Take a Look
+              // .created= moment(item.get('created_at')).format("dddd, MMMM Do YYYY, h:mm:ss a") 
