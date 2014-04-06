@@ -45,7 +45,7 @@ module.exports = HashtagItems = Backbone.Collection.extend({
 
   url: function() {
     // /v1/tags/snow/media/recent?access_token=ACCESS-TOKEN
-    var url = sd.API_URL + '/tags/' + this.hashtag + '/media/recent?client_id=' + sd.IG_CLIENT_ID;
+    var url = sd.IG_API_URL + '/tags/' + this.hashtag + '/media/recent?client_id=' + sd.IG_CLIENT_ID;
     return url;
   },
 

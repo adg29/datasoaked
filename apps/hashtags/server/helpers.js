@@ -110,8 +110,8 @@ function hashtag_process(tag, update, process_callback){
 
 
           var options = {
-            url: sd.API_URL + path + queryString,
-            //url: sd.API_URL + sd.API_BASE_PATH + path + queryString,
+            url: sd.IG_API_URL + path + queryString,
+            //url: sd.IG_API_URL + sd.IG_API_BASE_PATH + path + queryString,
             // Note that in all implementations, basePath will be ''. 
             // For internal APIs this is often not true ;)
           };

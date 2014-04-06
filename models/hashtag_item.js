@@ -31,7 +31,7 @@ models.TwitterItem = HashtagItem.extend({
 models.InstagramItem = HashtagItem.extend({
 
   url: function() {
-    var url = sd.API_URL + '/media/' + this.get('uid') + '?client_id=' + sd.IG_CLIENT_ID;
+    var url = sd.IG_API_URL + '/media/' + this.get('uid') + '?client_id=' + sd.IG_CLIENT_ID;
     return url;
   }
 });
