@@ -19,7 +19,7 @@ if (process.env.REDISTOGO_URL) {
 }
 
 redisClient.on("error", function (err) {
-  debug("ERROR: redisClient");
+  debug("callback ERROR: redisClient");
   debug(err);
 });
 
@@ -29,6 +29,10 @@ twit = new Twit({
   , consumer_secret:      'RSeYd37CTb1pzdfNXPjrkTmSpdLNHaghxItQCVF3TiRdDIkxNK'
   , access_token:         '6506472-iUZUCHc98lS3kpvWKbrZsCT1bljImPEiXVuXg5xs97'
   , access_token_secret:  'jlFVXEHc1BNXmypi13VhAhVJ1MGo4aUkVuXqV8f5zPiWv'
+  // consumer_key: 'oGpm3szB2AmwqwRkkdQvdA'
+  // , consumer_secret: 'us6NPD7xwbPKWd3BKJMSSgkpg3kVd1WNGmzs9YtJs'
+  // , access_token: '6506472-JsyKyxIcX4zGQVEkjQdJdY7pm0AhAjfdthE9D0N79S'
+  // , access_token_secret: 'LvoDBaQAPcBMUEFxSuD4rONnTV7aodOF5h9sWaJtPvIVg'
 })
 
 
@@ -61,41 +65,30 @@ function hashtag_process(tag, update, process_callback){
   var path = '/tags/' + tag + '/media/recent/';
   var queryString = "?client_id="+ sd.IG_CLIENT_ID;
 
- debug('hashtag_process') 
- debug(tag)
- debug(update)
- debug(process_callback)
-
   async.parallel({
       twitter: function(callback) {
           debug('twitter');
           // _hashtag_process_twitter
           twit.get('search/tweets', { q: tag, count: sd.hashtag_items}, function(err, reply) {
-            try {
-              debug('twitter parsedResponse');
-              debug(err);
-              // debug(reply.statuses);
-            } catch (parse_exception) {
-              debug('Twitter: Couldn\'t parse data. Malformed?');
-              debug(parse_exception);
-              return;
-            }
+            debug('twitter parsedResponse');
             try{
               redisClient.publish('channel:twitter:' + tag , JSON.stringify(reply));
+              //function(e){ callback(null,new Error); return; }
               debug("*********Published: " + tag );
               debug("*********Published: " + reply.length);
               if(update=="manual") {
                 debug("*******manual: " + tag);
                 debug("*********manual: " + reply.statuses.length);
                 callback(null,reply.statuses);
+                return;
               }
             }catch(e){
               debug("REDIS ERROR: redisClient.publish twitter channel " + tag);
               debug(e);
+              callback(null,e);
+              return;
             }
           });
-
-
       },
       instagram: function(callback) {
         debug('hashtag_minid_get');
@@ -125,11 +118,13 @@ function hashtag_process(tag, update, process_callback){
             } catch (parse_exception) {
               debug('Couldn\'t parse data. Malformed?');
               debug(parse_exception);
+              callback(null,parse_exception);
               return;
             }
             if(!parsedResponse || !parsedResponse['data']){
               debug('Did not receive data for ' + tag +':');
               debug(data);
+              callback(null,new Error);
               return;
             }
             hashtag_minid_set(tag, parsedResponse['data']);
@@ -144,17 +139,31 @@ function hashtag_process(tag, update, process_callback){
                 debug("*********manual: " + data.length);
                 debug("*********manual: " + parsedResponse.data.length);
                 callback(null,parsedResponse.data);
+                return;
               }
             }catch(e){
               debug("REDIS ERROR: redisClient.publish channel '" + tag);
               debug(e);
+              callback(null,e);
+              return;
             }
           });
         });
       }
   }, function(err, results) {
       debug('async results')
-      if(update=="manual") process_callback(results.twitter.concat(results.instagram));
+      if(!(results.instagram instanceof Error) && ! (results.twitter instanceof Error) ){
+        debug('both')
+        if(update=="manual") process_callback(results.twitter.concat(results.instagram));
+      }
+      else if(! (results.instagram instanceof Error) ){
+        debug('insta')
+        if(update=="manual") process_callback(results.instagram);
+      }
+      else if(! (results.twitter instanceof Error) ){
+        debug('twit')
+        if(update=="manual") process_callback(results.twitter);
+      }
   });
 
 }
