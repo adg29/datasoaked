@@ -8,6 +8,7 @@ var
   , helpers = require('./server/helpers')
   , helpersv = require('./templates/helpers')
   , url = require('url')
+  , http = require('request')
   , sd = require('sharify').data;
 
 exports.index = function(req, res, next) {
@@ -16,6 +17,7 @@ exports.index = function(req, res, next) {
     hashtag: sd.hashtag,
   });
 
+  subscribe(sd.hashtag,req.host);
 
   helpers.hashtag_media_get(hashtags.hashtag,function(error, media){
     helpers.debug('hashtag_media_get error')
@@ -42,6 +44,25 @@ exports.index = function(req, res, next) {
   //   error: function(m, err) { next(err.text); }
   // });
 };
+
+var subscribe = function(hashtag,host){
+  var options = {url:sd.IG_API_URL+"/subscriptions"
+    ,form:{ object:'tag'
+            , aspect:'media'
+            , object_id:hashtag
+            , callback_url: 'http://'+host+'/callbacks/tag/'+hashtag
+            , client_id:sd.IG_CLIENT_ID
+            , client_secret:sd.IG_CLIENT_SECRET
+          }};
+  helpers.debug('subscribe:')
+  helpers.debug(options)
+  http.post(options,function(e,i,r){
+    helpers. debug('error')
+    helpers.debug(e)
+    helpers.debug(r);
+  });
+}
+
 
 exports.challenge_callback_instagram = function(req, res, next){
     // The GET callback for each subscription verification.

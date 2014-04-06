@@ -26,14 +26,60 @@ Backbone.$ = $;
 
 module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
-  initialize: function() {
+  sceneSetting : {
+    x:0,
+    y:0,
+    width:300,
+    height:500,
+    data:{
+          model:[]
+          , strata: []
+          , stream:{}
+    }
+    , sedimentation:{
+        token:{
+          size:{original:20,minimum:2}
+        }
+        , aggregation: {height:250}
+        , suspension:{
+            decay:{power:1.02}
+        }
+    }
+
+  }
+  , oneDay : 24*60*60
+
+  , sceneData : {
+      'instagram' : {
+        label:"Instagram"
+        , unit: 24*60*60
+        , old:null
+        , value:parseFloat(_.random(1,8))+.1618
+        , ttl:0.993
+      }
+      , 'twitter' : {
+        label:"Twitter"
+        , unit: 24*60*60
+        , old:null
+        , value:parseFloat(_.random(1,8))+.3237
+        , ttl:0.993
+      }
+  }
+
+  , initialize: function() {
+    _.bindAll(this,'render_viz','scene_setup');
+
     this.collection.reset(sd.HASHTAGS);
+
+    this.scene_setup();
+
+    this.scene = this.$("#demo").vs(this.sceneSetting).data('visualSedimentation')
 
     this.render_viz();
 
     this.on('socket:parsed', this.socket_parsed, this);
     this.on('socket:error', this.socket_error, this);
-    
+
     this.collection.on('sync', this.render, this);
   }
 
@@ -42,6 +88,10 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
   }
 
   , socket_parsed: function(e){
+    var src = 'instagram';
+    this.createToken(src,this.sceneData[src]);
+    v.debug('e')
+    v.debug(e)
     v.debug('socket_parsed')
   }
 
@@ -49,121 +99,76 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
     v.debug('socket_error')
   }
 
+  // customize tokens before create it  
+  , createToken: function(i,data){
+     var token = { 
+        category: (i=="instagram" ? 1 : 0),
+        callback:{
+         draw:function(token){
+           var size = token.attr("size")
+           token.attr("size",size*data.ttl)
+         }
+        }
+      }
+    if(typeof(data.texture)!="undefined"){
+     token.texture = {}
+     token.texture.src = data.texture
+    }
+    if(typeof(data.size)!="undefined"){
+      token.size = data.size
+    }
+    this.scene.addToken(token);
+  }
+
   , render_viz: function(){
 
     // Define data and legend 
     // unit 
-    var oneDay  = 24*60*60
     var oneYear = 365*24*60*60
 
-    // data 
-    var data=[
-              {
-                label:"Twitter",
-                value:parseFloat(_.random(1,8))+.3237,
-                unit:oneDay,
-                old:null
-                , ttl:0.993
-              },
-              {
-                label:"Instagram",
-                value:parseFloat(_.random(1,8))+.1618,
-                unit:oneDay,
-                old:null
-                , ttl:0.993
-              }
-      ]
-
-      v.debug('twitter')
-      v.debug(data[0].value)
-      v.debug('insta')
-      v.debug(data[1].value)
-
-    // Setting normal chart 
-    sceneSetting = {
-      x:0,
-      y:0,
-      width:300,
-      height:500,
-      data:{
-            model:[]
-            , strata: []
-            , stream:{}
-      }
-      , sedimentation:{
-          token:{
-            size:{original:10,minimum:2}
-          }
-          , aggregation: {height:200}
-          , suspension:{
-              decay:{power:1.02}
-          }
-      }
-    }
-
-    // create column by datas  
-    for (var i = data.length - 1; i >= 0; i--) {
-      sceneSetting.data.model.push({label:data[i].label})
-      var source_value_init = this.collection.count_source[(data[i].label).toLowerCase()];
-      sceneSetting.data.strata.push([{initValue: source_value_init, label: data[i].label + " Strata " + i}])
-    };
-
-    // customize tokens before create it  
-    function createToken(_this,i,data){
-       var token = { 
-          category:i,
-          callback:{
-           draw:function(token){
-             var size = token.attr("size")
-             token.attr("size",size*data.ttl)
-           }
-          }
-        }
-      if(typeof(data.texture)!="undefined"){
-       token.texture = {}
-       token.texture.src = data.texture
-      }
-      if(typeof(data.size)!="undefined"){
-        token.size = data.size
-      }
-      _this.addToken(token);
-    }
-
-    // setup the scene
-    var scene    = this.$("#demo").vs(sceneSetting).data('visualSedimentation');
-    //v.debug(scene)
 
     // setup the clock 
     var time     = new Date(),secondsToday
 
     // start the clock 
-    var clock    = window.setInterval(
-                            function (){
-                                 time = new Date()
-                                 previousYear = new Date(2010,12,0,06,0,0,00)
-                                 diffPreviousYear = time.getTime()-previousYear.getTime()
-                                 //v.debug(diffPreviousYear)
-                                 secondsToday = (time.getHours()*60*60) + (time.getMinutes()*60) + time.getSeconds()
-                                 milliSecondsToday= (time.getHours()*60*60*1000) + (time.getMinutes()*60*1000) + time.getSeconds()*1000+time.getMilliseconds() 
-                                
-                                for (var i = data.length - 1; i >= 0; i--) {
-                                  data[i].now = Math.round(milliSecondsToday*data[i].value/1000)
-                                  if(data[i].now!=data[i].old) createToken(scene,i,data[i])
-                                  data[i].old = data[i].now
-                                };
-                               }
-                               , 1); 
+    var self = this;
+    var clock = window.setInterval(
+                  function (){
+                   time = new Date()
+                   previousYear = new Date(2010,12,0,06,0,0,00)
+                   diffPreviousYear = time.getTime()-previousYear.getTime()
+                   secondsToday = (time.getHours()*60*60) + (time.getMinutes()*60) + time.getSeconds()
+                   milliSecondsToday= (time.getHours()*60*60*1000) + (time.getMinutes()*60*1000) + time.getSeconds()*1000+time.getMilliseconds() 
+                  
+                  var srcs = ['twitter'];
+                  for (var s in srcs) {
+                    var src = srcs[s];
+                    self.sceneData[src].now = Math.round(milliSecondsToday*self.sceneData[src].value/1000)
+                    if(self.sceneData[src].now!=self.sceneData[src].old && _.random(1)==1) self.createToken(src,self.sceneData[src])
+                    self.sceneData[src].old = self.sceneData[src].now
+                  };
+                 }
+                 , 1000); 
 
     // add legends 
     var labeling =function(setting,container){
-     var divWidth = Math.round(setting.width/setting.data.model.length)
+    var divWidth = Math.round(setting.width/setting.data.model.length)
+
      for (var i = setting.data.model.length-1; i >= 0 ; i--) {
        $('#'+container).append('<div class="label" style="width:'+divWidth+'px;">'+setting.data.model[i].label+'</div>');
      }
     }
-    labeling(sceneSetting,"headerLabel")
+    labeling(this.sceneSetting,"headerLabel")
 
 
+  }
+
+  , scene_setup : function(){
+    for (src in this.sceneData) {
+      this.sceneSetting.data.model.push({label:this.sceneData[src].label})
+      var source_value_init = this.collection.count_source[(this.sceneData[src].label).toLowerCase()];
+      this.sceneSetting.data.strata.push([{initValue: source_value_init, label: this.sceneData[src].label + " Strata "}])
+    };
   }
 
 });
