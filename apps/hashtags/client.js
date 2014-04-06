@@ -45,23 +45,27 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
             decay:{power:1.02}
         }
     }
-
+    , options:{
+      layout:false
+    }
+    , chart:{
+    }
   }
   , oneDay : 24*60*60
 
   , sceneData : {
-      'instagram' : {
-        label:"Instagram"
-        , unit: 24*60*60
-        , old:null
-        , value:parseFloat(_.random(1,8))+.1618
-        , ttl:0.993
-      }
-      , 'twitter' : {
+      'twitter' : {
         label:"Twitter"
         , unit: 24*60*60
         , old:null
         , value:parseFloat(_.random(1,8))+.3237
+        , ttl:0.993
+      }
+      , 'instagram' : {
+        label:"Instagram"
+        , unit: 24*60*60
+        , old:null
+        , value:parseFloat(_.random(1,8))+.1618
         , ttl:0.993
       }
   }
@@ -144,7 +148,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
                   for (var s in srcs) {
                     var src = srcs[s];
                     self.sceneData[src].now = Math.round(milliSecondsToday*self.sceneData[src].value/1000)
-                    if(self.sceneData[src].now!=self.sceneData[src].old && _.random(1)==1) self.createToken(src,self.sceneData[src])
+                    if(self.sceneData[src].now!=self.sceneData[src].old && _.random(2)==1) self.createToken(src,self.sceneData[src])
                     self.sceneData[src].old = self.sceneData[src].now
                   };
                  }
@@ -152,11 +156,11 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
     // add legends 
     var labeling =function(setting,container){
-    var divWidth = Math.round(setting.width/setting.data.model.length)
+      var divWidth = Math.round(setting.width/setting.data.model.length)
 
-     for (var i = setting.data.model.length-1; i >= 0 ; i--) {
+      for (var i in setting.data.model) {
        $('#'+container).append('<div class="label" style="width:'+divWidth+'px;">'+setting.data.model[i].label+'</div>');
-     }
+      }
     }
     labeling(this.sceneSetting,"headerLabel")
 
@@ -166,8 +170,8 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
   , scene_setup : function(){
     for (src in this.sceneData) {
       this.sceneSetting.data.model.push({label:this.sceneData[src].label})
-      var source_value_init = this.collection.count_source[(this.sceneData[src].label).toLowerCase()];
-      this.sceneSetting.data.strata.push([{initValue: source_value_init, label: this.sceneData[src].label + " Strata "}])
+      var source_value_init = this.collection.count_source[src];
+      this.sceneSetting.data.strata.push([{initValue: parseInt(source_value_init), label: this.sceneData[src].label + " Strata "}])
     };
   }
 
