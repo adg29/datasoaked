@@ -1,5 +1,6 @@
-var moment = require('moment');
-var _ = require('underscore');
+var _ = require('underscore')
+	, moment = require('moment')
+  	, sd = require('sharify').data;
 
 
 moment.fn.fromNoww = function (a) {
@@ -11,6 +12,15 @@ moment.fn.fromNoww = function (a) {
     }
     return this.fromNow(a);
 }
+
+function debug(msg) {
+  if (sd.debug) {
+    console.log(msg);
+    if (msg instanceof Error)
+      console.log(msg.stack)
+  }
+}
+exports.debug = debug;
 
 exports.moment = moment;
 exports._ = _;
