@@ -20,8 +20,10 @@ exports.index = function(req, res, next) {
   subscribe(sd.hashtag,req.host);
 
   helpers.hashtag_media_get(hashtags.hashtag,function(error, media){
-    helpers.debug('hashtag_media_get error')
-    helpers.debug(error);
+    if(error!==null && error){
+      helpers.debug('hashtag_media_get error')
+      helpers.debug(error);
+    }
     hashtags.reset(media);
 
     res.locals.models = models; // include access to models
