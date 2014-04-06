@@ -19,47 +19,37 @@ var _ = require('underscore')
     , Hashtags = require('../../collections/hashtag_items.js')
     , listTemplate = function() {
       return require('./templates/list.jade').apply(null, arguments)
-    };
+    }
+    , view = null;
+
 Backbone.$ = $;
-
-
-v.debug(window.location.origin)
-
-socket.on('message', function(update){ 
-  var data,tmp;
-  try{
-    tmp = update;
-  }catch(e){
-    v.debug('ERROR message socket');
-    v.debug(e);
-  }
-  try{
-    v.debug('message')
-    // v.debug(tmp);
-    data = $.parseJSON(tmp);
-    $(document).trigger(data);
-  }catch(e){
-    v.debug(tmp);
-    v.debug(e);
-  }
-});
 
 module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
   initialize: function() {
     this.collection.reset(sd.HASHTAGS);
+
     this.render_viz();
+
+    this.on('socket:parsed', this.socket_parsed, this);
+    this.on('socket:error', this.socket_error, this);
+    
     this.collection.on('sync', this.render, this);
-  },
+  }
 
-  render: function() {
+  , render: function() {
     this.$('#hashtag-items').html(listTemplate({ hashtags: this.collection.models }));
-  },
+  }
 
-  events: {
-  },
+  , socket_parsed: function(e){
+    v.debug('socket_parsed')
+  }
 
-  render_viz: function(){
+  , socket_error: function(e){
+    v.debug('socket_error')
+  }
+
+  , render_viz: function(){
 
     // Define data and legend 
     // unit 
@@ -88,8 +78,6 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
       v.debug(data[0].value)
       v.debug('insta')
       v.debug(data[1].value)
-
-
 
     // Setting normal chart 
     sceneSetting = {
@@ -181,8 +169,22 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 });
 
 module.exports.init = function() {
-  new HashtagsView({
+  view = new HashtagsView({
     el: $('body'),
     collection: new Hashtags(null, { hashtag: sd.hashtag })
   });
+
+  socket.on('message', function(update){ 
+    var data;
+    try{
+      data = $.parseJSON(update);
+      view.trigger('socket:parsed',data);
+      v.debug('incoming socket message')
+    }catch(e){
+      view.trigger('socket:error',update);
+      v.debug(e);
+    }
+  });
+
+
 };
