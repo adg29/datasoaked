@@ -35,5 +35,5 @@ for item in hashtags
           h3!= (item.get('caption')!=null && tags.length < 7 ? tags.join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : tags.join(' ')) 
           span #{item.get('user').screen_name}
           div
-            a(href=(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'),title=(item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name,target="_blank") Take a Look
+            a(href=(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'),title=(item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name,target="_blank") Take a Look
               // .created= moment(item.get('created_at')).format("dddd, MMMM Do YYYY, h:mm:ss a") 
