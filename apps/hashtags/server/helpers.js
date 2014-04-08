@@ -69,6 +69,12 @@ function subscribe(hashtag,host){
             , client_secret:sd.IG_CLIENT_SECRET
           }};
 
+  http.post(options,function(e,i,r){
+    debug('error')
+    debug(e)
+    adebug(r);
+  });
+
   var stream = twit.stream('statuses/filter', { track: hashtag });
 
   stream.on('tweet', function (t) {
@@ -76,21 +82,14 @@ function subscribe(hashtag,host){
     var tweet = {statuses:[t]};
     try{
       redisClient.publish('channel:twitter:' + hashtag , JSON.stringify(tweet));
-      debug("*********Published: " + hashtag );
+      adebug("*********Published: streaming twitter channel " + hashtag);
     }catch(e){
-      debug("REDIS ERROR: redisClient.publish streaming twitter channel " + hashtag);
+      adebug("REDIS ERROR: redisClient.publish streaming twitter channel " + hashtag);
       debug(e);
       return;
     }
   });
 
-  // debug('subscribe:')
-  // debug(options)
-  http.post(options,function(e,i,r){
-    // debug('error')
-    // debug(e)
-    // debug(r);
-  });
 }
 
 
@@ -106,22 +105,29 @@ function hashtag_process(tag, update, process_callback){
           // _hashtag_process_twitter
           twit.get('search/tweets', { q: tag, count: sd.hashtag_items}, function(err, reply) {
             debug('twitter parsedResponse');
-            try{
-              // debug("*********Published: " + JSON.stringify(reply));
-              redisClient.publish('channel:twitter:' + tag , JSON.stringify(reply));
-              //function(e){ callback(null,new Error); return; }
-              debug("*********Published: " + tag );
-              // debug("*********Published: " + JSON.stringify(reply));
-              if(update=="manual") {
-                debug("*******manual: " + tag);
-                debug("*********manual: " + reply.statuses.length);
-                callback(null,reply.statuses);
+            if(err==null && typeof(reply)!='undefined'){
+              try{
+                // debug("*********Publishing: " + JSON.stringify(reply));
+                redisClient.publish('channel:twitter:' + tag , JSON.stringify(reply));
+                //function(e){ callback(null,new Error); return; }
+                debug("*********Published: " + tag );
+                // debug("*********Published: " + JSON.stringify(reply));
+                if(update=="manual") {
+                  debug("*******manual: " + tag);
+                  debug("*********manual: " + reply.statuses.length);
+                  callback(null,reply.statuses);
+                  return;
+                }
+              }catch(e){
+                debug("REDIS ERROR: redisClient.publish twitter channel " + tag);
+                debug(e);
+                callback(null,e);
                 return;
               }
-            }catch(e){
-              debug("REDIS ERROR: redisClient.publish twitter channel " + tag);
-              debug(e);
-              callback(null,e);
+            }else{
+              debug('TWIT ERROR')
+              debug(JSON.stringify(err));
+              callback(null,new Error(JSON.stringify(err)));
               return;
             }
           });
@@ -166,38 +172,44 @@ function hashtag_process(tag, update, process_callback){
             hashtag_minid_set(tag, parsedResponse['data']);
               
             // Let all the redis listeners know that we've got new media.
-            try{
-              redisClient.publish('channel:instagram:' + tag , data);
-              debug("*********Published: " + tag );
-              debug("*********Published: " + data.length);
-              if(update=="manual") {
-                debug("*******manual: " + tag);
-                debug("*********manual: " + data.length);
-                debug("*********manual: " + parsedResponse.data.length);
-                callback(null,parsedResponse.data);
+            if(e==null && typeof(data)!='undefined'){
+              try{
+                redisClient.publish('channel:instagram:' + tag , data);
+                adebug("*********Publishing: " + tag );
+                if(update=="manual") {
+                  debug("*******manual: " + tag);
+                  debug("*********manual: " + data.length);
+                  adebug("*********manual: " + parsedResponse.data.length);
+                  callback(null,parsedResponse.data);
+                  return;
+                }
+              }catch(e){
+                debug("REDIS ERROR: redisClient.publish channel '" + tag);
+                debug(e);
+                callback(null,e);
                 return;
               }
-            }catch(e){
-              debug("REDIS ERROR: redisClient.publish channel '" + tag);
-              debug(e);
-              callback(null,e);
-              return;
+            }else{
+              debug('INSTA ERROR:')
+              debug(e)
+              callback(null,new Error(JSON.stringify(e)));
             }
           });
         });
       }
   }, function(err, results) {
-      debug('async results')
+      adebug('async results')
       if(!(results.instagram instanceof Error) && ! (results.twitter instanceof Error) ){
-        debug('both')
+        adebug('both')
         if(update=="manual") process_callback(results.twitter.concat(results.instagram));
       }
       else if(! (results.instagram instanceof Error) ){
-        debug('insta')
+        adebug('insta')
+        adebug(results)
         if(update=="manual") process_callback(results.instagram);
       }
       else if(! (results.twitter instanceof Error) ){
-        debug('twit')
+        adebug('twit')
         if(update=="manual") process_callback(results.twitter);
       }
   });
@@ -234,6 +246,13 @@ function debug(msg) {
   }
 }
 exports.debug = debug;
+
+function adebug(msg) {
+    console.log(msg);
+    if (msg instanceof Error)
+      console.log(msg.stack)
+}
+exports.adebug = adebug;
 
 exports.subscribe = subscribe;
 exports.hashtag_process = hashtag_process;
