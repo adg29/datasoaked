@@ -8,8 +8,6 @@ var c = require('../../../config')
     , redisClient;
 
 
-var pubSubClient;
-
 if (process.env.REDISTOGO_URL) {
   // inside if statement
   var rtg   = require("url").parse(process.env.REDISTOGO_URL);
@@ -28,6 +26,15 @@ if (process.env.REDISTOGO_URL) {
   redisClient = redis.createClient(sd.REDIS_PORT, sd.REDIS_HOST);
 }
 
+pubSubClient.on("error", function (err) {
+  debug("callback ERROR: pubSubClient");
+  debug(err);
+});
+redisClient.on("error", function (err) {
+  debug("callback ERROR: redisClient subscription");
+  debug(err);
+});
+
 
 pubSubClient.psubscribe(subscriptionPattern);
 
@@ -43,6 +50,7 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
     , data;
   if(true||pattern == subscriptionPattern){
       try {
+        // helpers.debug(JSON.stringify(message));
         // this is where the pmessage comes in
         // the data from different apis will be structured differently
         // account for this in the json parse message data
@@ -66,7 +74,6 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
       }
     
     // Store individual media JSON for retrieval by homepage later
-    helpers.debug('Store individual media JSON for retrieval by homepage later');
     // helpers.debug(data);
     for(index in data){
         var media = data[index]
