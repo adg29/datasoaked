@@ -25,14 +25,14 @@ redisClient.on("error", function (err) {
 
 
 twit = new Twit({
-    consumer_key:         'YSlfYB1TZrfdTOYFZO1C7vNlM'
-  , consumer_secret:      'RSeYd37CTb1pzdfNXPjrkTmSpdLNHaghxItQCVF3TiRdDIkxNK'
-  , access_token:         '6506472-iUZUCHc98lS3kpvWKbrZsCT1bljImPEiXVuXg5xs97'
-  , access_token_secret:  'jlFVXEHc1BNXmypi13VhAhVJ1MGo4aUkVuXqV8f5zPiWv'
-  // consumer_key: 'oGpm3szB2AmwqwRkkdQvdA'
-  // , consumer_secret: 'us6NPD7xwbPKWd3BKJMSSgkpg3kVd1WNGmzs9YtJs'
-  // , access_token: '6506472-JsyKyxIcX4zGQVEkjQdJdY7pm0AhAjfdthE9D0N79S'
-  // , access_token_secret: 'LvoDBaQAPcBMUEFxSuD4rONnTV7aodOF5h9sWaJtPvIVg'
+  //   consumer_key:         'YSlfYB1TZrfdTOYFZO1C7vNlM'
+  // , consumer_secret:      'RSeYd37CTb1pzdfNXPjrkTmSpdLNHaghxItQCVF3TiRdDIkxNK'
+  // , access_token:         '6506472-iUZUCHc98lS3kpvWKbrZsCT1bljImPEiXVuXg5xs97'
+  // , access_token_secret:  'jlFVXEHc1BNXmypi13VhAhVJ1MGo4aUkVuXqV8f5zPiWv'
+  consumer_key: 'oGpm3szB2AmwqwRkkdQvdA'
+  , consumer_secret: 'us6NPD7xwbPKWd3BKJMSSgkpg3kVd1WNGmzs9YtJs'
+  , access_token: '6506472-JsyKyxIcX4zGQVEkjQdJdY7pm0AhAjfdthE9D0N79S'
+  , access_token_secret: 'LvoDBaQAPcBMUEFxSuD4rONnTV7aodOF5h9sWaJtPvIVg'
 })
 
 
@@ -59,6 +59,41 @@ function hashtag_media_get(hashtag,callback){
   });
 }
 
+function subscribe(hashtag,host){
+  var options = {url:sd.IG_API_URL+"/subscriptions"
+    ,form:{ object:'tag'
+            , aspect:'media'
+            , object_id:hashtag
+            , callback_url: 'http://'+host+'/callbacks/tag/'+hashtag
+            , client_id:sd.IG_CLIENT_ID
+            , client_secret:sd.IG_CLIENT_SECRET
+          }};
+
+  var stream = twit.stream('statuses/filter', { track: hashtag });
+
+  stream.on('tweet', function (t) {
+    debug('tweet');
+    var tweet = {statuses:[t]};
+    try{
+      redisClient.publish('channel:twitter:' + hashtag , JSON.stringify(tweet));
+      debug("*********Published: " + hashtag );
+    }catch(e){
+      debug("REDIS ERROR: redisClient.publish streaming twitter channel " + hashtag);
+      debug(e);
+      return;
+    }
+  });
+
+  // debug('subscribe:')
+  // debug(options)
+  http.post(options,function(e,i,r){
+    // debug('error')
+    // debug(e)
+    // debug(r);
+  });
+}
+
+
 
 
 function hashtag_process(tag, update, process_callback){
@@ -72,10 +107,11 @@ function hashtag_process(tag, update, process_callback){
           twit.get('search/tweets', { q: tag, count: sd.hashtag_items}, function(err, reply) {
             debug('twitter parsedResponse');
             try{
+              // debug("*********Published: " + JSON.stringify(reply));
               redisClient.publish('channel:twitter:' + tag , JSON.stringify(reply));
               //function(e){ callback(null,new Error); return; }
               debug("*********Published: " + tag );
-              debug("*********Published: " + reply.length);
+              // debug("*********Published: " + JSON.stringify(reply));
               if(update=="manual") {
                 debug("*******manual: " + tag);
                 debug("*********manual: " + reply.statuses.length);
@@ -199,7 +235,7 @@ function debug(msg) {
 }
 exports.debug = debug;
 
-
+exports.subscribe = subscribe;
 exports.hashtag_process = hashtag_process;
 exports.hashtag_media_get = hashtag_media_get;
 exports.hashtag_minid_get= hashtag_minid_get;
