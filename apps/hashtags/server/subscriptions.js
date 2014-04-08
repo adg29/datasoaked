@@ -107,6 +107,7 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
     var update = {
       'type': 'newMedia',
       'media': data,
+      'channelSrc': channel_split[1],
       'channelName': channelName
     };
     for(sessionId in c.io_clients){

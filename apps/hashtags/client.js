@@ -91,11 +91,17 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
     this.$('#hashtag-items').html(listTemplate({ hashtags: this.collection.models }));
   }
 
-  , socket_parsed: function(e){
-    var src = 'instagram';
-    this.createToken(src,this.sceneData[src]);
-    v.debug('e')
-    v.debug(e)
+  , socket_parsed: function(d){
+    var src = "";
+    if(d.channelSrc=="twitter"){
+      src = "twitter";
+      this.createToken(src,this.sceneData[src]);
+    }else{
+      src = "instagram";
+      this.createToken(src,this.sceneData[src]);
+    }
+    v.debug('d')
+    v.debug(d)
     v.debug('socket_parsed')
   }
 
@@ -136,23 +142,23 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
     // start the clock 
     var self = this;
-    var clock = window.setInterval(
-                  function (){
-                   time = new Date()
-                   previousYear = new Date(2010,12,0,06,0,0,00)
-                   diffPreviousYear = time.getTime()-previousYear.getTime()
-                   secondsToday = (time.getHours()*60*60) + (time.getMinutes()*60) + time.getSeconds()
-                   milliSecondsToday= (time.getHours()*60*60*1000) + (time.getMinutes()*60*1000) + time.getSeconds()*1000+time.getMilliseconds() 
+    // var clock = window.setInterval(
+    //               function (){
+    //                time = new Date()
+    //                previousYear = new Date(2010,12,0,06,0,0,00)
+    //                diffPreviousYear = time.getTime()-previousYear.getTime()
+    //                secondsToday = (time.getHours()*60*60) + (time.getMinutes()*60) + time.getSeconds()
+    //                milliSecondsToday= (time.getHours()*60*60*1000) + (time.getMinutes()*60*1000) + time.getSeconds()*1000+time.getMilliseconds() 
                   
-                  var srcs = ['twitter'];
-                  for (var s in srcs) {
-                    var src = srcs[s];
-                    self.sceneData[src].now = Math.round(milliSecondsToday*self.sceneData[src].value/1000)
-                    if(self.sceneData[src].now!=self.sceneData[src].old && _.random(2)==1) self.createToken(src,self.sceneData[src])
-                    self.sceneData[src].old = self.sceneData[src].now
-                  };
-                 }
-                 , 1000); 
+    //               var srcs = ['twitter'];
+    //               for (var s in srcs) {
+    //                 var src = srcs[s];
+    //                 self.sceneData[src].now = Math.round(milliSecondsToday*self.sceneData[src].value/1000)
+    //                 if(self.sceneData[src].now!=self.sceneData[src].old && _.random(2)==1) self.createToken(src,self.sceneData[src])
+    //                 self.sceneData[src].old = self.sceneData[src].now
+    //               };
+    //              }
+    //              , 1000); 
 
     // add legends 
     var labeling =function(setting,container){
@@ -187,8 +193,8 @@ module.exports.init = function() {
     var data;
     try{
       data = $.parseJSON(update);
-      view.trigger('socket:parsed',data);
       v.debug('incoming socket message')
+      view.trigger('socket:parsed',data);
     }catch(e){
       view.trigger('socket:error',update);
       v.debug(e);
