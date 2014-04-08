@@ -85,6 +85,9 @@ body {
 #wrap figcaption span:before {
   content: 'by ';
 }
+#wrap figcaption span.byline-twit:before {
+  content: 'via ';
+}
 #wrap figcaption a {
   text-align: center;
   padding: 5px 10px;
@@ -92,6 +95,12 @@ body {
   display: inline-block;
   background: #ed4e6e;
   color: #fff;
+}
+#wrap figcaption a.insta {
+  background: #517fa4;
+}
+#wrap figcaption a.twit {
+  background: #00aced;
 }
 #wrap .element {
   -webkit-perspective: 1700px;
