@@ -46,23 +46,27 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
             decay:{power:1.02}
         }
     }
-
+    , options:{
+      layout:false
+    }
+    , chart:{
+    }
   }
   , oneDay : 24*60*60
 
   , sceneData : {
-      'instagram' : {
-        label:"Instagram"
-        , unit: 24*60*60
-        , old:null
-        , value:parseFloat(_.random(1,8))+.1618
-        , ttl:0.993
-      }
-      , 'twitter' : {
+      'twitter' : {
         label:"Twitter"
         , unit: 24*60*60
         , old:null
         , value:parseFloat(_.random(1,8))+.3237
+        , ttl:0.993
+      }
+      , 'instagram' : {
+        label:"Instagram"
+        , unit: 24*60*60
+        , old:null
+        , value:parseFloat(_.random(1,8))+.1618
         , ttl:0.993
       }
   }
@@ -88,11 +92,17 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
     this.$('#hashtag-items').html(listTemplate({ hashtags: this.collection.models }));
   }
 
-  , socket_parsed: function(e){
-    var src = 'instagram';
-    this.createToken(src,this.sceneData[src]);
-    v.debug('e')
-    v.debug(e)
+  , socket_parsed: function(d){
+    var src = "";
+    if(d.channelSrc=="twitter"){
+      src = "twitter";
+      this.createToken(src,this.sceneData[src]);
+    }else{
+      src = "instagram";
+      this.createToken(src,this.sceneData[src]);
+    }
+    v.debug('d')
+    v.debug(d)
     v.debug('socket_parsed')
   }
 
@@ -133,31 +143,31 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
     // start the clock 
     var self = this;
-    var clock = window.setInterval(
-                  function (){
-                   time = new Date()
-                   previousYear = new Date(2010,12,0,06,0,0,00)
-                   diffPreviousYear = time.getTime()-previousYear.getTime()
-                   secondsToday = (time.getHours()*60*60) + (time.getMinutes()*60) + time.getSeconds()
-                   milliSecondsToday= (time.getHours()*60*60*1000) + (time.getMinutes()*60*1000) + time.getSeconds()*1000+time.getMilliseconds() 
+    // var clock = window.setInterval(
+    //               function (){
+    //                time = new Date()
+    //                previousYear = new Date(2010,12,0,06,0,0,00)
+    //                diffPreviousYear = time.getTime()-previousYear.getTime()
+    //                secondsToday = (time.getHours()*60*60) + (time.getMinutes()*60) + time.getSeconds()
+    //                milliSecondsToday= (time.getHours()*60*60*1000) + (time.getMinutes()*60*1000) + time.getSeconds()*1000+time.getMilliseconds() 
                   
-                  var srcs = ['twitter'];
-                  for (var s in srcs) {
-                    var src = srcs[s];
-                    self.sceneData[src].now = Math.round(milliSecondsToday*self.sceneData[src].value/1000)
-                    if(self.sceneData[src].now!=self.sceneData[src].old && _.random(1)==1) self.createToken(src,self.sceneData[src])
-                    self.sceneData[src].old = self.sceneData[src].now
-                  };
-                 }
-                 , 1000); 
+    //               var srcs = ['twitter'];
+    //               for (var s in srcs) {
+    //                 var src = srcs[s];
+    //                 self.sceneData[src].now = Math.round(milliSecondsToday*self.sceneData[src].value/1000)
+    //                 if(self.sceneData[src].now!=self.sceneData[src].old && _.random(2)==1) self.createToken(src,self.sceneData[src])
+    //                 self.sceneData[src].old = self.sceneData[src].now
+    //               };
+    //              }
+    //              , 1000); 
 
     // add legends 
     var labeling =function(setting,container){
-    var divWidth = Math.round(setting.width/setting.data.model.length)
+      var divWidth = Math.round(setting.width/setting.data.model.length)
 
-     for (var i = setting.data.model.length-1; i >= 0 ; i--) {
+      for (var i in setting.data.model) {
        $('#'+container).append('<div class="label" style="width:'+divWidth+'px;">'+setting.data.model[i].label+'</div>');
-     }
+      }
     }
     labeling(this.sceneSetting,"headerLabel")
 
@@ -167,8 +177,8 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
   , scene_setup : function(){
     for (src in this.sceneData) {
       this.sceneSetting.data.model.push({label:this.sceneData[src].label})
-      var source_value_init = this.collection.count_source[(this.sceneData[src].label).toLowerCase()];
-      this.sceneSetting.data.strata.push([{initValue: source_value_init, label: this.sceneData[src].label + " Strata "}])
+      var source_value_init = this.collection.count_source[src];
+      this.sceneSetting.data.strata.push([{initValue: parseInt(source_value_init), label: this.sceneData[src].label + " Strata "}])
     };
   }
 
@@ -184,8 +194,8 @@ module.exports.init = function() {
     var data;
     try{
       data = $.parseJSON(update);
-      view.trigger('socket:parsed',data);
       v.debug('incoming socket message')
+      view.trigger('socket:parsed',data);
     }catch(e){
       view.trigger('socket:error',update);
       v.debug(e);
@@ -211,7 +221,7 @@ moment.fn.fromNoww = function (a) {
 }
 
 function debug(msg) {
-  if (sd.debug) {
+  if (false && sd.debug) {
     console.log(msg);
     if (msg instanceof Error)
       console.log(msg.stack)
@@ -278,12 +288,17 @@ var jade_interp;
 buf.push("<div class=\"grid-sizer\"></div>");
 if ( item instanceof models.InstagramItem	 )
 {
-buf.push("<div class=\"element\"><figure><div><img" + (jade.attr("src", item.get('images').low_resolution.url, true, false)) + "/></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\">" + (null == (jade_interp = moment.unix(parseInt(item.get('created_time'))).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && item.get('tags').length < 7 ? item.get('tags').join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : item.get('tags').join(' ')) ) ? "" : jade_interp) + "</h3><span>" + (jade.escape((jade_interp = item.get('user').username) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\">Take a Look</a></div></figcaption></figure></div>");
+buf.push("<div class=\"element\"><figure><div><img" + (jade.attr("src", item.get('images').low_resolution.url, true, false)) + "/></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\" class=\"insta\">" + (null == (jade_interp = moment.unix(parseInt(item.get('created_time'))).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && item.get('tags').length < 7 ? item.get('tags').join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : item.get('tags').join(' ')) ) ? "" : jade_interp) + "</h3><span>" + (jade.escape((jade_interp = item.get('user').username) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\">Take a Look</a></div></figcaption></figure></div>");
 }
 if ( item instanceof models.TwitterItem	 )
 {
 tags = _.map(item.get('entities').hashtags, function(h){ return h.text; })
-buf.push("<div class=\"element\"><figure><div><div class=\"tweet\">" + (jade.escape(null == (jade_interp = item.get('text')) ? "" : jade_interp)) + "</div></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\">" + (null == (jade_interp = moment(item.get('created_at')).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && tags.length < 7 ? tags.join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : tags.join(' ')) ) ? "" : jade_interp) + "</h3><span>" + (jade.escape((jade_interp = item.get('user').screen_name) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\">Take a Look<!-- .created= moment(item.get('created_at')).format(\"dddd, MMMM Do YYYY, h:mm:ss a\") --></a></div></figcaption></figure></div>");
+buf.push("<div class=\"element\"><figure><div>");
+if ( item.get('entities').media && item.get('entities').media[0] && item.get('entities').media[0].sizes.medium)
+{
+buf.push("<img" + (jade.attr("src", item.get('entities').media[0].media_url, true, false)) + "/>");
+}
+buf.push("<div class=\"tweet\">" + (jade.escape(null == (jade_interp = item.get('text')) ? "" : jade_interp)) + "</div></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\" class=\"twit\">" + (null == (jade_interp = moment(item.get('created_at')).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && tags.length < 7 ? tags.join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : tags.join(' ')) ) ? "" : jade_interp) + "</h3><span class=\"byline-twit\">@" + (jade.escape((jade_interp = item.get('user').screen_name) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\">Take a Look<!-- .created= moment(item.get('created_at')).format(\"dddd, MMMM Do YYYY, h:mm:ss a\") --></a></div></figcaption></figure></div>");
 }
     }
 
@@ -295,12 +310,17 @@ buf.push("<div class=\"element\"><figure><div><div class=\"tweet\">" + (jade.esc
 buf.push("<div class=\"grid-sizer\"></div>");
 if ( item instanceof models.InstagramItem	 )
 {
-buf.push("<div class=\"element\"><figure><div><img" + (jade.attr("src", item.get('images').low_resolution.url, true, false)) + "/></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\">" + (null == (jade_interp = moment.unix(parseInt(item.get('created_time'))).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && item.get('tags').length < 7 ? item.get('tags').join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : item.get('tags').join(' ')) ) ? "" : jade_interp) + "</h3><span>" + (jade.escape((jade_interp = item.get('user').username) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\">Take a Look</a></div></figcaption></figure></div>");
+buf.push("<div class=\"element\"><figure><div><img" + (jade.attr("src", item.get('images').low_resolution.url, true, false)) + "/></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\" class=\"insta\">" + (null == (jade_interp = moment.unix(parseInt(item.get('created_time'))).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && item.get('tags').length < 7 ? item.get('tags').join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : item.get('tags').join(' ')) ) ? "" : jade_interp) + "</h3><span>" + (jade.escape((jade_interp = item.get('user').username) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\">Take a Look</a></div></figcaption></figure></div>");
 }
 if ( item instanceof models.TwitterItem	 )
 {
 tags = _.map(item.get('entities').hashtags, function(h){ return h.text; })
-buf.push("<div class=\"element\"><figure><div><div class=\"tweet\">" + (jade.escape(null == (jade_interp = item.get('text')) ? "" : jade_interp)) + "</div></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\">" + (null == (jade_interp = moment(item.get('created_at')).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && tags.length < 7 ? tags.join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : tags.join(' ')) ) ? "" : jade_interp) + "</h3><span>" + (jade.escape((jade_interp = item.get('user').screen_name) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\">Take a Look<!-- .created= moment(item.get('created_at')).format(\"dddd, MMMM Do YYYY, h:mm:ss a\") --></a></div></figcaption></figure></div>");
+buf.push("<div class=\"element\"><figure><div>");
+if ( item.get('entities').media && item.get('entities').media[0] && item.get('entities').media[0].sizes.medium)
+{
+buf.push("<img" + (jade.attr("src", item.get('entities').media[0].media_url, true, false)) + "/>");
+}
+buf.push("<div class=\"tweet\">" + (jade.escape(null == (jade_interp = item.get('text')) ? "" : jade_interp)) + "</div></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\" class=\"twit\">" + (null == (jade_interp = moment(item.get('created_at')).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && tags.length < 7 ? tags.join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : tags.join(' ')) ) ? "" : jade_interp) + "</h3><span class=\"byline-twit\">@" + (jade.escape((jade_interp = item.get('user').screen_name) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\">Take a Look<!-- .created= moment(item.get('created_at')).format(\"dddd, MMMM Do YYYY, h:mm:ss a\") --></a></div></figcaption></figure></div>");
 }
     }
 
