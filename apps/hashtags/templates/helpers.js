@@ -14,6 +14,7 @@ moment.fn.fromNoww = function (a) {
 }
 
 function debug(msg) {
+  console.log( sd.debug ? 'Console Out' : 'Console Hidden' );
   if (sd.debug) {
     console.log(msg);
     if (msg instanceof Error)
