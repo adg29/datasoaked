@@ -12,6 +12,7 @@ var
 
 exports.index = function(req, res, next) {
   sd.hashtag = req.params.tag || sd.hashtag;
+  sd.debug = true;
   var hashtags = new HashtagItems(null, {
     hashtag: sd.hashtag,
   });
@@ -30,7 +31,6 @@ exports.index = function(req, res, next) {
     res.locals._ = helpersv._; // include underscore lib
     res.locals.sd.hashtag = sd.hashtag;
     res.locals.sd.HASHTAGS = hashtags.toJSON();
-    res.locals.sd.debug = true;
     helpers.debug('render index')
     res.render('index', { 
       hashtag: hashtags.hashtag
