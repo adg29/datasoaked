@@ -101,13 +101,13 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
       src = "instagram";
       this.createToken(src,this.sceneData[src]);
     }
-    console.log('d')
-    console.log(d)
-    console.log('socket_parsed')
+    v.debug('d')
+    v.debug(d)
+    v.debug('socket_parsed')
   }
 
   , socket_error: function(e){
-    console.log('socket_error')
+    v.debug('socket_error')
   }
 
   // customize tokens before create it  
@@ -194,11 +194,11 @@ module.exports.init = function() {
     var data;
     try{
       data = $.parseJSON(update);
-      console.log('incoming socket message')
+      v.debug('incoming socket message')
       view.trigger('socket:parsed',data);
     }catch(e){
       view.trigger('socket:error',update);
-      console.log(e);
+      v.debug(e);
     }
   });
 
