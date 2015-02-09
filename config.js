@@ -4,12 +4,13 @@
 // simply lays out all of those environment variables with sensible defaults 
 // for development.
 //
+var util = require('util');
 
 module.exports = {
   debug_on: true
   , debug: function debug(msg) {
     if (module.exports.debug_on) {
-      console.log(msg);
+      console.log(util.inspect(msg,false,null));
       if (msg instanceof Error)
         console.log(msg.stack)
     }
