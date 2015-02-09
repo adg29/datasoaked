@@ -26,14 +26,19 @@ if (process.env.REDISTOGO_URL) {
   redisClient = redis.createClient(sd.REDIS_PORT, sd.REDIS_HOST);
 }
 
-pubSubClient.on("error", function (err) {
-  debug("callback ERROR: pubSubClient");
-  debug(err);
-});
-redisClient.on("error", function (err) {
-  debug("callback ERROR: redisClient subscription");
-  debug(err);
-});
+var pubSubErrorCallback = function (err) {
+  helpers.debug("ERROR: pubSubClient");
+  helpers.debug(err);
+};
+
+pubSubClient.on("error", pubSubErrorCallback);
+
+var redisErrorCallback = function (err) {
+  helpers.debug("ERROR: redisClient subscriptions.js");
+  helpers.debug(err);
+};
+
+redisClient.on("error", redisErrorCallback);
 
 
 pubSubClient.psubscribe(subscriptionPattern);
@@ -72,9 +77,51 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
           helpers.debug(e);
           return;
       }
+
+
+      var mediaZadd = function(channelName , channel_split, media, media_weight, data){
+        redisClient.zadd('media:'+channelName, media_weight, JSON.stringify(media),function(err,result){
+          if(err){
+            helpers.debug('zadd');
+            redisErrorCallback(err);
+          }
+          redisClient.expire('media:'+channelName, 60,function(err,result){
+            helpers.debug('expireZaddResult'); // true
+            helpers.debug('media:'+channelName); // true
+            helpers.debug(JSON.stringify(err)); // true
+            helpers.debug(result); // true
+          });
+        });
+
+        //pubsub update
+        // Send out whole update to the listeners
+        var update = {
+          'type': 'newMedia',
+          'media': data,
+          'channelSrc': channel_split[1],
+          'channelName': channelName
+        };
+        for(sessionId in c.io_clients){
+          try{
+            helpers.debug('try socket clients send') 
+            helpers.debug(sessionId) 
+            var client = c.io_clients[sessionId];
+            client.send(JSON.stringify(update));
+          }catch (e) {
+            helpers.debug('catch socket clients send') 
+            helpers.debug(sessionId) 
+            helpers.debug(update) 
+            helpers.debug(e) 
+          }
+        }
+
+
+      };
+
     
     // Store individual media JSON for retrieval by homepage later
-    // helpers.debug(data);
+    helpers.debug('Store individual media JSON for retrieval by homepage later');
+    helpers.debug(channelName);
     for(index in data){
         var media = data[index]
           , media_weight;
@@ -88,48 +135,26 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
         media.meta = {};
         media.meta.location = channelName;
         var redis_length;
-        // helpers.debug('INFO len ' + redisClient.server_info.used_memory_human);
+        helpers.debug('INFO len ' + redisClient.server_info.used_memory_human);
         //helpers.debug(redisClient.server_info);
         redisClient.zcount('media:'+channelName,'-inf', '+inf',function(err,len){
           redis_length = len;
           // helpers.debug('redis_len ' + redis_length);
           // helpers.debug(err);
           // #TODO redis trimming length should be a setting
-          if(redis_length>200||parseInt(redisClient.server_info.used_memory_human)>4){
-            redisClient.zremrangebyrank("media:"+channelName,0,200,function (err, didSucceed) {
+          if(parseInt(redisClient.server_info.used_memory_human)>4){
+            redisClient.zremrangebyrank("media:"+channelName,0,1200,function (err, didSucceed) {
               // helpers.debug('zrem didSucceed'); // true
               // helpers.debug(err); // true
               // helpers.debug(didSucceed); // true
+              mediaZadd(channelName , channel_split, media, media_weight, data);
             });
+          }else{
+            mediaZadd(channelName , channel_split, media, media_weight, data);
           }
         });
-        redisClient.zadd('media:'+channelName, media_weight, JSON.stringify(media),function(err,result){
-            // helpers.debug('zaddResult'); // true
-            // helpers.debug(err); // true
-            // helpers.debug(result); // true
-          });
     }
     
-    // Send out whole update to the listeners
-    var update = {
-      'type': 'newMedia',
-      'media': data,
-      'channelSrc': channel_split[1],
-      'channelName': channelName
-    };
-    for(sessionId in c.io_clients){
-      try{
-        helpers.debug('try socket clients send') 
-        helpers.debug(sessionId) 
-        var client = c.io_clients[sessionId];
-        client.send(JSON.stringify(update));
-      }catch (e) {
-        helpers.debug('catch socket clients send') 
-        helpers.debug(sessionId) 
-        helpers.debug(update) 
-        helpers.debug(e) 
-      }
-    }
   }
 });
 
