@@ -15,7 +15,7 @@ var _ = require('underscore')
     , sd = require('sharify').data
     , v = require('./templates/helpers')
     , io = require('socket.io-browserify')
-    , socket = io.connect(window.location.origin)
+    , socket = io.connect(window.location.origin+'/socket/'+sd.hashtag)
     , Backbone = require('backbone')
     , Hashtags = require('../../collections/hashtag_items.js')
     , listTemplate = function() {
@@ -225,7 +225,6 @@ moment.fn.fromNoww = function (a) {
 }
 
 function debug(msg) {
-  console.log( sd.debug ? 'Console Out' : 'Console Hidden' );
   if (sd.debug) {
     console.log(msg);
     if (msg instanceof Error)
