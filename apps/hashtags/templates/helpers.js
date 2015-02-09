@@ -14,7 +14,7 @@ moment.fn.fromNoww = function (a) {
 }
 
 function debug(msg) {
-  if (false && sd.debug) {
+  if (sd.debug) {
     console.log(msg);
     if (msg instanceof Error)
       console.log(msg.stack)
