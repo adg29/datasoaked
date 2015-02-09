@@ -12,8 +12,8 @@
 
 var _ = require('underscore')
     , $ = require('jquery')
-    , v = require('./templates/helpers')
     , sd = require('sharify').data
+    , v = require('./templates/helpers')
     , io = require('socket.io-browserify')
     , socket = io.connect(window.location.origin)
     , Backbone = require('backbone')
@@ -96,9 +96,13 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
     var src = "";
     if(d.channelSrc=="twitter"){
       src = "twitter";
+      console.log('twitter');
+      console.log(d);
       this.createToken(src,this.sceneData[src]);
     }else{
       src = "instagram";
+      console.log('insta');
+      console.log(d);
       this.createToken(src,this.sceneData[src]);
     }
     v.debug('d')
