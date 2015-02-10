@@ -101,17 +101,16 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
           'channelSrc': channel_split[1],
           'channelName': channelName
         };
-        for(sessionId in c.io_clients){
+        for(i in c.io_clients[channelName]){
           try{
-            helpers.debug('try socket clients send') 
-            helpers.debug(sessionId) 
-            var client = c.io_clients[sessionId];
+            helpers.debug('try socket clients send ', i, channelName);
+            var client = c.io_clients[channelName][i];
             client.send(JSON.stringify(update));
           }catch (e) {
             helpers.debug('catch socket clients send') 
-            helpers.debug(sessionId) 
-            helpers.debug(update) 
-            helpers.debug(e) 
+            helpers.debug(i);
+            helpers.debug(update);
+            helpers.debug(e);
           }
         }
 

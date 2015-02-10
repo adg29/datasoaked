@@ -17,7 +17,7 @@ module.exports = {
   }
   , NODE_ENV: 'development'
   , PORT: 5000
-  , io_clients: []
+  , io_clients: {}
 }
 
 // Override any values with env variables
