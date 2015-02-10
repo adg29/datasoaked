@@ -103,11 +103,11 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
         };
         // console.log( util.inspect(c.io_clients),false,null );
         var channelClient = c.io_clients['/tag/'+channelName];
-        // console.log(channelClient);
         if(typeof channelClient!='undefined' && Array.isArray(channelClient)){
+          console.log('# clients ', channelClient.length);
           for(i in channelClient){
             try{
-              helpers.debug('try socket clients send ', i, channelName);
+              helpers.debug('try socket clients send ' +  i + ' '  +channelName);
               var client = channelClient[i];
               client.send(JSON.stringify(update));
             }catch (e) {
