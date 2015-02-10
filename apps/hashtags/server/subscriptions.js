@@ -86,10 +86,10 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
             redisErrorCallback(err);
           }
           redisClient.expire('media:'+channelName, 60,function(err,result){
-            helpers.debug('expireZaddResult'); // true
-            helpers.debug('media:'+channelName); // true
-            helpers.debug(JSON.stringify(err)); // true
-            helpers.debug(result); // true
+            // helpers.debug('expireZaddResult'); // true
+            // helpers.debug('media:'+channelName); // true
+            // helpers.debug(JSON.stringify(err)); // true
+            // helpers.debug(result); // true
           });
         });
 
