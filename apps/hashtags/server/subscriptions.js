@@ -1,5 +1,6 @@
 var c = require('../../../config')
     , helpers = require('./helpers')
+    , util = require('util')
     , redis = require('redis')
     , moment = require('moment')
     , sd = require('sharify').data
@@ -60,10 +61,10 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
         // the data from different apis will be structured differently
         // account for this in the json parse message data
         if(channel_split[1]=="twitter"){
-          helpers.debug('twitter pmessage')
+          helpers.debug('twitter pmessage', channelName);
           data = JSON.parse(message).statuses;
         }else{
-          helpers.debug('insta pmessage')
+          helpers.debug('insta pmessage', channelName);
           data = JSON.parse(message).data;
         }
 
@@ -87,7 +88,6 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
           }
           redisClient.expire('media:'+channelName, 60,function(err,result){
             // helpers.debug('expireZaddResult'); // true
-            // helpers.debug('media:'+channelName); // true
             // helpers.debug(JSON.stringify(err)); // true
             // helpers.debug(result); // true
           });
@@ -101,6 +101,7 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
           'channelSrc': channel_split[1],
           'channelName': channelName
         };
+        console.log( util.inspect(c.io_clients),false,null );
         for(i in c.io_clients[channelName]){
           try{
             helpers.debug('try socket clients send ', i, channelName);
