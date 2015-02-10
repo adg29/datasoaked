@@ -103,7 +103,7 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
         };
         // console.log( util.inspect(c.io_clients),false,null );
         var channelClient = c.io_clients['/tag/'+channelName];
-        console.log(channelClient);
+        // console.log(channelClient);
         if(typeof channelClient!='undefined' && Array.isArray(channelClient)){
           for(i in channelClient){
             try{
@@ -118,8 +118,6 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
             }
           }
         }
-
-
       };
 
     
