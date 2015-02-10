@@ -14,7 +14,11 @@ var _ = require('underscore')
     , sd = require('sharify').data
     , v = require('./templates/helpers')
     , io = require('socket.io-browserify')
-    , socket = io.connect(window.location.origin+'/socket/'+sd.hashtag)
+    , clientNS = '/tag/'+sd.hashtag
+    , socket = io.connect(window.location.origin+clientNS,  {
+       query: 'ns='+clientNS,
+       resource: "socket.io"
+    })
     , Backbone = require('backbone')
     , Hashtags = require('../../collections/hashtag_items.js')
     , listTemplate = function() {
