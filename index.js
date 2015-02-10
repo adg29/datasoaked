@@ -4,6 +4,13 @@
 // be abstracted into modules under /lib.
 // 
 
+if(process.env.NODETIME_ACCOUNT_KEY) {
+  require('nodetime').profile({
+    accountKey: process.env.NODETIME_ACCOUNT_KEY,
+    appName: 'Datasoaked' // optional
+  });
+}
+
 var c = require('./config')
   , express = require('express')
   , setup = require('./lib/setup')
