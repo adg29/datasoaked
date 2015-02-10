@@ -102,10 +102,11 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
           'channelName': channelName
         };
         console.log( util.inspect(c.io_clients),false,null );
-        for(i in c.io_clients[channelName]){
+        var channelClient = c.io_clients['/tag/'+channelName];
+        for(i in channelClient){
           try{
             helpers.debug('try socket clients send ', i, channelName);
-            var client = c.io_clients[channelName][i];
+            var client = channelClient[i];
             client.send(JSON.stringify(update));
           }catch (e) {
             helpers.debug('catch socket clients send') 
