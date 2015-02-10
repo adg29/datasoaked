@@ -101,7 +101,7 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
           'channelSrc': channel_split[1],
           'channelName': channelName
         };
-        console.log( util.inspect(c.io_clients),false,null );
+        // console.log( util.inspect(c.io_clients),false,null );
         var channelClient = c.io_clients['/tag/'+channelName];
         for(i in channelClient){
           try{
