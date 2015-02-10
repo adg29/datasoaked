@@ -1,7 +1,7 @@
 var sd = require('sharify').data;
 
 // Inject some constant data into sharify
-sd['debug'] = true;
+sd['debug'] = false;
 sd['httpClient'] = require('http');
 sd['REDIS_PORT'] = 6486;
 sd['REDIS_HOST'] = '127.0.0.1';

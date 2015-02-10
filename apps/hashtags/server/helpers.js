@@ -1,5 +1,6 @@
 var redis = require('redis')
   , sd = require('sharify').data
+  , util = require('util')
   , settings = require('../settings')
   , http = require('request')
   , async = require('async')
@@ -72,19 +73,20 @@ function subscribe(hashtag,host){
   http.post(options,function(e,i,r){
     debug('error')
     debug(e)
+    adebug('***InstaPOST');
     adebug(r);
   });
 
   var stream = twit.stream('statuses/filter', { track: hashtag });
 
   stream.on('tweet', function (t) {
-    debug('tweet');
+    // debug('tweet');
     var tweet = {statuses:[t]};
     try{
       redisClient.publish('channel:twitter:' + hashtag , JSON.stringify(tweet));
-      adebug("*********Published: streaming twitter channel " + hashtag);
+      // adebug("*********Published: streaming twitter channel " + hashtag);
     }catch(e){
-      adebug("REDIS ERROR: redisClient.publish streaming twitter channel " + hashtag);
+      // adebug("REDIS ERROR: redisClient.publish streaming twitter channel " + hashtag);
       debug(e);
       return;
     }
@@ -133,7 +135,7 @@ function hashtag_process(tag, update, process_callback){
           });
       },
       instagram: function(callback) {
-        debug('hashtag_minid_get');
+        debug('INSTACALL hashtag_minid_get');
         hashtag_minid_get(tag, function(error,minID){
           debug(minID);
           if(minID){
@@ -251,6 +253,8 @@ function adebug(msg) {
     console.log(msg);
     if (msg instanceof Error)
       console.log(msg.stack)
+    if (msg instanceof Object)
+      console.log( util.inspect(msg,false,null) );
 }
 exports.adebug = adebug;
 

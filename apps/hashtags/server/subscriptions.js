@@ -50,7 +50,7 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
   /* Every time we receive a message, we check to see if it matches
      the subscription pattern. If it does, then go ahead and parse it. */
 
-  helpers.debug('pmessage from ' + pattern + " against " + subscriptionPattern)
+  // helpers.debug('pmessage from ' + pattern + " against " + subscriptionPattern)
   var channel_split = channel.split(':')
     , data;
   if(true||pattern == subscriptionPattern){
@@ -120,8 +120,8 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
 
     
     // Store individual media JSON for retrieval by homepage later
-    helpers.debug('Store individual media JSON for retrieval by homepage later');
-    helpers.debug(channelName);
+    // helpers.debug('Store individual media JSON for retrieval by homepage later');
+    // helpers.debug(channelName);
     for(index in data){
         var media = data[index]
           , media_weight;
@@ -135,7 +135,7 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
         media.meta = {};
         media.meta.location = channelName;
         var redis_length;
-        helpers.debug('INFO len ' + redisClient.server_info.used_memory_human);
+        // helpers.debug('INFO len ' + redisClient.server_info.used_memory_human);
         //helpers.debug(redisClient.server_info);
         redisClient.zcount('media:'+channelName,'-inf', '+inf',function(err,len){
           redis_length = len;
