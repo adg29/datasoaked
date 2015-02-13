@@ -1,10 +1,10 @@
 export IG_APP_PORT="4567"
 export IG_CALLBACK_HOST="http://galan.fwd.wf"
 export WHO_CALLBACK_HOST="http://datasoaked.herokuapp.com"
-export IG_CLIENT_ID="fbc600c2d36d4c5dae64ae9a275ba612"
-export IG_CLIENT_SECRET="a8ab4b3ef5bc4486b04a4fa97b9ac6cb"
-# export IG_CLIENT_ID="602782ce658f4577b7950bea45e510cd"
-# export IG_CLIENT_SECRET="8f64948615734619a8d847646152048d"
+# export IG_CLIENT_ID="fbc600c2d36d4c5dae64ae9a275ba612"
+# export IG_CLIENT_SECRET="a8ab4b3ef5bc4486b04a4fa97b9ac6cb"
+export IG_CLIENT_ID="dcae1c9bbef5439fa64836255e81d108"
+export IG_CLIENT_SECRET="1ca6fd3939964f6d82668d504201242d"
 alias sub_delete='curl -X DELETE  "https://api.instagram.com/v1/subscriptions?object=all&client_id=$IG_CLIENT_ID&client_secret=$IG_CLIENT_SECRET"'
 alias sub_list='curl "https://api.instagram.com/v1/subscriptions?client_id=$IG_CLIENT_ID&client_secret=$IG_CLIENT_SECRET"'
 
