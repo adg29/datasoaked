@@ -3,7 +3,8 @@
 // 
 
 var 
-  Hashtags = require('../../collections/hashtag_items')
+  util = require('util')
+  , Hashtags = require('../../collections/hashtag_items')
   , models = require('../../models/hashtag_item')
   , helpers = require('./server/helpers')
   , helpersv = require('./templates/helpers')
@@ -61,6 +62,11 @@ exports.subscription_callback_instagram = function(req, res, next){
   helpers.debug("/callbacks/instagram/tag/" + req.params.tag);
   // The POST callback for Instagram to call every time there's an update
   // to one of our subscriptions.
+
+  // Information regarding the global rate limits is included in the HTTP header on the response to each of your calls, which enables your app to determine its current status with respect to these rate limits. The following fields are provided in the header of each response and their values are related to the type of call that was made (authenticated or unauthenticated):
+  // X-Ratelimit-Remaining: the remaining number of calls available to your app within the 1-hour window
+  // X-Ratelimit-Limit: the total number of calls allowed within the 1-hour window
+  // helpers.debug("API " + req.headers['X-Ratelimit-Remaining'] + " remaining - on /callbacks/instagram/tag/" + req.params.tag);
     
   var tag = req.params.tag;
   helpers.debug('tag')

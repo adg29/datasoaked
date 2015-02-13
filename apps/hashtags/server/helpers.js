@@ -71,10 +71,10 @@ function subscribe(hashtag,host){
           }};
 
   http.post(options,function(e,i,r){
-    debug('error')
-    debug(e)
-    adebug('***InstaPOST');
-    adebug(r);
+    // debug('error')
+    // debug(e)
+    // adebug('***InstaPOST');
+    // adebug(r);
   });
 
   var stream = twit.stream('statuses/filter', { track: hashtag });
@@ -155,7 +155,9 @@ function hashtag_process(tag, update, process_callback){
 
           // Asynchronously ask the Instagram API for new media for a given
           // tag.
-          http.get(options, function(e,i,response){
+          http.get(options, function(e,res,response){
+            // debug('insta http get i \n' +  util.inspect(i,false,null) );
+            debug("API " + res.headers['x-ratelimit-remaining'] + " remaining - on /callbacks/instagram/tag/" + tag);
             var data = response;
             try {
               var parsedResponse = JSON.parse(data);
@@ -177,7 +179,7 @@ function hashtag_process(tag, update, process_callback){
             if(e==null && typeof(data)!='undefined'){
               try{
                 redisClient.publish('channel:instagram:' + tag , data);
-                adebug("*********Publishing: " + tag );
+                adebug("*********hashtag_process publishing: " + tag );
                 if(update=="manual") {
                   debug("*******manual: " + tag);
                   debug("*********manual: " + data.length);
@@ -207,7 +209,7 @@ function hashtag_process(tag, update, process_callback){
       }
       else if(! (results.instagram instanceof Error) ){
         adebug('insta')
-        adebug(results)
+        // adebug(results)
         if(update=="manual") process_callback(results.instagram);
       }
       else if(! (results.twitter instanceof Error) ){

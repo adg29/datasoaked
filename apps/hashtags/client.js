@@ -81,7 +81,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
     this.scene_setup();
 
-    this.scene = this.$("#demo").vs(this.sceneSetting).data('visualSedimentation')
+    // this.scene = this.$("#demo").vs(this.sceneSetting).data('visualSedimentation')
 
     this.render_viz();
 
@@ -95,18 +95,31 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
     this.$('#hashtag-items').html(listTemplate({ hashtags: this.collection.models }));
   }
 
+  , onNewMedia: function(d){
+      if(d.channelName==sd.hashtag){
+        var newMedia = _.reject(d.media,function(m){
+          return _.contains($('.element[data-uid]').map(function(){ return $(this).data('uid')}).get(),m.id);
+        });
+      }
+
+      v.debug('onNewMedia');
+      v.debug(newMedia);
+  }
+
   , socket_parsed: function(d){
     var src = "";
     if(d.channelSrc=="twitter"){
       src = "twitter";
       console.log('twitter');
       console.log(d);
-      this.createToken(src,this.sceneData[src]);
+      // this.createToken(src,this.sceneData[src]);
     }else{
       src = "instagram";
       console.log('insta');
       console.log(d);
-      this.createToken(src,this.sceneData[src]);
+      //incoming instagram data contains the last twenty media items
+      // this.createToken(src,this.sceneData[src]);
+      this.onNewMedia(d);
     }
     v.debug('d')
     v.debug(d)
@@ -118,9 +131,9 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
   }
 
   // customize tokens before create it  
-  , createToken: function(i,data){
-     var token = { 
-        category: (i=="instagram" ? 1 : 0),
+  , createToken: function(src,data){
+      var token = { 
+        category: (src=="instagram" ? 1 : 0),
         callback:{
          draw:function(token){
            var size = token.attr("size")
@@ -128,14 +141,14 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
          }
         }
       }
-    if(typeof(data.texture)!="undefined"){
-     token.texture = {}
-     token.texture.src = data.texture
-    }
-    if(typeof(data.size)!="undefined"){
-      token.size = data.size
-    }
-    this.scene.addToken(token);
+      if(typeof(data.texture)!="undefined"){
+        token.texture = {}
+        token.texture.src = data.texture
+      }
+      if(typeof(data.size)!="undefined"){
+        token.size = data.size
+      }
+      this.scene.addToken(token);
   }
 
   , render_viz: function(){
