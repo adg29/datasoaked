@@ -46,17 +46,13 @@ pubSubClient.psubscribe(subscriptionPattern);
 
 
 pubSubClient.on('pmessage', function(pattern, channel, message){
-  //helpers.debug("Handling " + pattern + " pmessage: " + message);
-
   /* Every time we receive a message, we check to see if it matches
      the subscription pattern. If it does, then go ahead and parse it. */
-
   // helpers.debug('pmessage from ' + pattern + " against " + subscriptionPattern)
   var channel_split = channel.split(':')
     , data;
   if(true||pattern == subscriptionPattern){
       try {
-        // helpers.debug(JSON.stringify(message));
         // this is where the pmessage comes in
         // the data from different apis will be structured differently
         // account for this in the json parse message data
@@ -105,7 +101,8 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
         // console.log( util.inspect(c.io_clients),false,null );
         var channelClient = c.io_clients['/tag/'+channelName];
         if(typeof channelClient!='undefined' && Array.isArray(channelClient)){
-          console.log('# ' + channelName + ' clients ', channelClient.length);
+          // helpers.debug( util.inspect(channelClient,false,null) );
+          helpers.debug('PROFILE # ' + channelName + ' clients ' + channelClient.length);
           for(i in channelClient){
             try{
               helpers.debug('try socket clients send ' +  i + ' '  +channelName);
@@ -114,8 +111,8 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
             }catch (e) {
               helpers.debug('catch socket clients send') 
               helpers.debug(i);
-              helpers.debug(update);
-              helpers.debug(e);
+              // helpers.debug(update);
+              // helpers.debug(e);
             }
           }
         }
