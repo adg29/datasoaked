@@ -97,7 +97,27 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
           'channelSrc': channel_split[1],
           'channelName': channelName
         };
-        /* #TODO #ISSUE too many cio_clients being created per tag */
+
+
+        // for(sessionId in c.io_clients){
+        //   try{
+        //     helpers.debug('try socket clients send') 
+        //     helpers.debug(sessionId) 
+        //     var client = c.io_clients[sessionId];
+        //     client.send(JSON.stringify(update));
+        //   }catch (e) {
+        //     helpers.debug('catch socket clients send') 
+        //     helpers.debug(sessionId) 
+        //     helpers.debug(update) 
+        //     helpers.debug(e) 
+        //   }
+        // }
+
+
+        /* 
+          #TODO #ISSUE 
+          too many cio_clients being created per tag 
+        */
         // console.log( util.inspect(c.io_clients),false,null );
         var channelClient = c.io_clients['/tag/'+channelName];
         if(typeof channelClient!='undefined' && Array.isArray(channelClient)){
@@ -116,6 +136,9 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
             }
           }
         }
+
+
+
       };
 
     
