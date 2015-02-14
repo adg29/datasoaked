@@ -159,7 +159,7 @@ function hashtag_process(tag, update, process_callback){
           // Asynchronously ask the Instagram API for new media for a given
           // tag.
           // http.get(options, function(e,res,response){
-          http.delete(options, function(e,res,response){
+          http.del(options, function(e,res,response){
             // debug('insta http get i \n' +  util.inspect(i,false,null) );
             debug("API " + res.headers['x-ratelimit-remaining'] + " remaining - on /callbacks/instagram/tag/" + tag);
             var data = response;
