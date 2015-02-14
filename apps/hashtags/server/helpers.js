@@ -160,7 +160,7 @@ function hashtag_process(tag, update, process_callback){
           // tag.
           // http.get(options, function(e,res,response){
           http.del(options, function(e,res,response){
-            // debug('insta http get i \n' +  util.inspect(i,false,null) );
+            debug('insta http del \n' +  util.inspect(response,false,null) );
             debug("API " + res.headers['x-ratelimit-remaining'] + " remaining - on /callbacks/instagram/tag/" + tag);
             var data = response;
 
@@ -207,7 +207,8 @@ function hashtag_process(tag, update, process_callback){
         });
       }
   }, function(err, results) {
-      adebug('async results')
+      adebug('async resultsss')
+      // console.log( util.inspect(results,false,null) );
       if(!(results.instagram instanceof Error) && ! (results.twitter instanceof Error) ){
         adebug('both')
         if(update=="manual") process_callback(results.twitter.concat(results.instagram));
