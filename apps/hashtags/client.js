@@ -26,6 +26,7 @@ var _ = require('underscore')
     , listTemplate = function() {
       return require('./templates/list.jade').apply(null, arguments)
     }
+    , moment = require('moment')
     , view = null;
 
 Backbone.$ = $;
@@ -129,6 +130,27 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
       this.wrapper.isotope( 'remove', $extraElems)
         .isotope('layout'); 
+
+
+      var self = this;
+      $(newMedia).each(function(index, media){
+        var caption = (media.caption==null? "": media.caption.text) + " via " + media.user.username;
+        var figdesc = (media.caption!=null && media.tags.length < 7 ?  media.tags.join(' ') + ' <br/><small> ' + media.caption.text + ' </small> ' : media.tags.join(' '));
+        var figlink = media.link;
+        if( /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ) {
+          figlink = "instagram://media?id="+media.id;
+        }
+        var figtime = '<a target="_blank" href="'+figlink+'" title="'+caption+'">'+moment.unix(parseInt(media.created_time)).fromNoww()+'</a>';
+        var figcaption = '<figcaption class="item-meta"><h3>'+figdesc+'</h3><span>'+media.user.username+'</span><div><a target="_blank" href="'+figlink+'" title="'+caption+'">Take a Look</a></div>'
+        var figcaption_time = '<figcaption class="item-time"><h5>'+figtime+'</h5></figcaption>'
+
+        var fig = '<figure><div><img data-uid="'+media.id+'" src="'+media.images.low_resolution.url+'" alt="'+caption+'" data-adaptive-background="1"/></div>'+figcaption_time+figcaption+'</figure>';
+        var $newItems = $('<div class="element" data-created="'+media.created_time+'" data-uid="'+media.id+'">'+fig+'</div>');
+        self.wrapper.prepend($newItems).isotope('prepended',$newItems );
+        self.wrapper.isotope('updateSortData').isotope();
+      });
+
+
 
     }
 
