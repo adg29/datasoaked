@@ -104,28 +104,33 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
         var newMedia = _.reject(d.media,function(m){
           return _.contains($('.element[data-uid]').map(function(){ return $(this).data('uid')}).get(),m.id);
         });
-      }
 
       v.debug('onNewMedia');
-      v.debug(newMedia);
+      v.debug(newMedia.length);
 
       var flat_tags;
       flat_tags = _.reduceRight(newMedia, function(a, b) { 
         return a.concat(b.tags); 
       }, []) 
 
-      console.log(flat_tags);
+      // console.log(flat_tags);
 
       var $extraElems = this.wrapper.isotope('getItemElements')
+      console.log("all ", $extraElems.length);
       $extraElems = $extraElems.sort(function(a, b) {
         return $(a).data('created') - $(b).data('created');
       })
       $extraElems = $extraElems.slice(0,-24+newMedia.length);
 
+
+      console.log("extra ", $extraElems.length);
+
       var d = new Date();
 
       this.wrapper.isotope( 'remove', $extraElems)
         .isotope('layout'); 
+
+    }
 
 
   }
@@ -143,9 +148,8 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
       // this.createToken(src,this.sceneData[src]);
       this.onNewMedia(d);
     }
-    v.debug('d')
-    v.debug(d)
-    v.debug('socket_parsed')
+    // v.debug('socket_parsed')
+    // v.debug(d)
   }
 
   , socket_error: function(e){
@@ -175,7 +179,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
   , isotope_setup: function(){
       $.bridget('isotope', Isotope);
-      this.wrapper = $('#wrapper', {
+      this.wrapper = $('#wrapper').isotope({
         // options
         sortAscending: false,
         getSortData: {
@@ -258,7 +262,7 @@ module.exports.init = function() {
     var data;
     try{
       data = $.parseJSON(update);
-      v.debug('incoming socket message')
+      // v.debug('incoming socket message')
       view.trigger('socket:parsed',data);
     }catch(e){
       view.trigger('socket:error',update);
