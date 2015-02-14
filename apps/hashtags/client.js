@@ -11,15 +11,17 @@
 
 var _ = require('underscore')
     , $ = require('jquery')
-    , sd = require('sharify').data
     , v = require('./templates/helpers')
+    , sd = require('sharify').data
     , io = require('socket.io-browserify')
+    , jqb = require('jquery-bridget')
     , clientNS = '/tag/'+sd.hashtag
     , socket = io.connect(window.location.origin+clientNS,  {
        query: 'ns='+clientNS,
        resource: "socket.io"
     })
     , Backbone = require('backbone')
+    , Isotope = require('isotope-layout')
     , Hashtags = require('../../collections/hashtag_items.js')
     , listTemplate = function() {
       return require('./templates/list.jade').apply(null, arguments)
@@ -83,7 +85,9 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
     // this.scene = this.$("#demo").vs(this.sceneSetting).data('visualSedimentation')
 
-    this.render_viz();
+    this.isotope_setup();
+
+    // this.render_viz();
 
     this.on('socket:parsed', this.socket_parsed, this);
     this.on('socket:error', this.socket_error, this);
@@ -104,6 +108,26 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
       v.debug('onNewMedia');
       v.debug(newMedia);
+
+      var flat_tags;
+      flat_tags = _.reduceRight(newMedia, function(a, b) { 
+        return a.concat(b.tags); 
+      }, []) 
+
+      console.log(flat_tags);
+
+      var $extraElems = this.wrapper.isotope('getItemElements')
+      $extraElems = $extraElems.sort(function(a, b) {
+        return $(a).data('created') - $(b).data('created');
+      })
+      $extraElems = $extraElems.slice(0,-24+newMedia.length);
+
+      var d = new Date();
+
+      this.wrapper.isotope( 'remove', $extraElems)
+        .isotope('layout'); 
+
+
   }
 
   , socket_parsed: function(d){
@@ -115,8 +139,6 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
       // this.createToken(src,this.sceneData[src]);
     }else{
       src = "instagram";
-      console.log('insta');
-      console.log(d);
       //incoming instagram data contains the last twenty media items
       // this.createToken(src,this.sceneData[src]);
       this.onNewMedia(d);
@@ -151,6 +173,26 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
       this.scene.addToken(token);
   }
 
+  , isotope_setup: function(){
+      $.bridget('isotope', Isotope);
+      this.wrapper = $('#wrapper', {
+        // options
+        sortAscending: false,
+        getSortData: {
+            date: function (el) {
+                return new Date(parseInt($(el).data('created'))*1000);
+            }
+        },
+        sortBy: 'date',
+        itemSelector : '.element',
+        masonry: {
+          columnWidth: 4,//'.grid-sizer'  ,
+          isFitWidth: true
+        }
+      });
+
+  }
+
   , render_viz: function(){
 
     // Define data and legend 
@@ -163,23 +205,25 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
     // start the clock 
     var self = this;
-    // var clock = window.setInterval(
-    //               function (){
-    //                time = new Date()
-    //                previousYear = new Date(2010,12,0,06,0,0,00)
-    //                diffPreviousYear = time.getTime()-previousYear.getTime()
-    //                secondsToday = (time.getHours()*60*60) + (time.getMinutes()*60) + time.getSeconds()
-    //                milliSecondsToday= (time.getHours()*60*60*1000) + (time.getMinutes()*60*1000) + time.getSeconds()*1000+time.getMilliseconds() 
+    /*
+    var clock = window.setInterval(
+                  function (){
+                   time = new Date()
+                   previousYear = new Date(2010,12,0,06,0,0,00)
+                   diffPreviousYear = time.getTime()-previousYear.getTime()
+                   secondsToday = (time.getHours()*60*60) + (time.getMinutes()*60) + time.getSeconds()
+                   milliSecondsToday= (time.getHours()*60*60*1000) + (time.getMinutes()*60*1000) + time.getSeconds()*1000+time.getMilliseconds() 
                   
-    //               var srcs = ['twitter'];
-    //               for (var s in srcs) {
-    //                 var src = srcs[s];
-    //                 self.sceneData[src].now = Math.round(milliSecondsToday*self.sceneData[src].value/1000)
-    //                 if(self.sceneData[src].now!=self.sceneData[src].old && _.random(2)==1) self.createToken(src,self.sceneData[src])
-    //                 self.sceneData[src].old = self.sceneData[src].now
-    //               };
-    //              }
-    //              , 1000); 
+                  var srcs = ['twitter'];
+                  for (var s in srcs) {
+                    var src = srcs[s];
+                    self.sceneData[src].now = Math.round(milliSecondsToday*self.sceneData[src].value/1000)
+                    if(self.sceneData[src].now!=self.sceneData[src].old && _.random(2)==1) self.createToken(src,self.sceneData[src])
+                    self.sceneData[src].old = self.sceneData[src].now
+                  };
+                 }
+                 , 1000); 
+    */
 
     // add legends 
     var labeling =function(setting,container){
