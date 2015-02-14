@@ -23,18 +23,20 @@
     "nodetime": "0.8.15"
   },
   "devDependencies": {
-    "jquery": "*",
-    "browserify": "4.2.0",
-    "stylus": "*",
-    "jadeify": "2.7.0",
-    "browserify-dev-middleware": "*",
-    "should": "*",
-    "mocha": "*",
-    "sinon": "*",
     "benv": "*",
-    "zombie": "*",
+    "browserify": "4.2.0",
+    "browserify-dev-middleware": "*",
     "html5": "*",
+    "isotope-layout": "^2.1.0",
+    "jadeify": "2.7.0",
+    "jquery": "*",
+    "jquery-bridget": "^1.1.0",
+    "mocha": "*",
+    "should": "*",
+    "sinon": "*",
     "sqwish": "*",
-    "uglify-js": "*"
+    "stylus": "*",
+    "uglify-js": "*",
+    "zombie": "*"
   }
 }
