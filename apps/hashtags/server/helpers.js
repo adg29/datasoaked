@@ -147,7 +147,7 @@ function hashtag_process(tag, update, process_callback){
 
           // alias sub_delete='curl -X DELETE  "https://api.instagram.com/v1/subscriptions?object=all&client_id=$IG_CLIENT_ID&client_secret=$IG_CLIENT_SECRET"'
 
-          var queryString = "?client_id="+ sd.IG_CLIENT_ID "&client_secret="+ sd.IG_CLIENT_SECRET + "&object=all";
+          var queryString = "?client_id="+ sd.IG_CLIENT_ID + "&client_secret="+ sd.IG_CLIENT_SECRET + "&object=all";
           var options = {
             url: sd.IG_API_URL + '/subscriptions' + queryString,
             // url: sd.IG_API_URL + path + queryString,
@@ -163,7 +163,7 @@ function hashtag_process(tag, update, process_callback){
             // debug('insta http get i \n' +  util.inspect(i,false,null) );
             debug("API " + res.headers['x-ratelimit-remaining'] + " remaining - on /callbacks/instagram/tag/" + tag);
             var data = response;
-            
+
             try {
               var parsedResponse = JSON.parse(data);
             } catch (parse_exception) {
