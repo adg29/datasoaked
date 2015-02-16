@@ -103,29 +103,26 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
   , onNewMedia: function(d){
       if(d.channelName==sd.hashtag){
+        // #TODO ensure newMedia has no #ISSUE in filtering logic
         var newMedia = _.reject(d.media,function(m){
           return _.contains($('.element[data-uid]').map(function(){ return $(this).data('uid')}).get(),m.id);
         });
-
-      v.debug('onNewMedia');
-      v.debug(newMedia.length);
 
       var flat_tags;
       flat_tags = _.reduceRight(newMedia, function(a, b) { 
         return a.concat(b.tags); 
       }, []) 
 
-      // console.log(flat_tags);
+      v.debug(flat_tags);
 
       var $extraElems = this.wrapper.isotope('getItemElements')
-      console.log("all ", $extraElems.length);
       $extraElems = $extraElems.sort(function(a, b) {
         return $(a).data('created') - $(b).data('created');
       })
       $extraElems = $extraElems.slice(0,-24+newMedia.length);
 
 
-      console.log("extra ", $extraElems.length);
+      console.log("onNewMedia", d.channelName,$extraElems.length);
 
       var d = new Date();
 
@@ -281,13 +278,12 @@ module.exports.init = function() {
     collection: new Hashtags(null, { hashtag: sd.hashtag })
   });
 
-  socket.on('message', function(update){ 
-    var data;
+  socket.on('message', function(data){ 
     try{
-      data = $.parseJSON(update);
-      // v.debug('incoming socket message')
+      v.debug('SOCKET update')
       view.trigger('socket:parsed',data);
     }catch(e){
+      v.debug('SOCKET ERROR update')
       view.trigger('socket:error',update);
       v.debug(e);
     }
