@@ -57,29 +57,49 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
         // the data from different apis will be structured differently
         // account for this in the json parse message data
         if(channel_split[1]=="twitter"){
-          helpers.debug('twitter pmessage', channelName);
+          helpers.debug('PUBSUB twitter pmessage', channelName);
           data = JSON.parse(message).statuses;
         }else{
-          helpers.debug('insta pmessage', channelName);
+          helpers.debug('PUBSUB insta pmessage', channelName);
           data = JSON.parse(message).data;
         }
 
-        // Channel name is really just a 'humanized' version of a slug
-        // san-francisco turns into san francisco. Nothing fancy, just
-        // works.
+        // Channel name is really just a 'humanized' version of a slug san-francisco turns into san francisco. Nothing fancy, just works.
         var channelName = channel_split[2].replace(/-/g, ' ');
-        helpers.debug(channelName);
       } catch (e) {
           helpers.debug('catch channel parse');
           helpers.debug(e);
           return;
       }
 
+      //PUBSUB
+      // can do this directly in async process
+      // should not send a message for each piece of data
+      var pubsub_update = {
+        'type': 'newMedia',
+        'media': data,
+        'channelSrc': channel_split[1],
+        'channelName': channelName
+      };
 
+
+      try{
+        var ioNS = '/tag/'+channelName;
+        helpers.debug('SOCKETIO EMIT ' + channelName);
+        io.of(ioNS).emit('message',pubsub_update);
+      }catch (e) {
+        helpers.debug('SOCKETIO ERROR emit');
+        // helpers.debug(update);
+        helpers.debug(e);
+      }
+
+
+
+      /* REDIS helper method for a sorted record of hashtag items*/
       var mediaZadd = function(channelName , channel_split, media, media_weight, data){
         redisClient.zadd('media:'+channelName, media_weight, JSON.stringify(media),function(err,result){
           if(err){
-            helpers.debug('zadd');
+            helpers.debug('REDIS zadd ERROR ');
             redisErrorCallback(err);
           }
           redisClient.expire('media:'+channelName, 60,function(err,result){
@@ -89,43 +109,17 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
           });
         });
 
-        //pubsub update
-        // Send out whole update to the listeners
-        var update = {
-          'type': 'newMedia',
-          'media': data,
-          'channelSrc': channel_split[1],
-          'channelName': channelName
-        };
-
-
-        // for(sessionId in c.io_clients){
-        //   try{
-        //     helpers.debug('try socket clients send') 
-        //     helpers.debug(sessionId) 
-        //     var client = c.io_clients[sessionId];
-        //     client.send(JSON.stringify(update));
-        //   }catch (e) {
-        //     helpers.debug('catch socket clients send') 
-        //     helpers.debug(sessionId) 
-        //     helpers.debug(update) 
-        //     helpers.debug(e) 
-        //   }
-        // }
-
-
         /* 
           #TODO #ISSUE 
           too many cio_clients being created per tag 
-        */
         // console.log( util.inspect(c.io_clients),false,null );
         var channelClient = c.io_clients['/tag/'+channelName];
         if(typeof channelClient!='undefined' && Array.isArray(channelClient)){
           // helpers.debug( util.inspect(channelClient,false,null) );
-          helpers.debug('PROFILE # ' + channelName + ' clients ' + channelClient.length);
+          helpers.debug('DATASOAKED ' + channelName + ' clients ' + channelClient.length);
           for(i in channelClient){
             try{
-              helpers.debug('try socket clients send ' +  i + ' '  +channelName);
+              helpers.debug('SOCKET.IO client send ' +  i + ' '  +channelName);
               var client = channelClient[i];
               client.send(JSON.stringify(update));
             }catch (e) {
@@ -136,6 +130,7 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
             }
           }
         }
+        */
 
 
 

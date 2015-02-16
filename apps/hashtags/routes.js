@@ -59,32 +59,18 @@ exports.challenge_callback_instagram = function(req, res, next){
 };
 
 exports.subscription_callback_instagram = function(req, res, next){
-  helpers.debug("/callbacks/instagram/tag/" + req.params.tag);
-  // The POST callback for Instagram to call every time there's an update
-  // to one of our subscriptions.
+  helpers.debug(req.params.tag + " ****** /callbacks/instagram/tag/" + req.params.tag);
+  // The POST callback for Instagram to call every time there's an update to one of our subscriptions.
 
-  // Information regarding the global rate limits is included in the HTTP header on the response to each of your calls, which enables your app to determine its current status with respect to these rate limits. The following fields are provided in the header of each response and their values are related to the type of call that was made (authenticated or unauthenticated):
-  // X-Ratelimit-Remaining: the remaining number of calls available to your app within the 1-hour window
-  // X-Ratelimit-Limit: the total number of calls allowed within the 1-hour window
-  // helpers.debug("API " + req.headers['X-Ratelimit-Remaining'] + " remaining - on /callbacks/instagram/tag/" + req.params.tag);
-    
   var tag = req.params.tag;
-  helpers.debug('tag')
-  helpers.debug(tag)
-  // Go through and process each update. Note that every update doesn't
-  // include the updated data - we use the data in the update to query
-  // the  API to get the data we want.
-  helpers.debug('subscription_callback_instagram rawwww')
-  helpers.debug(req.rawBody);
+  // we use the data in the update to query the  API to get the data we want.
+  // [{"changed_aspect": "media", "object": "tag", "object_id": "nyfw", "time": 1424050888, "subscription_id": 16842889, "data": {}}]
   var updates = JSON.parse(req.rawBody);
   for(index in updates){
     var update = updates[index];
-    // helpers.debug('updateLoop')
-    // helpers.debug(update)
-    if(false){
-    }
-    else if(true||update['object'] == "tag"){
-      helpers.debug('subscription_callback_instagram tag process')
+    if(update['object'] == "tag"){
+      helpers.debug('DATASOAKED ROUTE subscription_callback_instagram')
+      //Expect hashtag_process to query twitter and instagram via async and publish messages indicating changes in media sets
       helpers.hashtag_process(tag, update);
     }
   }
