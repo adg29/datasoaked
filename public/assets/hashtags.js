@@ -109,6 +109,8 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
     // this.render_viz();
 
+    this.search_setup();
+
     this.on('socket:parsed', this.socket_parsed, this);
     this.on('socket:error', this.socket_error, this);
 
@@ -236,6 +238,55 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
         token.size = data.size
       }
       this.scene.addToken(token);
+  }
+
+  , search_setup: function(){
+
+      var morphSearch = document.getElementById( 'morphsearch' ),
+        input = morphSearch.querySelector( 'input.morphsearch-input' ),
+        ctrlClose = morphSearch.querySelector( 'span.morphsearch-close' ),
+        isOpen = isAnimating = false,
+        // show/hide search area
+        toggleSearch = function(evt) {
+          // return if open and the input gets focused
+          if( evt.type.toLowerCase() === 'focus' && isOpen ) return false;
+
+          var offsets = morphsearch.getBoundingClientRect();
+          if( isOpen ) {
+            $(morphSearch).removeClass( 'open' );
+
+            // trick to hide input text once the search overlay closes 
+            // todo: hardcoded times, should be done after transition ends
+            if( input.value !== '' ) {
+              setTimeout(function() {
+                $( morphSearch ).addClass( 'hideInput' );
+                setTimeout(function() {
+                 $( morphSearch ).removeClass( 'hideInput' );
+                  input.value = '';
+                }, 300 );
+              }, 500);
+            }
+            
+            input.blur();
+          }
+          else {
+            $( morphSearch ).addClass( 'open' );
+          }
+          isOpen = !isOpen;
+        };
+
+      // events
+      input.addEventListener( 'focus', toggleSearch );
+      ctrlClose.addEventListener( 'click', toggleSearch );
+      // esc key closes search overlay
+      // keyboard navigation events
+      document.addEventListener( 'keydown', function( ev ) {
+        var keyCode = ev.keyCode || ev.which;
+        if( keyCode === 27 && isOpen ) {
+          toggleSearch(ev);
+        }
+      } );
+
   }
 
   , isotope_setup: function(){
