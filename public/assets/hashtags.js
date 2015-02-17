@@ -113,7 +113,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
         return a.concat(b.tags); 
       }, []) 
 
-      v.debug(flat_tags);
+      // v.debug(flat_tags);
 
       var $extraElems = this.wrapper.isotope('getItemElements')
       $extraElems = $extraElems.sort(function(a, b) {
@@ -159,8 +159,8 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
     var src = "";
     if(d.channelSrc=="twitter"){
       src = "twitter";
-      console.log('twitter');
-      console.log(d);
+      // console.log('twitter');
+      // console.log(d);
       // this.createToken(src,this.sceneData[src]);
     }else{
       src = "instagram";
