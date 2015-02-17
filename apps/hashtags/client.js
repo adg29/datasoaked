@@ -77,8 +77,26 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
       }
   }
 
+  , events: {
+      "click a.updates-toggle": 'bindNewMediaToggle',
+      "keydown": 'keyControls'
+  }
+
+  , keyControls: function(e) {
+      var self = this;
+      switch(e.keyCode) {
+          case 32:
+              // spacebar pressed
+              console.log('spacebar');
+              e.preventDefault();
+              self.bindNewMediaToggle();
+              return false;
+              break;
+      }   
+  }
+
   , initialize: function() {
-    _.bindAll(this,'render_viz','scene_setup');
+    _.bindAll(this,'render_viz','scene_setup','keyControls','bindNewMediaToggle');
 
     this.collection.reset(sd.HASHTAGS);
 
@@ -100,8 +118,31 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
     this.$('#hashtag-items').html(listTemplate({ hashtags: this.collection.models }));
   }
 
+  , bindNewMediaToggle: function() { 
+      this.wrapper.isotope('updateSortData').isotope();
+
+      $('a.updates-toggle').toggleClass('hover');
+       
+      if($('.container').hasClass('paused')){
+        $('.container').css('background','#222').css('background-opacity',1)
+        $('.container').toggleClass('paused');
+      }else{
+        $('.container').toggleClass('paused');
+      }
+
+      this.newMediaToggle ? this.unbindNewMedia() : this.bindNewMedia();
+  }
+  , bindNewMedia: function() { 
+      // $(document).bind("newMedia", this.onNewMedia);
+      this.newMediaToggle = true;
+  }
+  , unbindNewMedia: function() { 
+      // $(document).unbind("newMedia");
+      this.newMediaToggle = false;
+  }
+
   , onNewMedia: function(d){
-      if(d.channelName==sd.hashtag){
+      if(d.channelName==sd.hashtag && this.newMediaToggle){
         // #TODO ensure newMedia has no #ISSUE in filtering logic
         var newMedia = _.reject(d.media,function(m){
           return _.contains($('.element[data-uid]').map(function(){ return $(this).data('uid')}).get(),m.id);
@@ -262,6 +303,10 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
   }
 
   , scene_setup : function(){
+    window.addEventListener("keydown", this.keyControls, false);
+
+    this.newMediaToggle = true;
+
     for (src in this.sceneData) {
       this.sceneSetting.data.model.push({label:this.sceneData[src].label})
       var source_value_init = this.collection.count_source[src];
@@ -273,7 +318,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
 module.exports.init = function() {
   view = new HashtagsView({
-    el: $('body'),
+    el: "document",
     collection: new Hashtags(null, { hashtag: sd.hashtag })
   });
 
@@ -287,6 +332,5 @@ module.exports.init = function() {
       v.debug(e);
     }
   });
-
 
 };
