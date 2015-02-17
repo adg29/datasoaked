@@ -151,6 +151,7 @@ function hashtag_process(tag, update, process_callback){
           };
 
           // Asynchronously ask the Instagram API for new media for a given tag.
+          // #TODO should not be making API calls if no one is expecting an update. a potential ratelimit #ISSUE
           http.get(options, function(e,res,response){
             if(e){
                 debug('ASYNC INSTA ERROR',e)
