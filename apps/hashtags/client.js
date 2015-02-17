@@ -286,6 +286,12 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
         }
       } );
 
+
+      morphSearch.querySelector( 'button[type="submit"]' )
+        .addEventListener( 'click', function(ev) { 
+            window.location('/tag/'+$('.morphsearch-input').val());
+        } );
+
   }
 
   , isotope_setup: function(){
