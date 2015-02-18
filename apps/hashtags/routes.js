@@ -33,10 +33,17 @@ exports.index = function(req, res, next) {
     res.locals.sd.hashtag = sd.hashtag;
     // res.locals.sd.HASHTAGS = hashtags.toJSON();
     helpers.debug('render index')
-    res.render('index', { 
-      hashtag: hashtags.hashtag
-      , hashtags: hashtags.models 
-    });
+    if (req.params.format) { 
+      res.json({
+          hashtag: hashtags.hashtag
+        , hashtags: hashtags.models 
+        });
+    }else{
+      res.render('index', { 
+        hashtag: hashtags.hashtag
+        , hashtags: hashtags.models 
+      });
+    }
   });
 
   // hashtags.fetch({
