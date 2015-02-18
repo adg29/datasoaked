@@ -289,7 +289,8 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
       morphSearch.querySelector( 'button[type="submit"]' )
         .addEventListener( 'click', function(ev) { 
-            window.location('/tag/'+$('.morphsearch-input').val());
+            ev.preventDefault();
+            window.location.assign( '/tag/'+$('.morphsearch-input').val() );
         } );
 
   }
