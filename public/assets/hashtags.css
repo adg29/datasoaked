@@ -110,6 +110,10 @@ body {
   margin: 0 auto;
   clear: both;
   width: 90%;
+  -webkit-transition-property: all;
+  transition-property: all;
+  -webkit-transition: all 0.5s cubic-bezier(0.7, 0, 0.3, 1);
+  transition: all 0.5s cubic-bezier(0.7, 0, 0.3, 1);
 }
 .container {
   -webkit-transition: background 0.3s;
@@ -1379,7 +1383,12 @@ code .c1 {
   transition-timing-function: cubic-bezier(0.7, 0, 0.3, 1);
 }
 .morphsearch label {
-  display: none;
+  display: inline-block;
+  opacity: 0;
+  -webkit-transition-property: all;
+  transition-property: all;
+  -webkit-transition-duration: 1s;
+  transition-duration: 1s;
 }
 .morphsearch.open {
   width: 100%;
@@ -1394,9 +1403,9 @@ code .c1 {
   transform: translate3d(0, 3em, 0);
 }
 .morphsearch.open label {
-  display: inline-block;
   color: #ec5a62;
   font-size: 7em;
+  opacity: 1;
 }
 .morphsearch.open .morphsearch-input {
   font-size: 7em;
@@ -1609,6 +1618,7 @@ input[type="search"] {
   border-radius: 5px;
   background: rgba(118,117,128,0.05);
   color: rgba(145,145,145,0.7);
+  text-transform: none;
 }
 #morphsearch .menutag:before,
 #morphsearch .menuperson:before,

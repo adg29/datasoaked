@@ -15,7 +15,12 @@
   -webkit-transition-timing-function cubic-bezier(0.7,0,0.3,1)
   transition-timing-function cubic-bezier(0.7,0,0.3,1)
   label
-    display none
+    display inline-block
+    opacity 0
+    -webkit-transition-property all 
+    transition-property all 
+    -webkit-transition-duration 1.0s
+    transition-duration 1.0s
   &.open
     width 100%
     min-height 100%
@@ -27,9 +32,9 @@
       -webkit-transform translate3d(0,3em,0)
       transform translate3d(0,3em,0)
     label 
-      display inline-block
       color rgba(236,90,98,1)
       font-size 7em
+      opacity 1
     .morphsearch-input
       font-size 7em
     .morphsearch-submit
@@ -227,6 +232,7 @@ input[type="search"]
     border-radius 5px
     background rgba(118,117,128,0.05)
     color rgba(145,145,145,0.7)
+    text-transform none
     &:before,
     img
       width 100%

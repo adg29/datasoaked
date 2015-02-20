@@ -106,10 +106,6 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
   , initialize: function() {
     _.bindAll(this,'render','render_viz','scene_setup','keyControls','bindNewMediaToggle');
 
-    console.log('reset');
-    console.log(sd.HASHTAGS);
-    // this.collection.reset(sd.HASHTAGS);
-
     this.scene_setup();
 
     // this.scene = this.$("#demo").vs(this.sceneSetting).data('visualSedimentation')
@@ -400,31 +396,18 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
   }
 
   , scene_setup : function(){
-    window.addEventListener("keydown", this.keyControls, false);
+      window.addEventListener("keydown", this.keyControls, false);
 
-    this.newMediaToggle = true;
+      this.sceneSetting.data.related.hashtags = _.union(this.sceneSetting.data.related.hashtags,sd.related.hashtags);
+      this.sceneSetting.data.related.people = _.union(this.sceneSetting.data.related.people,sd.related.people);
 
-    var flat_tags;
-    flat_tags = _.reduceRight(sd.HASHTAGS, function(a, b) { 
-      return a.concat(b.tags); 
-    }, []) 
+      this.newMediaToggle = true;
 
-    var flat_people;
-    flat_people = _.reduceRight(sd.HASHTAGS, function(a, b) { 
-      return a.concat(b.user); 
-    }, []) 
-
-    v.debug(flat_people);
-
-    this.sceneSetting.data.related.hashtags = _.union(this.sceneSetting.data.related.hashtags,flat_tags);
-    this.sceneSetting.data.related.people = _.union(this.sceneSetting.data.related.people,flat_people);
-
-
-    for (src in this.sceneData) {
-      this.sceneSetting.data.model.push({label:this.sceneData[src].label})
-      var source_value_init = this.collection.count_source[src];
-      this.sceneSetting.data.strata.push([{initValue: parseInt(source_value_init), label: this.sceneData[src].label + " Strata "}])
-    };
+      for (src in this.sceneData) {
+        this.sceneSetting.data.model.push({label:this.sceneData[src].label})
+        var source_value_init = this.collection.count_source[src];
+        this.sceneSetting.data.strata.push([{initValue: parseInt(source_value_init), label: this.sceneData[src].label + " Strata "}])
+      };
   }
 
 });

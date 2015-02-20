@@ -31,7 +31,25 @@ exports.index = function(req, res, next) {
     res.locals.moment = helpersv.moment; // include moment lib
     res.locals._ = helpersv._; // include underscore lib
     res.locals.sd.hashtag = sd.hashtag;
-    res.locals.sd.HASHTAGS = hashtags.toJSON();
+
+   var hashtagsJSON = hashtags.toJSON();
+
+    var flat_tags;
+    flat_tags = helpersv._.reduceRight(hashtagsJSON, function(a, b) {
+      return a.concat(b.tags); 
+    }, []);
+
+    var flat_people;
+    flat_people = helpersv._.reduceRight(hashtagsJSON, function(a, b) {
+      return a.concat(b.user);
+    }, []);
+
+
+    res.locals.sd.related = {};
+    res.locals.sd.related.hashtags = flat_tags;
+    res.locals.sd.related.people = flat_people;
+
+
     helpers.debug('render index')
     res.render('index', { 
       hashtag: hashtags.hashtag
