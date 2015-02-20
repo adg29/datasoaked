@@ -38,5 +38,8 @@
     "stylus": "*",
     "uglify-js": "*",
     "zombie": "*"
+  },
+  "engines": {
+    "node": "0.10.35"
   }
 }
