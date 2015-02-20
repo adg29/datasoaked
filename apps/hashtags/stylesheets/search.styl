@@ -14,6 +14,8 @@
   transition-duration 0.5s
   -webkit-transition-timing-function cubic-bezier(0.7,0,0.3,1)
   transition-timing-function cubic-bezier(0.7,0,0.3,1)
+  label
+    display none
   &.open
     width 100%
     min-height 100%
@@ -24,6 +26,10 @@
       height 160px
       -webkit-transform translate3d(0,3em,0)
       transform translate3d(0,3em,0)
+    label 
+      display inline-block
+      color rgba(236,90,98,1)
+      font-size 7em
     .morphsearch-input
       font-size 7em
     .morphsearch-submit
@@ -87,7 +93,7 @@
   transition-timing-function cubic-bezier(0.7,0,0.3,1)
 
 .morphsearch-input
-  width 100%
+  width 94%
   height 100%
   padding 0 10% 0 10px
   font-weight 700
@@ -185,6 +191,9 @@ input[type="search"]
   position absolute
   pointer-events none
   opacity 0
+  .items
+    li 
+      list-style-type none
 
 .dummy-column
   width 30%
@@ -208,67 +217,83 @@ input[type="search"]
 .round
   border-radius 50%
 
-.dummy-media-object
-  padding 0.75em
-  display block
-  margin 0.3em 0
-  cursor pointer
-  border-radius 5px
-  background rgba(118,117,128,0.05)
-  img
-    display inline-block
-    width 50px
-    margin 0 10px 0 0
-    vertical-align middle
-  h3
-    vertical-align middle
-    font-size 0.85em
-    display inline-block
-    font-weight 700
-    margin 0 0 0 0
-    width calc(100% - 70px)
+#morphsearch
+  .menutag,
+  .menuperson
+    padding 0.75em
+    display block
+    margin 0.3em 0
+    cursor pointer
+    border-radius 5px
+    background rgba(118,117,128,0.05)
     color rgba(145,145,145,0.7)
-  &:hover
-    h3
+    &:before,
+    img
+      width 100%
+      margin 0 10px 0 0
+      vertical-align middle
       color rgba(236,90,98,1)
+      font-size 1em
+    h3
+      vertical-align middle
+      font-size 0.85em
+      display inline-block
+      font-weight 700
+      margin 0 0 0 0
+      width calc(100% - 70px)
+      color rgba(145,145,145,0.7)
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
 
-.dummy-media-object:hover,
-.dummy-media-object:focus
-  background rgba(118,117,128,0.1)
+    &:hover
+      h3
+        color rgba(236,90,98,1)
 
-.overlay
-  position fixed
-  top 0
-  left 0
-  width 100%
-  height 100%
-  background rgba(0,0,0,0.5)
-  opacity 0
-  pointer-events none
-  -webkit-transition opacity 0.5s
-  transition opacity 0.5s
-  -webkit-transition-timing-function cubic-bezier(0.7,0,0.3,1)
-  transition-timing-function cubic-bezier(0.7,0,0.3,1)
+  .menuperson
+    img
+      display inline-block
+      width 50px
+  .menutag:before
+      content '#'
+      display inline
+  .menutag:hover,
+  .menutag:focus
+    background rgba(118,117,128,0.1)
 
-@media screen and (max-width: 53.125em)
-  .morphsearch-input
-    padding 0 25% 0 10px
+  .overlay
+    position fixed
+    top 0
+    left 0
+    width 100%
+    height 100%
+    background rgba(0,0,0,0.5)
+    opacity 0
+    pointer-events none
+    -webkit-transition opacity 0.5s
+    transition opacity 0.5s
+    -webkit-transition-timing-function cubic-bezier(0.7,0,0.3,1)
+    transition-timing-function cubic-bezier(0.7,0,0.3,1)
 
-  .morphsearch
-    &.open
-      .morphsearch-input
-        font-size 2em
-      .morphsearch-submit
-        -webkit-transform translate3d(0,-50%,0) scale3d(0.5,0.5,1)
-        transform translate3d(0,-50%,0) scale3d(0.5,0.5,1)
+  @media screen and (max-width: 53.125em)
+    .morphsearch-input
+      padding 0 25% 0 10px
+
+    .morphsearch
+      &.open
+        .morphsearch-input
+          font-size 2em
+        .morphsearch-submit
+          -webkit-transform translate3d(0,-50%,0) scale3d(0.5,0.5,1)
+          transform translate3d(0,-50%,0) scale3d(0.5,0.5,1)
 
 
 
-@media screen and (max-width: 60.625em)
-  .morphsearch
-    width 80%
-    top 10%
-    right 10%
+  @media screen and (max-width: 60.625em)
+    .morphsearch
+      width 80%
+      top 10%
+      right 10%
 
 
 

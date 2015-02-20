@@ -1378,6 +1378,9 @@ code .c1 {
   -webkit-transition-timing-function: cubic-bezier(0.7, 0, 0.3, 1);
   transition-timing-function: cubic-bezier(0.7, 0, 0.3, 1);
 }
+.morphsearch label {
+  display: none;
+}
 .morphsearch.open {
   width: 100%;
   min-height: 100%;
@@ -1389,6 +1392,11 @@ code .c1 {
   height: 160px;
   -webkit-transform: translate3d(0, 3em, 0);
   transform: translate3d(0, 3em, 0);
+}
+.morphsearch.open label {
+  display: inline-block;
+  color: #ec5a62;
+  font-size: 7em;
 }
 .morphsearch.open .morphsearch-input {
   font-size: 7em;
@@ -1461,7 +1469,7 @@ code .c1 {
   transition-timing-function: cubic-bezier(0.7, 0, 0.3, 1);
 }
 .morphsearch-input {
-  width: 100%;
+  width: 94%;
   height: 100%;
   padding: 0 10% 0 10px;
   font-weight: 700;
@@ -1565,6 +1573,9 @@ input[type="search"] {
   pointer-events: none;
   opacity: 0;
 }
+.morphsearch-content .items li {
+  list-style-type: none;
+}
 .dummy-column {
   width: 30%;
   padding: 0 0 6em;
@@ -1589,21 +1600,28 @@ input[type="search"] {
 .round {
   border-radius: 50%;
 }
-.dummy-media-object {
+#morphsearch .menutag,
+#morphsearch .menuperson {
   padding: 0.75em;
   display: block;
   margin: 0.3em 0;
   cursor: pointer;
   border-radius: 5px;
   background: rgba(118,117,128,0.05);
+  color: rgba(145,145,145,0.7);
 }
-.dummy-media-object img {
-  display: inline-block;
-  width: 50px;
+#morphsearch .menutag:before,
+#morphsearch .menuperson:before,
+#morphsearch .menutag img,
+#morphsearch .menuperson img {
+  width: 100%;
   margin: 0 10px 0 0;
   vertical-align: middle;
+  color: #ec5a62;
+  font-size: 1em;
 }
-.dummy-media-object h3 {
+#morphsearch .menutag h3,
+#morphsearch .menuperson h3 {
   vertical-align: middle;
   font-size: 0.85em;
   display: inline-block;
@@ -1611,15 +1629,27 @@ input[type="search"] {
   margin: 0 0 0 0;
   width: calc(100% - 70px);
   color: rgba(145,145,145,0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.dummy-media-object:hover h3 {
+#morphsearch .menutag:hover h3,
+#morphsearch .menuperson:hover h3 {
   color: #ec5a62;
 }
-.dummy-media-object:hover,
-.dummy-media-object:focus {
+#morphsearch .menuperson img {
+  display: inline-block;
+  width: 50px;
+}
+#morphsearch .menutag:before {
+  content: '#';
+  display: inline;
+}
+#morphsearch .menutag:hover,
+#morphsearch .menutag:focus {
   background: rgba(118,117,128,0.1);
 }
-.overlay {
+#morphsearch .overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -1634,19 +1664,19 @@ input[type="search"] {
   transition-timing-function: cubic-bezier(0.7, 0, 0.3, 1);
 }
 @media screen and (max-width: 53.125em) {
-  .morphsearch-input {
+  #morphsearch .morphsearch-input {
     padding: 0 25% 0 10px;
   }
-  .morphsearch.open .morphsearch-input {
+  #morphsearch .morphsearch.open .morphsearch-input {
     font-size: 2em;
   }
-  .morphsearch.open .morphsearch-submit {
+  #morphsearch .morphsearch.open .morphsearch-submit {
     -webkit-transform: translate3d(0, -50%, 0) scale3d(0.5, 0.5, 1);
     transform: translate3d(0, -50%, 0) scale3d(0.5, 0.5, 1);
   }
 }
 @media screen and (max-width: 60.625em) {
-  .morphsearch {
+  #morphsearch .morphsearch {
     width: 80%;
     top: 10%;
     right: 10%;
