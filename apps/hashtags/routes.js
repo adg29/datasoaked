@@ -31,7 +31,7 @@ exports.index = function(req, res, next) {
     res.locals.moment = helpersv.moment; // include moment lib
     res.locals._ = helpersv._; // include underscore lib
     res.locals.sd.hashtag = sd.hashtag;
-    // res.locals.sd.HASHTAGS = hashtags.toJSON();
+    res.locals.sd.HASHTAGS = hashtags.toJSON();
     helpers.debug('render index')
     res.render('index', { 
       hashtag: hashtags.hashtag

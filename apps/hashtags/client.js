@@ -104,9 +104,11 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
   }
 
   , initialize: function() {
-    _.bindAll(this,'render_viz','scene_setup','keyControls','bindNewMediaToggle');
+    _.bindAll(this,'render','render_viz','scene_setup','keyControls','bindNewMediaToggle');
 
-    this.collection.reset(sd.HASHTAGS);
+    console.log('reset');
+    console.log(sd.HASHTAGS);
+    // this.collection.reset(sd.HASHTAGS);
 
     this.scene_setup();
 
@@ -121,12 +123,13 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
     this.on('socket:parsed', this.socket_parsed, this);
     this.on('socket:error', this.socket_error, this);
 
-    this.collection.on('sync', this.render, this);
+    this.collection.on('reset', this.render, this);
   }
 
-  , render: function() {
-    this.$('#hashtag-items').html(listTemplate({ hashtags: this.collection.models }));
-  }
+  // , render: function() {
+  //   console.log('actual render');
+  //   this.$('#hashtag-items').html(listTemplate({ hashtags: this.collection.models }));
+  // }
 
   , bindNewMediaToggle: function() { 
       this.wrapper.isotope('updateSortData').isotope();
@@ -400,6 +403,22 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
     window.addEventListener("keydown", this.keyControls, false);
 
     this.newMediaToggle = true;
+
+    var flat_tags;
+    flat_tags = _.reduceRight(sd.HASHTAGS, function(a, b) { 
+      return a.concat(b.tags); 
+    }, []) 
+
+    var flat_people;
+    flat_people = _.reduceRight(sd.HASHTAGS, function(a, b) { 
+      return a.concat(b.user); 
+    }, []) 
+
+    v.debug(flat_people);
+
+    this.sceneSetting.data.related.hashtags = _.union(this.sceneSetting.data.related.hashtags,flat_tags);
+    this.sceneSetting.data.related.people = _.union(this.sceneSetting.data.related.people,flat_people);
+
 
     for (src in this.sceneData) {
       this.sceneSetting.data.model.push({label:this.sceneData[src].label})
