@@ -57,7 +57,7 @@ exports.index = function(req, res, next) {
         , hashtags: hashtags.models 
         });
     }else{
-      res.render('index', { 
+      res.render('cody', { 
         hashtag: hashtags.hashtag
         , hashtags: hashtags.models 
       });

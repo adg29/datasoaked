@@ -1,0 +1,153 @@
+doctype html
+meta(charset="utf-8")
+html.csstransforms3d
+  head
+    meta(name="viewport",content="width=device-width, initial-scale=1.0")
+    title= '#'+sd.hashtag + ' Realtime Updates'
+    //- link( type='text/css', rel='stylesheet', href=('/assets/hashtags' + sd.CSS_EXT) )
+    link( type='text/css', rel='stylesheet', href=('/assets/cody' + sd.CSS_EXT) )
+  body
+    header.cd-header
+        h1 Content Filters
+    main.cd-main-content
+      .cd-tab-filter-wrapper
+        .cd-tab-filter
+          ul.cd-filters
+            li.placeholder
+              a(data-type='all', href='#0') All
+              // selected option on mobile
+            |                 
+            li.filter
+              a.selected(href='#0', data-type='all') All
+            |                 
+            li.filter(data-filter='.color-1')
+              a(href='#0', data-type='color-1') Color 1
+            |                 
+            li.filter(data-filter='.color-2')
+              a(href='#0', data-type='color-2') Color 2
+          // cd-filters
+        // cd-tab-filter
+      // cd-tab-filter-wrapper
+      section.cd-gallery
+        ul
+          li.mix.color-1.check1.radio2.option3
+            img(src='img/img-1.jpg', alt='Image 1')
+          |                 
+          li.mix.color-2.check2.radio2.option2
+            img(src='img/img-2.jpg', alt='Image 2')
+          |                     
+          li.mix.color-1.check3.radio3.option1
+            img(src='img/img-3.jpg', alt='Image 3')
+          |                         
+          li.mix.color-1.check3.radio2.option4
+            img(src='img/img-4.jpg', alt='Image 4')
+          |                             
+          li.mix.color-1.check1.radio3.option2
+            img(src='img/img-5.jpg', alt='Image 5')
+          |                                 
+          li.mix.color-2.check2.radio3.option3
+            img(src='img/img-6.jpg', alt='Image 6')
+          |                                     
+          li.mix.color-2.check2.radio2.option1
+            img(src='img/img-7.jpg', alt='Image 7')
+          |                                         
+          li.mix.color-1.check1.radio3.option4
+            img(src='img/img-8.jpg', alt='Image 8')
+          |                                             
+          li.mix.color-2.check1.radio2.option3
+            img(src='img/img-9.jpg', alt='Image 9')
+          |                                                 
+          li.mix.color-1.check3.radio2.option4
+            img(src='img/img-10.jpg', alt='Image 10')
+          |                                                     
+          li.mix.color-1.check3.radio3.option2
+            img(src='img/img-11.jpg', alt='Image 11')
+          |                                                         
+          li.mix.color-2.check1.radio3.option1
+            img(src='img/img-12.jpg', alt='Image 12')
+          |                                                             
+          li.gap
+          |                                                             
+          li.gap
+          |                                                             
+          li.gap
+        |                                                         
+        .cd-fail-message No results found
+      // cd-gallery
+      .cd-filter
+        form
+          .cd-filter-block
+            h4 Search
+            |                                                                 
+            .cd-filter-content
+              input(type='search', placeholder='Try color-1...')
+            // cd-filter-content
+          // cd-filter-block
+          .cd-filter-block
+            h4 Check boxes
+            |                                                                     
+            ul.cd-filter-content.cd-filters.list
+              li
+                input#checkbox1.filter(data-filter='.check1', type='checkbox')
+                |                                                                                 
+                label.checkbox-label(for='checkbox1') Option 1
+              |                                                                             
+              li
+                input#checkbox2.filter(data-filter='.check2', type='checkbox')
+                |                                                                                     
+                label.checkbox-label(for='checkbox2') Option 2
+              |                                                                                 
+              li
+                input#checkbox3.filter(data-filter='.check3', type='checkbox')
+                |                                                                                         
+                label.checkbox-label(for='checkbox3') Option 3
+            // cd-filter-content
+          // cd-filter-block
+          .cd-filter-block
+            h4 Select
+            |                                                                                 
+            .cd-filter-content
+              .cd-select.cd-filters
+                select#selectThis.filter(name='selectThis')
+                  option(value='') Choose an option
+                  |                                                                                             
+                  option(value='.option1') Option 1
+                  |                                                                                             
+                  option(value='.option2') Option 2
+                  |                                                                                             
+                  option(value='.option3') Option 3
+                  |                                                                                             
+                  option(value='.option4') Option 4
+              // cd-select
+            // cd-filter-content
+          // cd-filter-block
+          .cd-filter-block
+            h4 Radio buttons
+            |                                                                                 
+            ul.cd-filter-content.cd-filters.list
+              li
+                input#radio1.filter(data-filter='', type='radio', name='radioButton', checked='')
+                |                                                                                             
+                label.radio-label(for='radio1') All
+              |                                                                                         
+              li
+                input#radio2.filter(data-filter='.radio2', type='radio', name='radioButton')
+                |                                                                                                 
+                label.radio-label(for='radio2') Choice 2
+              |                                                                                             
+              li
+                input#radio3.filter(data-filter='.radio3', type='radio', name='radioButton')
+                |                                                                                                     
+                label.radio-label(for='radio3') Choice 3
+            // cd-filter-content
+          // cd-filter-block
+        |                                                                                     
+        a.cd-close(href='#0') Close
+      // cd-filter
+      a.cd-filter-trigger(href='#0') Filters
+    // cd-main-content
+
+
+!= sharify.script()
+script( src='/assets/hashtags' + sd.JS_EXT )
+script( src='/socket.io/socket.io.js', type="text/javascript")
