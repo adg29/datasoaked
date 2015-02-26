@@ -16,69 +16,34 @@ html.csstransforms3d
 
           #morphsearch.morphsearch
               form.morphsearch-form
+                  label #
                   input.morphsearch-input(type='search', placeholder='Search...')
                   button.morphsearch-submit(type='submit') Search
                 .morphsearch-content
-                  .dummy-column
+                  .dummy-column.related-people
                     h2 People
-                    a.dummy-media-object(href='http://twitter.com/SaraSoueidan')
-                      img.round(src='http://0.gravatar.com/avatar/81b58502541f9445253f30497e53c280?s=50&d=identicon&r=G', alt='Sara Soueidan')
-                      h3 Sara Soueidan
-                    a.dummy-media-object(href='http://twitter.com/rachsmithtweets')
-                      img.round(src='http://0.gravatar.com/avatar/48959f453dffdb6236f4b33eb8e9f4b7?s=50&d=identicon&r=G', alt='Rachel Smith')
-                      h3 Rachel Smith
-                    a.dummy-media-object(href='http://www.twitter.com/peterfinlan')
-                      img.round(src='http://0.gravatar.com/avatar/06458359cb9e370d7c15bf6329e5facb?s=50&d=identicon&r=G', alt='Peter Finlan')
-                      h3 Peter Finlan
-                    a.dummy-media-object(href='http://www.twitter.com/pcridesagain')
-                      img.round(src='http://1.gravatar.com/avatar/db7700c89ae12f7d98827642b30c879f?s=50&d=identicon&r=G', alt='Patrick Cox')
-                      h3 Patrick Cox
-                    a.dummy-media-object(href='https://twitter.com/twholman')
-                      img.round(src='http://0.gravatar.com/avatar/cb947f0ebdde8d0f973741b366a51ed6?s=50&d=identicon&r=G', alt='Tim Holman')
-                      h3 Tim Holman
-                    a.dummy-media-object(href='https://twitter.com/shaund0na')
-                      img.round(src='http://1.gravatar.com/avatar/9bc7250110c667cd35c0826059b81b75?s=50&d=identicon&r=G', alt='Shaun Dona')
-                      h3 Shaun Dona
+                    ul.items
+                  .dummy-column.related-tags
+                    h2 Related 
+                    ul.items
                   .dummy-column
-                    h2 Popular
-                    a.dummy-media-object(href='http://tympanus.net/codrops/2014/08/05/page-preloading-effect/')
-                      img(src='/img/thumbs/PagePreloadingEffect.png', alt='PagePreloadingEffect')
-                      h3 Page Preloading Effect
-                        a.dummy-media-object(href='http://tympanus.net/codrops/2014/05/28/arrow-navigation-styles/')
-                          img(src='/img/thumbs/ArrowNavigationStyles.png', alt='ArrowNavigationStyles')
-                          h3 Arrow Navigation Styles
-                        a.dummy-media-object(href='http://tympanus.net/codrops/2014/06/19/ideas-for-subtle-hover-effects/')
-                          img(src='/img/thumbs/HoverEffectsIdeasNew.png', alt='HoverEffectsIdeasNew')
-                          h3 Ideas for Subtle Hover Effects
-                        a.dummy-media-object(href='http://tympanus.net/codrops/2014/07/14/freebie-halcyon-days-one-page-website-template/')
-                          img(src='/img/thumbs/FreebieHalcyonDays.png', alt='FreebieHalcyonDays')
-                          h3 Halcyon Days Template
-                        a.dummy-media-object(href='http://tympanus.net/codrops/2014/05/22/inspiration-for-article-intro-effects/')
-                          img(src='/img/thumbs/ArticleIntroEffects.png', alt='ArticleIntroEffects')
-                          h3 Inspiration for Article Intro Effects
-                        a.dummy-media-object(href='http://tympanus.net/codrops/2014/06/26/draggable-dual-view-slideshow/')
-                          img(src='/img/thumbs/DraggableDualViewSlideshow.png', alt='DraggableDualViewSlideshow')
-                          h3 Draggable Dual-View Slideshow
-                  .dummy-column
-                    h2 Recent
-                    a.dummy-media-object(href='http://tympanus.net/codrops/2014/10/07/tooltip-styles-inspiration/')
-                      img(src='/img/thumbs/TooltipStylesInspiration.png', alt='TooltipStylesInspiration')
-                      h3 Tooltip Styles Inspiration
-                    a.dummy-media-object(href='http://tympanus.net/codrops/2014/09/23/animated-background-headers/')
-                      img(src='/img/thumbs/AnimatedHeaderBackgrounds.png', alt='AnimatedHeaderBackgrounds')
-                      h3 Animated Background Headers
-                    a.dummy-media-object(href='http://tympanus.net/codrops/2014/09/16/off-canvas-menu-effects/')
-                      img(src='/img/thumbs/OffCanvas.png', alt='OffCanvas')
-                      h3 Off-Canvas Menu Effects
-                    a.dummy-media-object(href='http://tympanus.net/codrops/2014/09/02/tab-styles-inspiration/')
-                      img(src='/img/thumbs/TabStyles.png', alt='TabStyles')
-                      h3 Tab Styles Inspiration
-                    a.dummy-media-object(href='http://tympanus.net/codrops/2014/08/19/making-svgs-responsive-with-css/')
-                      img(src='/img/thumbs/ResponsiveSVGs.png', alt='ResponsiveSVGs')
-                      h3 Make SVGs Responsive with CSS
-                    a.dummy-media-object(href='http://tympanus.net/codrops/2014/07/23/notification-styles-inspiration/')
-                      img(src='/img/thumbs/NotificationStyles.png', alt='NotificationStyles')
-                      h3 Notification Styles Inspiration
+                    h2 Upcoming 
+                    ul.items
+                      li
+                        a.menutag(href='/tag/oscars')
+                          h3 OSCARS 
+                      li
+                        a.menutag(href='/tag/nycbartseries')
+                          h3 NYCBArtSeries
+                      li
+                        a.menutag(href='/tag/museumweek')
+                          h3 MuseumWeek
+                      li
+                        a.menutag(href='/tag/smw15')
+                          h3 SMW15
+                      li
+                        a.menutag(href='/tag/sxsw')
+                          h3 SXSW
                 // /morphsearch-content
               span.morphsearch-close
 

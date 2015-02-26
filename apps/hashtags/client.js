@@ -42,6 +42,14 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
           model:[]
           , strata: []
           , stream:{}
+          , related:{
+              hashtags: []
+            , people: []
+          }
+          , history: {
+              hashtags: []
+            , people: []
+          }
     }
     , sedimentation:{
         token:{
@@ -96,9 +104,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
   }
 
   , initialize: function() {
-    _.bindAll(this,'render_viz','scene_setup','keyControls','bindNewMediaToggle');
-
-    this.collection.reset(sd.HASHTAGS);
+    _.bindAll(this,'render','render_viz','scene_setup','keyControls','bindNewMediaToggle');
 
     this.scene_setup();
 
@@ -113,12 +119,13 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
     this.on('socket:parsed', this.socket_parsed, this);
     this.on('socket:error', this.socket_error, this);
 
-    this.collection.on('sync', this.render, this);
+    this.collection.on('reset', this.render, this);
   }
 
-  , render: function() {
-    this.$('#hashtag-items').html(listTemplate({ hashtags: this.collection.models }));
-  }
+  // , render: function() {
+  //   console.log('actual render');
+  //   this.$('#hashtag-items').html(listTemplate({ hashtags: this.collection.models }));
+  // }
 
   , bindNewMediaToggle: function() { 
       this.wrapper.isotope('updateSortData').isotope();
@@ -155,7 +162,15 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
         return a.concat(b.tags); 
       }, []) 
 
-      // v.debug(flat_tags);
+      var flat_people;
+      flat_people = _.reduceRight(newMedia, function(a, b) { 
+        return a.concat(b.user); 
+      }, []) 
+
+      v.debug(flat_people);
+
+      this.sceneSetting.data.related.hashtags = _.union(this.sceneSetting.data.related.hashtags,flat_tags);
+      this.sceneSetting.data.related.people = _.union(this.sceneSetting.data.related.people,flat_people);
 
       var $extraElems = this.wrapper.isotope('getItemElements')
       $extraElems = $extraElems.sort(function(a, b) {
@@ -240,7 +255,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
   }
 
   , search_setup: function(){
-
+      var self = this;
       var morphSearch = document.getElementById( 'morphsearch' ),
         input = morphSearch.querySelector( 'input.morphsearch-input' ),
         ctrlClose = morphSearch.querySelector( 'span.morphsearch-close' ),
@@ -270,6 +285,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
           }
           else {
             $( morphSearch ).addClass( 'open' );
+            self.search_data();
           }
           isOpen = !isOpen;
         };
@@ -290,9 +306,28 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
       morphSearch.querySelector( 'button[type="submit"]' )
         .addEventListener( 'click', function(ev) { 
             ev.preventDefault();
-            window.location.assign( '/tag/'+$('.morphsearch-input').val() );
+            window.location.assign('/tag/'+$('.morphsearch-input').val());
         } );
 
+  }
+
+  , search_data: function(){
+      var tplString_personitem = "<li><a target='_blank' class='menuperson' href='http://instagram.com/<%= username %>'><img class='round' src='<%= profile_picture %>'/><h3><%= username %></h3></a></li>";
+      var tpl_personitem = _.template(tplString_personitem);
+      var $relatedColumn = $('.related-people ul.items');
+      $relatedColumn.html('');
+      _.each( this.sceneSetting.data.related.people.slice(0,7), function(p){
+        $relatedColumn.append(tpl_personitem(p));
+      });
+      // var tplString_hashtagitem = "<a class='menutag' href='<%= tag_path %><img src='<%= tag_img %>' alt=''/><h3><%= tag_title %></h3></a>";
+      var tplString_hashtagitem = "<li><a class='menutag' href='/tag/<%= tag %>'<h3><%= tag %></h3></a></li>";
+      var tpl_hashtagitem = _.template(tplString_hashtagitem);
+      $relatedColumn = $('.related-tags ul.items');
+      $relatedColumn.html('');
+      _.each( this.sceneSetting.data.related.hashtags.slice(0,7), function(t){
+        $relatedColumn.append(tpl_hashtagitem({tag: t}));
+      });
+  
   }
 
   , isotope_setup: function(){
@@ -361,15 +396,18 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
   }
 
   , scene_setup : function(){
-    window.addEventListener("keydown", this.keyControls, false);
+      window.addEventListener("keydown", this.keyControls, false);
 
-    this.newMediaToggle = true;
+      this.sceneSetting.data.related.hashtags = _.union(this.sceneSetting.data.related.hashtags,sd.related.hashtags);
+      this.sceneSetting.data.related.people = _.union(this.sceneSetting.data.related.people,sd.related.people);
 
-    for (src in this.sceneData) {
-      this.sceneSetting.data.model.push({label:this.sceneData[src].label})
-      var source_value_init = this.collection.count_source[src];
-      this.sceneSetting.data.strata.push([{initValue: parseInt(source_value_init), label: this.sceneData[src].label + " Strata "}])
-    };
+      this.newMediaToggle = true;
+
+      for (src in this.sceneData) {
+        this.sceneSetting.data.model.push({label:this.sceneData[src].label})
+        var source_value_init = this.collection.count_source[src];
+        this.sceneSetting.data.strata.push([{initValue: parseInt(source_value_init), label: this.sceneData[src].label + " Strata "}])
+      };
   }
 
 });
