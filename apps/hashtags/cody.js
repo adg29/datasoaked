@@ -105,7 +105,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
   , filter_setup: function(){
 
-
+      var view_self = this;
 
       //open/close lateral filter
       $('.cd-filter-trigger').on('click', function(){
@@ -189,7 +189,11 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
           
             // The "init" method will run on document ready and cache any jQuery objects we will need.
             init: function(){
-              var self = this; // As a best practice, in each method we will asign "this" to the variable "self" so that it remains scope-agnostic. We will use it to refer to the parent "buttonFilter" object so that we can share methods and properties between all parts of the object.
+              // As a best practice, in each method we will asign "this" to the variable 
+              // "self" so that it remains scope-agnostic. 
+              // We will use it to refer to the parent "buttonFilter" object so that we can 
+              // share methods and properties between all parts of the object.
+              var self = this; 
             
               self.$filters = $('.cd-main-content');
               self.$container = $('.cd-gallery ul');
@@ -251,12 +255,13 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
               }
             
               // If the output string is empty, show all rather than none:    
-              !self.outputString.length && (self.outputString = 'all'); 
+              !self.outputString.length && (self.outputString = '*'); 
           
               // Send the output string to MixItUp via the 'filter' method:    
-            if(self.$container.mixItUp('isLoaded')){
-                self.$container.mixItUp('filter', self.outputString);
-            }
+              // if(self.$container.mixItUp('isLoaded')){
+                  view_self.wrapper.isotope({ filter: self.outputString });
+                  // self.$container.mixItUp('filter', self.outputString);
+              // }
             }
         };
 
@@ -305,10 +310,12 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
                         $matching = $matching.not(this);
                     }
                   });
-                  $('.cd-gallery ul').mixItUp('filter', $matching);
+                  // $('.cd-gallery ul').mixItUp('filter', $matching);
+                  view_self.wrapper.isotope({filter: $matching});
               } else {
                   // resets the filter to show all item if input is empty
-                  $('.cd-gallery ul').mixItUp('filter', 'all');
+                  // $('.cd-gallery ul').mixItUp('filter', 'all');
+                  view_self.wrapper.isotope({filter: '*'});
               }
             }, 200 );
         });
@@ -327,14 +334,14 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
     // this.scene = this.$("#demo").vs(this.sceneSetting).data('visualSedimentation')
 
-    // this.isotope_setup();
+    this.isotope_setup();
 
     // this.render_viz();
 
     // this.search_setup();
 
-    // this.on('socket:parsed', this.socket_parsed, this);
-    // this.on('socket:error', this.socket_error, this);
+    this.on('socket:parsed', this.socket_parsed, this);
+    this.on('socket:error', this.socket_error, this);
 
     // this.collection.on('reset', this.render, this);
   }
@@ -400,7 +407,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
       var d = new Date();
 
-      this.wrapper.isotope( 'remove', $extraElems)
+      this.wrapper.isotope('remove', $extraElems)
         .isotope('layout'); 
 
 
@@ -549,7 +556,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
   , isotope_setup: function(){
       $.bridget('isotope', Isotope);
-      this.wrapper = $('#wrapper').isotope({
+      this.wrapper = $('.cd-gallery').isotope({
         // options
         sortAscending: false,
         getSortData: {

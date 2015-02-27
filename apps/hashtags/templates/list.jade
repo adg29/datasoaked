@@ -8,7 +8,7 @@
 for item in hashtags
   .grid-sizer 
   if item instanceof models.InstagramItem	 
-    .element(data-created=item.get('created_time'),data-uid=item.get('id'))
+    div(data-created=item.get('created_time'),data-uid=item.get('id'),class='element ' + item.get('tags').join(' '))
       figure
         div
           img(src=item.get('images').low_resolution.url)

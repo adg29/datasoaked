@@ -22,6 +22,6 @@ sd['REDIS_HOST'] = '127.0.0.1';
 sd['IG_CLIENT_ID'] =  process.env.IG_CLIENT_ID || "7215ab31c2b5410ab649f11d6ff060df";
 sd['IG_CLIENT_SECRET'] = process.env.IG_CLIENT_SECRET  || "5b3bcecdfe24425384559b961a91f084";
 
-sd['hashtag'] = 'tulum';
+sd['hashtag'] = 'tbt';
 sd['hashtag_items'] = 60;
 
