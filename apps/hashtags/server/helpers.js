@@ -135,6 +135,7 @@ function hashtag_process(tag, update, process_callback){
           });
       },
       instagram: function(callback) {
+        // Build query string  based on redis record
         debug('ASYNC INSTA hashtag_minid_get via redis');
         hashtag_minid_get(tag, function(error,minID){
           // debug(minID);
@@ -158,6 +159,8 @@ function hashtag_process(tag, update, process_callback){
                 callback(null,new Error(e));
             }else if(typeof res!='undefined'){
               debug("API INSTA " + res.headers['x-ratelimit-remaining'] + " remaining - on /callbacks/instagram/tag/" + tag);
+              // Check response for ratelimit remaining value and delete subscriptions
+              // if remaining count is low
               if( parseInt(res.headers['x-ratelimit-remaining'])<=250 ){
                 // #TODO save x-ratelimit-remaining AND query before subscribing or requesting new media
 
@@ -169,6 +172,7 @@ function hashtag_process(tag, update, process_callback){
                   debug('insta http del \n' +  util.inspect(response,false,null) );
                 });
               }
+              // Data in response contains collection of media items, some of which could be duplicates
               var data = response;
 
               try {
@@ -176,39 +180,45 @@ function hashtag_process(tag, update, process_callback){
               } catch (parse_exception) {
                 debug('Couldn\'t parse data. Malformed?');
                 debug(parse_exception);
+                // async parallel callback
                 callback(null,parse_exception);
                 return;
               }
               if(!parsedResponse || !parsedResponse['data']){
                 debug('Did not receive data for ' + tag +':');
                 debug(data);
+                // async parallel callback
                 callback(null,new Error);
                 return;
               }
 
               hashtag_minid_set(tag, parsedResponse['data']);
                 
-              // Let all the redis listeners know that we've got new media.
+              // Redis publishing
               if(e==null && typeof(data)!='undefined'){
                 try{
                   debug("PMESSAGE insta sending");
+                  // Redis pubsub listener will receive this payload and save the records
                   redisClient.publish('channel:instagram:' + tag , data);
                   // adebug("*********hashtag_process publishing: " + tag );
                   if(update=="manual") {
                     debug("REDIS manual: " + tag);
                     adebug("REDIS manual: " + parsedResponse.data.length);
+                    // async parallel callback
                     callback(null,parsedResponse.data);
                     return;
                   }
                 }catch(e){
                   debug("REDIS ERROR: redisClient.publish channel '" + tag);
                   debug(e);
+                  // async parallel callback
                   callback(null,e);
                   return;
                 }
               }else{
                 debug('INSTA ERROR:')
                 debug(e)
+                // async parallel callback
                 callback(null,new Error(JSON.stringify(e)));
               }
             }

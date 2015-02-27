@@ -391,6 +391,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
         return a.concat(b.user); 
       }, []) 
 
+      v.debug(d);
       v.debug(flat_people);
 
       this.sceneSetting.data.related.hashtags = _.union(this.sceneSetting.data.related.hashtags,flat_tags);

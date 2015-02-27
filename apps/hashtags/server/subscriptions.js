@@ -102,6 +102,7 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
             helpers.debug('REDIS zadd ERROR ');
             redisErrorCallback(err);
           }
+          // Important for memory management
           redisClient.expire('media:'+channelName, 60,function(err,result){
             // helpers.debug('expireZaddResult'); // true
             // helpers.debug(JSON.stringify(err)); // true
@@ -143,6 +144,8 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
     for(index in data){
         var media = data[index]
           , media_weight;
+
+        // Date data differs btw twitter and instagram
         if(channel_split[1]=="twitter"){
           media_weight = moment(media.created_at).unix();
         }else{
@@ -152,6 +155,9 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
         // helpers.debug(media_weight);
         media.meta = {};
         media.meta.location = channelName;
+
+
+        // Redis memory management
         var redis_length;
         // helpers.debug('INFO len ' + redisClient.server_info.used_memory_human);
         //helpers.debug(redisClient.server_info);
