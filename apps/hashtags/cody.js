@@ -15,11 +15,6 @@ var _ = require('underscore')
     , sd = require('sharify').data
     , io = require('socket.io-browserify')
     , jqb = require('jquery-bridget')
-    , clientNS = '/tag/'+sd.hashtag
-    , socket = io.connect(window.location.origin+clientNS,  {
-       query: 'ns='+clientNS,
-       resource: "socket.io"
-    })
     , Backbone = require('backbone')
     , Isotope = require('isotope-layout')
     , Hashtags = require('../../collections/hashtag_items.js')
@@ -28,6 +23,21 @@ var _ = require('underscore')
     }
     , moment = require('moment')
     , view = null;
+
+
+
+var clientTags = sd.hashtag.split('.');
+var socketClients = [];
+// clientTags.forEach(function(t){
+  // console.log('connect',t);
+  socketClients.push(
+    io.connect(window.location.origin,  {
+      multiplex: true,
+      query: 'ns='+clientTags,
+      resource: "socket.io"
+    })
+  );
+// });
 
 Backbone.$ = $;
 
@@ -49,6 +59,9 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
           , history: {
               hashtags: []
             , people: []
+          }
+          , filter: {
+            matching: []
           }
     }
     , sedimentation:{
@@ -283,7 +296,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
         //search filtering
         //credits http://codepen.io/edprats/pen/pzAdg
         var inputText;
-        var $matching = $();
+        // var $matching = $();
 
         var delay = (function(){
           var timer = 0;
@@ -293,28 +306,21 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
           };
         })();
 
+        $('#input-filter').on('submit',function(e){
+          e.preventDefault();
+        })
         $(".cd-filter-content input[type='search']").keyup(function(){
             // Delay function invoked to make sure user stopped typing
             delay(function(){
               inputText = $(".cd-filter-content input[type='search']").val().toLowerCase();
+              inputText = inputText.replace(/#/g, '');
+
               // Check to see if input field is empty
               if ((inputText.length) > 0) {            
-                  $('.mix').each(function() {
-                    var $this = $(this);
-                  
-                    // add item to be filtered out if input text matches items inside the title   
-                    if($this.attr('class').toLowerCase().match(inputText)) {
-                        $matching = $matching.add(this);
-                    } else {
-                        // removes any previously matched item
-                        $matching = $matching.not(this);
-                    }
-                  });
-                  // $('.cd-gallery ul').mixItUp('filter', $matching);
-                  view_self.wrapper.isotope({filter: $matching});
+                  // #TODO add input search with buttons group and checkbox group filters
+                  view_self.sceneSetting.data.filter.matching = inputText.toLowerCase();
+                  view_self.wrapper.isotope({filter: '.'+view_self.sceneSetting.data.filter.matching});
               } else {
-                  // resets the filter to show all item if input is empty
-                  // $('.cd-gallery ul').mixItUp('filter', 'all');
                   view_self.wrapper.isotope({filter: '*'});
               }
             }, 200 );
@@ -375,7 +381,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
   }
 
   , onNewMedia: function(d){
-      if(d.channelName==sd.hashtag && this.newMediaToggle){
+      if( _.contains(clientTags, d.channelName ) && this.newMediaToggle){
         // #TODO ensure newMedia has no #ISSUE in filtering logic
         var newMedia = _.reject(d.media,function(m){
           return _.contains($('.element[data-uid]').map(function(){ return $(this).data('uid')}).get(),m.id);
@@ -404,6 +410,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
       $extraElems = $extraElems.slice(0,-24+newMedia.length);
 
 
+      // #TODO figure out extraElems 
       console.log("onNewMedia", d.channelName,$extraElems.length);
 
       var d = new Date();
@@ -450,8 +457,8 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
       // this.createToken(src,this.sceneData[src]);
       this.onNewMedia(d);
     }
-    // v.debug('socket_parsed')
-    // v.debug(d)
+    v.debug('socket_parsed')
+    v.debug(d)
   }
 
   , socket_error: function(e){
@@ -643,15 +650,19 @@ module.exports.init = function() {
     collection: new Hashtags(null, { hashtag: sd.hashtag })
   });
 
-  socket.on('message', function(data){ 
-    try{
-      v.debug('SOCKET update')
-      view.trigger('socket:parsed',data);
-    }catch(e){
-      v.debug('SOCKET ERROR update')
-      view.trigger('socket:error',update);
-      v.debug(e);
-    }
+  socketClients.forEach(function(socket){
+    console.log('socketClients');
+    console.log(socket);
+    socket.on('message', function(data){ 
+      try{
+        v.debug('SOCKET update')
+        view.trigger('socket:parsed',data);
+      }catch(e){
+        v.debug('SOCKET ERROR update')
+        view.trigger('socket:error',update);
+        v.debug(e);
+      }
+    });
   });
 
 };

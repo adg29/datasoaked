@@ -86,7 +86,7 @@ pubSubClient.on('pmessage', function(pattern, channel, message){
       try{
         var ioNS = '/tag/'+channelName;
         helpers.debug('SOCKETIO EMIT ' + channelName);
-        io.of(ioNS).emit('message',pubsub_update);
+        io.sockets.to(channelName).emit('message',pubsub_update);
       }catch (e) {
         helpers.debug('SOCKETIO ERROR emit');
         // helpers.debug(update);

@@ -12,14 +12,28 @@ var
   , sd = require('sharify').data;
 
 exports.index = function(req, res, next) {
+  // #TODO parse tag(s) by splitting on delimiter 
   sd.hashtag = req.params.tag || sd.hashtag;
+  var hashtagSplit = sd.hashtag.split('.');
+
   sd.debug = true;
+
+  // collection init
   var hashtags = new HashtagItems(null, {
     hashtag: sd.hashtag,
   });
 
-  helpers.subscribe(sd.hashtag,req.host);
+  // #TODO Each hashtag needs to call subscribe
+  helpers.debug(hashtagSplit);
+  helpers.debug(Array.isArray(hashtagSplit));
+  hashtagSplit.forEach(function(t){
+    helpers.debug('subscribe');
+    helpers.debug(t);
+    helpers.subscribe(t,req.host);
+  })
 
+  // #TODO hashtag_media_get needs to return media based on multiple hashtags
+  // Respond by rendering json or html template
   helpers.hashtag_media_get(hashtags.hashtag,function(error, media){
     if(error!==null && error){
       helpers.debug('hashtag_media_get error')
@@ -31,6 +45,7 @@ exports.index = function(req, res, next) {
     res.locals.moment = helpersv.moment; // include moment lib
     res.locals._ = helpersv._; // include underscore lib
     res.locals.sd.hashtag = sd.hashtag;
+    res.locals.sd.hashtagList = sd.hashtag.split('.');
 
    var hashtagsJSON = hashtags.toJSON();
 
@@ -59,7 +74,8 @@ exports.index = function(req, res, next) {
     }else{
       res.render('cody', { 
         hashtag: hashtags.hashtag
-        , hashtags: hashtags.models 
+        , hashtags: hashtags.models // #RENAME hashtags to media
+        , hashtagsRelated: flat_tags
       });
     }
   });

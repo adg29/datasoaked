@@ -8,7 +8,8 @@ html.csstransforms3d
     link( type='text/css', rel='stylesheet', href=('/assets/cody' + sd.CSS_EXT) )
   body
     header.cd-header
-        h1 Content Filters
+        h1 
+          != '#' + sd.hashtag
     main.cd-main-content
       .cd-tab-filter-wrapper
         .cd-tab-filter
@@ -20,11 +21,10 @@ html.csstransforms3d
             li.filter
               a.selected(href='#0', data-type='*') All
             |                 
-            li.filter(data-filter='.nyfw')
-              a(href='#0', data-type='nyfw') #NYFW
-            |                 
-            li.filter(data-filter='.tbt')
-              a(href='#0', data-type='tbt') #tbt
+            for t in sd.hashtagList
+              li.filter(data-filter='.'+t)
+                a(href='#0', data-type=t)
+                  != '#' + t
           // cd-filters
         // cd-tab-filter
       // cd-tab-filter-wrapper
@@ -69,54 +69,46 @@ html.csstransforms3d
         .cd-fail-message No results found
       // cd-gallery
       .cd-filter
-        form
+        form#input-filter
           .cd-filter-block
             h4 Search
             |                                                                 
             .cd-filter-content
-              input(type='search', placeholder='Try color-1...')
+              input(type='search', placeholder='Try #'+hashtagsRelated[Math.floor(Math.random() * hashtagsRelated.length)])
             // cd-filter-content
           // cd-filter-block
           .cd-filter-block
-            h4 Check boxes
+            h4 Tags
             |                                                                     
             ul.cd-filter-content.cd-filters.list
-              li
-                input#checkbox1.filter(data-filter='.check1', type='checkbox')
-                |                                                                                 
-                label.checkbox-label(for='checkbox1') Option 1
-              |                                                                             
-              li
-                input#checkbox2.filter(data-filter='.check2', type='checkbox')
-                |                                                                                     
-                label.checkbox-label(for='checkbox2') Option 2
+              for h in hashtagsRelated
+                li
+                  input.filter(id='checkbox-'+h,data-filter='.'+h, type='checkbox')
+                  |                                                                                 
+                  label.checkbox-label(for='checkbox-'+h) 
+                    != h
+            // cd-filter-content
+          // cd-filter-block
+            .cd-filter-block
+              h4 Select
               |                                                                                 
-              li
-                input#checkbox3.filter(data-filter='.check3', type='checkbox')
-                |                                                                                         
-                label.checkbox-label(for='checkbox3') Option 3
-            // cd-filter-content
+              .cd-filter-content
+                .cd-select.cd-filters
+                  select#selectThis.filter(name='selectThis')
+                    option(value='') Choose an option
+                    |                                                                                             
+                    option(value='.option1') Option 1
+                    |                                                                                             
+                    option(value='.option2') Option 2
+                    |                                                                                             
+                    option(value='.option3') Option 3
+                    |                                                                                             
+                    option(value='.option4') Option 4
+                // cd-select
+              // cd-filter-content
           // cd-filter-block
           .cd-filter-block
-            h4 Select
-            |                                                                                 
-            .cd-filter-content
-              .cd-select.cd-filters
-                select#selectThis.filter(name='selectThis')
-                  option(value='') Choose an option
-                  |                                                                                             
-                  option(value='.option1') Option 1
-                  |                                                                                             
-                  option(value='.option2') Option 2
-                  |                                                                                             
-                  option(value='.option3') Option 3
-                  |                                                                                             
-                  option(value='.option4') Option 4
-              // cd-select
-            // cd-filter-content
-          // cd-filter-block
-          .cd-filter-block
-            h4 Radio buttons
+            h4 Influence Threshold
             |                                                                                 
             ul.cd-filter-content.cd-filters.list
               li

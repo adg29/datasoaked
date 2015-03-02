@@ -1,4 +1,5 @@
 var redis = require('redis')
+  , _ = require('underscore')
   , sd = require('sharify').data
   , util = require('util')
   , settings = require('../settings')
@@ -36,8 +37,7 @@ twit = new Twit({
   , access_token_secret: 'LvoDBaQAPcBMUEFxSuD4rONnTV7aodOF5h9sWaJtPvIVg'
 })
 
-
-function hashtag_media_get(hashtag,callback){
+function hashtag_media_get_redis(hashtag,callback){
   // This function gets the most recent media stored in redis
   redisClient.zrevrange('media:'+hashtag, 0, sd.hashtag_items-1, function(error, media){
       debug('REDIS zrange callback')
@@ -47,16 +47,32 @@ function hashtag_media_get(hashtag,callback){
         media = media.map(function(json){return JSON.parse(json);});
         if(true || media.length < sd.hashtag_items){
           hashtag_process(hashtag,"manual",function(media){
+            // #TODO don't callback until all tags are processed
             callback(error,media);
           });
         }else{
           debug('media_get via zrange')
+          // #TODO don't callback until all tags are processed
           callback(error, media);
         }
       }else{
         debug('zrange error')
         debug(error);
       }
+  });
+}    
+
+// #TODO hashtag_media_get needs to return media based on multiple hashtags
+// Based on a discrete hashtag
+// Query redis, instagram, and twitter
+function hashtag_media_get(hashtags,response_callback){
+  var hashtagSplit = hashtags.split('.');
+  async.map(hashtagSplit,hashtag_media_get_redis,function(err,results){
+    debug('map results');
+    debug(results.length);
+    // console.log( util.inspect(results,false,null) );
+    var mediaMerged = _.reduce(results,function(a,b){ return a.concat(b)});
+    response_callback(err,mediaMerged);
   });
 }
 
@@ -71,10 +87,10 @@ function subscribe(hashtag,host){
           }};
 
   http.post(options,function(e,i,r){
-    // debug('error')
-    // debug(e)
-    // adebug('***InstaPOST');
-    // adebug(r);
+    debug('error')
+    debug(e)
+    adebug('***InstaPOST');
+    adebug(r);
   });
 
   var stream = twit.stream('statuses/filter', { track: hashtag });
