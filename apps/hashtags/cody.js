@@ -432,7 +432,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
         var figcaption_time = '<figcaption class="item-time"><h5>'+figtime+'</h5></figcaption>'
 
         var fig = '<figure><div><img data-uid="'+media.id+'" src="'+media.images.low_resolution.url+'" alt="'+caption+'" data-adaptive-background="1"/></div>'+figcaption_time+figcaption+'</figure>';
-        var $newItems = $('<div class="element" data-created="'+media.created_time+'" data-uid="'+media.id+'">'+fig+'</div>');
+        var $newItems = $('<div class="element'+media.tags.join(' ')+'" data-created="'+media.created_time+'" data-uid="'+media.id+'">'+fig+'</div>');
         self.wrapper.prepend($newItems).isotope('prepended',$newItems );
         self.wrapper.isotope('updateSortData').isotope();
       });

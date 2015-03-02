@@ -3,13 +3,14 @@ meta(charset="utf-8")
 html.csstransforms3d
   head
     meta(name="viewport",content="width=device-width, initial-scale=1.0")
-    title= '#'+sd.hashtag + ' Realtime Updates'
+    title
+      != '#'+sd.hashtagList.join(' & #') + ' posts, realtime updates via Instagram & DataSoaked'
     //- link( type='text/css', rel='stylesheet', href=('/assets/hashtags' + sd.CSS_EXT) )
     link( type='text/css', rel='stylesheet', href=('/assets/cody' + sd.CSS_EXT) )
   body
     header.cd-header
         h1 
-          != '#' + sd.hashtag
+          != '#' + sd.hashtagList.join(' & #') + ' posts, realtime via Instagram'
     main.cd-main-content
       .cd-tab-filter-wrapper
         .cd-tab-filter
@@ -78,7 +79,7 @@ html.csstransforms3d
             // cd-filter-content
           // cd-filter-block
           .cd-filter-block
-            h4 Tags
+            h4 Related Hashtags
             |                                                                     
             ul.cd-filter-content.cd-filters.list
               for h in hashtagsRelated
@@ -86,7 +87,7 @@ html.csstransforms3d
                   input.filter(id='checkbox-'+h,data-filter='.'+h, type='checkbox')
                   |                                                                                 
                   label.checkbox-label(for='checkbox-'+h) 
-                    != h
+                    != '#' + h
             // cd-filter-content
           // cd-filter-block
             .cd-filter-block
