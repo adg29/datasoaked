@@ -1,5 +1,5 @@
 
-#wrap
+.cd-main-content
   margin 0 auto
   width 100%
   figure
@@ -26,7 +26,7 @@
   figcaption
     &.item-time
       position absolute
-      bottom 0
+      bottom 8px
       right 0
       padding 7px
       background transparent
@@ -34,7 +34,7 @@
       font-size .8em
       line-height 10px
       height 10%
-      width 30%
+      width 36%
       opacity 100
       -webkit-backface-visibility hidden
     &.item-meta
@@ -43,9 +43,13 @@
       left 0
       padding 20px
       background #2c3f52
+      background #1f1e1d
+      background #4E2568
+      background #150A1C
       color #ed4e6e
       height 100%
-      width 50%
+      width 60%
+      overflow hidden
       opacity 0
       -webkit-backface-visibility hidden
       -webkit-transform-origin 0 0
@@ -69,14 +73,14 @@
       background #ed4e6e
       color #fff
     a.insta
-      background #517fa4
+      // background #517fa4
     a.twit
-      background #00aced
+      // background #00aced
   .element
     -webkit-perspective 1700px
     -webkit-perspective-origin 0 50%
 
-#wrapper
+.cd-main-contentper
   margin 0 auto
   clear both
   width 90%
@@ -105,25 +109,25 @@
         font-weight 700
         &:hover
           color #0c69a4
-  & > section#update-status
+  section#update-status
     text-align center
 
 .grid-sizer
   width 20%
 
-  #wrap
+ .cd-main-content 
     figure
       margin 0
       position relative
 
-#wrap figure:hover img,
-#wrap figure.cs-hover img
-#wrap figure:hover .tweet,
-#wrap figure.cs-hover .tweet 
+.cd-main-content figure:hover img,
+.cd-main-content figure.cs-hover img
+.cd-main-content figure:hover .tweet,
+.cd-main-content figure.cs-hover .tweet 
   -webkit-transform translateX(25%)
 
-#wrap figure:hover figcaption.item-meta,
-#wrap figure.cs-hover figcaption.item-meta
+.cd-main-content figure:hover figcaption.item-meta,
+.cd-main-content figure.cs-hover figcaption.item-meta
   opacity 1
   -webkit-transform rotateY(0deg)
   -webkit-transition -webkit-transform 0.4s, opacity 0.1s
@@ -197,7 +201,7 @@ section#update-status
     a
       position relative
       display inline-block
-      margin 15px 25px
+      margin 5% 25px
       outline none
       color #fff
       text-decoration none
@@ -225,6 +229,7 @@ a
       display inline-block
       padding 0 14px
       background #2195de
+      background #150a1c
       -webkit-transition -webkit-transform 0.3s
       -moz-transition -moz-transform 0.3s
       transition transform 0.3s
@@ -268,6 +273,7 @@ a
 .csstransforms3d .cl-effect-2 a:hover span::before,
 .csstransforms3d .cl-effect-2 a:focus span::before
   background #28a2ee
+  background #41307c
 
 .color-1
   background #435a6b

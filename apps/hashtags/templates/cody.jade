@@ -7,10 +7,13 @@ html.csstransforms3d
       != '#'+sd.hashtagList.join(' & #') + ' posts, realtime updates via Instagram & DataSoaked'
     //- link( type='text/css', rel='stylesheet', href=('/assets/hashtags' + sd.CSS_EXT) )
     link( type='text/css', rel='stylesheet', href=('/assets/cody' + sd.CSS_EXT) )
-  body
+  body.container
     header.cd-header
-        h1 
-          != '#' + sd.hashtagList.join(' & #') + ' posts, realtime via Instagram'
+      section#update-status
+        nav#cl-effect-2.cl-effect-2
+          a.updates-tag
+            span(data-hover="via Datasoaked") 
+              != 'Realtime Instagram Updates' 
     main.cd-main-content
       .cd-tab-filter-wrapper
         .cd-tab-filter
@@ -79,9 +82,10 @@ html.csstransforms3d
             // cd-filter-content
           // cd-filter-block
           .cd-filter-block
-            h4 Related Hashtags
-            |                                                                     
+            h4#filter-related 
+              != 'Related Hashtags'
             ul.cd-filter-content.cd-filters.list
+              li.filter-related-clear &#10006; clear
               for h in hashtagsRelated
                 li
                   input.filter(id='checkbox-'+h,data-filter='.'+h, type='checkbox')

@@ -10,10 +10,10 @@ html
     -moz-osx-font-smoothing grayscale
 
 body
-  font-size 1.6rem
-  font-family "Open Sans", sans-serif
+  // font-size 1.6rem
+  // font-family "Open Sans", sans-serif
   color #331d35
-  background-color #e7e7e7
+  // background-color #e7e7e7
 
 a
   color #41307c
@@ -22,7 +22,7 @@ a
 .cd-header
   position relative
   height 150px
-  background-color #331d35
+  background-color #1f1e1d
   h1
     color #ffffff
     line-height 150px
@@ -57,7 +57,7 @@ a
       position fixed
 
 .cd-tab-filter-wrapper
-  background-color #ffffff
+  background-color #920CE8
   box-shadow 0 1px 1px rgba(0, 0, 0, 0.08)
   z-index 1
   &:after
@@ -94,7 +94,7 @@ a
     position absolute
     top 0
     left 0
-    background-color #ffffff
+    background-color #ed4e6e
     box-shadow inset 0 -2px 0 #41307c
   li
     display none
@@ -148,7 +148,7 @@ a
   left 0
   width 280px
   height 100%
-  background #ffffff
+  background #1f1e1d
   box-shadow 4px 4px 20px transparent
   z-index 2
   -webkit-transform translateZ(0)
@@ -235,7 +235,7 @@ a
     position relative
     margin-bottom .2em
     padding 10px 0 10px 20px
-    color #9a9a9a
+    color #fff
     text-transform uppercase
     font-weight 700
     font-size 1.3rem
@@ -302,6 +302,11 @@ a
       margin-bottom .8em
       &:last-of-type
         margin-bottom 0
+      &.filter-related-clear
+        font-size 1.5em
+        cursor pointer
+        display none
+        color #e6e6e6
   .checkbox-label
     &::after
       width 16px
@@ -355,6 +360,7 @@ a
 .cd-filter-block .radio-label
   padding-left 24px
   font-size 1.4rem
+  color #e6e6e6
   -webkit-user-select none
   -moz-user-select none
   -ms-user-select none
@@ -412,7 +418,7 @@ a
     &::after
       display none
     ul
-      background transparent
+      background #920CE8
       position static
       box-shadow none
       text-align center
@@ -424,14 +430,14 @@ a
       display inline-block
       padding 0 1em
       width auto
-      color #9a9a9a
+      color #fff
       text-transform uppercase
       font-weight 700
       font-size 1.3rem
       &.selected
         background transparent
-        color #41307c
-        box-shadow inset 0 -2px 0 #41307c
+        color #420568
+        box-shadow inset 0 -2px 0 #420568
     &.is-open
       ul
         li
@@ -457,7 +463,7 @@ a
 
 @media only screen and (min-width: 768px)
   .cd-gallery
-    padding 40px 3%
+    // padding 40px 3%
     ul
       text-align justify
       &:after

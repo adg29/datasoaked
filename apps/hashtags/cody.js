@@ -127,6 +127,9 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
       $('.cd-filter .cd-close').on('click', function(){
         triggerFilter(false);
       });
+      $('.cd-gallery').on('click', function(){
+        triggerFilter(false);
+      });
 
       function triggerFilter($bool) {
         var elementsToTrigger = $([$('.cd-filter-trigger'), $('.cd-filter'), $('.cd-tab-filter'), $('.cd-gallery')]);
@@ -254,6 +257,11 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
                     group.active.push($this.attr('data-filter'));
                   }
                 });
+                if( $('.cd-filter-content input[type=checkbox]:checked').length > 0 ) {
+                  $('.filter-related-clear').css('display','block');
+                }else{
+                  $('.filter-related-clear').css('display','none');
+                }
               }
               self.concatenate();
             },
@@ -306,6 +314,10 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
           };
         })();
 
+        $('.cd-main-content').on('click','.filter-related-clear',function(){
+          $('.cd-filter-content input[type=checkbox]:checked').removeAttr('checked');
+          buttonFilter.parseFilters();
+        });
         $('#input-filter').on('submit',function(e){
           e.preventDefault();
         })
@@ -496,6 +508,8 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
         toggleSearch = function(evt) {
           // return if open and the input gets focused
           if( evt.type.toLowerCase() === 'focus' && isOpen ) return false;
+          // return if closed and the cd-main-content gets focused
+          if( evt.type.toLowerCase() === 'focus' && !isOpen ) return false;
 
           var offsets = morphsearch.getBoundingClientRect();
           if( isOpen ) {
