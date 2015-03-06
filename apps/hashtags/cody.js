@@ -352,7 +352,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
     // this.scene = this.$("#demo").vs(this.sceneSetting).data('visualSedimentation')
 
-    this.isotope_setup();
+    // this.isotope_setup();
 
     // this.render_viz();
 
@@ -508,8 +508,6 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
         toggleSearch = function(evt) {
           // return if open and the input gets focused
           if( evt.type.toLowerCase() === 'focus' && isOpen ) return false;
-          // return if closed and the cd-main-content gets focused
-          if( evt.type.toLowerCase() === 'focus' && !isOpen ) return false;
 
           var offsets = morphsearch.getBoundingClientRect();
           if( isOpen ) {
