@@ -122,6 +122,11 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
       //open/close lateral filter
       $('.cd-filter-trigger').on('click', function(){
+
+        if( $('#morphsearch').hasClass('open')){
+          $('span.morphsearch-close').trigger('click');
+        }
+
         triggerFilter(true);
       });
       $('.cd-filter .cd-close').on('click', function(){
@@ -352,11 +357,11 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
     // this.scene = this.$("#demo").vs(this.sceneSetting).data('visualSedimentation')
 
-    // this.isotope_setup();
+    this.isotope_setup();
 
     // this.render_viz();
 
-    // this.search_setup();
+    this.search_setup();
 
     this.on('socket:parsed', this.socket_parsed, this);
     this.on('socket:error', this.socket_error, this);
@@ -550,7 +555,9 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
       morphSearch.querySelector( 'button[type="submit"]' )
         .addEventListener( 'click', function(ev) { 
             ev.preventDefault();
-            window.location.assign('/tag/'+$('.morphsearch-input').val());
+            var addHashtag = $('.morphsearch-input').val();
+            sd.hashtagList.push(addHashtag);
+            window.location.assign('/tag/'+ sd.hashtagList.join('.') );
         } );
 
   }

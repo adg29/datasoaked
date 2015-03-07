@@ -144,7 +144,7 @@ body {
   height: 27px;
 }
 .cd-main-content {
-  margin: 0 auto;
+  margin: 1em auto;
   width: 100%;
 }
 .cd-main-content figure {
@@ -1892,6 +1892,7 @@ a {
   background-color: #920ce8;
   box-shadow: 0 1px 1px rgba(0,0,0,0.08);
   z-index: 1;
+  top: 1%;
 }
 .cd-tab-filter-wrapper:after {
   content: "";
