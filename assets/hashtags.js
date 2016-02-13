@@ -6,7 +6,9 @@
 // small, often just a line of initialize code like this.
 //
 
-require('jquery')(require('../apps/hashtags/templates/lib/visualsedimentation.js'))
-require('jquery')(require('../apps/hashtags/client.js').init)
+// require('jquery')(require('../apps/hashtags/templates/lib/imagesloaded.js'))
+// require('jquery')(require('../apps/hashtags/templates/lib/visualsedimentation.js'))
+// require('jquery')(require('../apps/hashtags/client.js').init)
+require('jquery')(require('../apps/hashtags/cody.js').init)
 
 

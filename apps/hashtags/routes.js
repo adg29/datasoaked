@@ -3,7 +3,8 @@
 // 
 
 var 
-  Hashtags = require('../../collections/hashtag_items')
+  util = require('util')
+  , Hashtags = require('../../collections/hashtag_items')
   , models = require('../../models/hashtag_item')
   , helpers = require('./server/helpers')
   , helpersv = require('./templates/helpers')
@@ -11,13 +12,28 @@ var
   , sd = require('sharify').data;
 
 exports.index = function(req, res, next) {
+  // #TODO parse tag(s) by splitting on delimiter 
   sd.hashtag = req.params.tag || sd.hashtag;
+  var hashtagSplit = sd.hashtag.split('.');
+
+  sd.debug = true;
+
+  // collection init
   var hashtags = new HashtagItems(null, {
     hashtag: sd.hashtag,
   });
 
-  helpers.subscribe(sd.hashtag,req.host);
+  // #TODO Each hashtag needs to call subscribe
+  helpers.debug(hashtagSplit);
+  helpers.debug(Array.isArray(hashtagSplit));
+  hashtagSplit.forEach(function(t){
+    helpers.debug('subscribe');
+    helpers.debug(t);
+    helpers.subscribe(t,req.host);
+  })
 
+  // #TODO hashtag_media_get needs to return media based on multiple hashtags
+  // Respond by rendering json or html template
   helpers.hashtag_media_get(hashtags.hashtag,function(error, media){
     if(error!==null && error){
       helpers.debug('hashtag_media_get error')
@@ -29,12 +45,39 @@ exports.index = function(req, res, next) {
     res.locals.moment = helpersv.moment; // include moment lib
     res.locals._ = helpersv._; // include underscore lib
     res.locals.sd.hashtag = sd.hashtag;
-    res.locals.sd.HASHTAGS = hashtags.toJSON();
+    res.locals.sd.hashtagList = sd.hashtag.split('.');
+
+   var hashtagsJSON = hashtags.toJSON();
+
+    var flat_tags;
+    flat_tags = helpersv._.reduceRight(hashtagsJSON, function(a, b) {
+      return a.concat(b.tags); 
+    }, []);
+
+    var flat_people;
+    flat_people = helpersv._.reduceRight(hashtagsJSON, function(a, b) {
+      return a.concat(b.user);
+    }, []);
+
+
+    res.locals.sd.related = {};
+    res.locals.sd.related.hashtags = flat_tags;
+    res.locals.sd.related.people = flat_people;
+
+
     helpers.debug('render index')
-    res.render('index', { 
-      hashtag: hashtags.hashtag
-      , hashtags: hashtags.models 
-    });
+    if (req.params.format) { 
+      res.json({
+          hashtag: hashtags.hashtag
+        , hashtags: hashtags.models 
+        });
+    }else{
+      res.render('cody', { 
+        hashtag: hashtags.hashtag
+        , hashtags: hashtags.models // #RENAME hashtags to media
+        , hashtagsRelated: flat_tags
+      });
+    }
   });
 
   // hashtags.fetch({
@@ -57,27 +100,18 @@ exports.challenge_callback_instagram = function(req, res, next){
 };
 
 exports.subscription_callback_instagram = function(req, res, next){
-  helpers.debug("/callbacks/instagram/tag/" + req.params.tag);
-  // The POST callback for Instagram to call every time there's an update
-  // to one of our subscriptions.
-    
+  helpers.debug(req.params.tag + " ****** /callbacks/instagram/tag/" + req.params.tag);
+  // The POST callback for Instagram to call every time there's an update to one of our subscriptions.
+
   var tag = req.params.tag;
-  helpers.debug('tag')
-  helpers.debug(tag)
-  // Go through and process each update. Note that every update doesn't
-  // include the updated data - we use the data in the update to query
-  // the  API to get the data we want.
-  helpers.debug('subscription_callback_instagram rawwww')
-  helpers.debug(req.rawBody);
+  // we use the data in the update to query the  API to get the data we want.
+  // [{"changed_aspect": "media", "object": "tag", "object_id": "nyfw", "time": 1424050888, "subscription_id": 16842889, "data": {}}]
   var updates = JSON.parse(req.rawBody);
   for(index in updates){
     var update = updates[index];
-    // helpers.debug('updateLoop')
-    // helpers.debug(update)
-    if(false){
-    }
-    else if(true||update['object'] == "tag"){
-      helpers.debug('subscription_callback_instagram tag process')
+    if(update['object'] == "tag"){
+      helpers.debug('DATASOAKED ROUTE subscription_callback_instagram')
+      //Expect hashtag_process to query twitter and instagram via async and publish messages indicating changes in media sets
       helpers.hashtag_process(tag, update);
     }
   }

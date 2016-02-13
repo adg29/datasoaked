@@ -1,4 +1,5 @@
 doctype html
+meta(charset="utf-8")
 html.csstransforms3d
   head
     meta(name="viewport",content="width=device-width, initial-scale=1.0")
@@ -12,6 +13,42 @@ html.csstransforms3d
             span(data-hover="Live") ##{hashtag}
           a.updates-toggle(href="#updates-toggle")
             span(data-hover="Updates Off") Updates On
+
+          #morphsearch.morphsearch
+              form.morphsearch-form
+                  label #
+                  input.morphsearch-input(type='search', placeholder='Search...')
+                  button.morphsearch-submit(type='submit') Search
+                .morphsearch-content
+                  .dummy-column.related-people
+                    h2 People
+                    ul.items
+                  .dummy-column.related-tags
+                    h2 Related 
+                    ul.items
+                  .dummy-column
+                    h2 Upcoming 
+                    ul.items
+                      li
+                        a.menutag(href='/tag/oscars')
+                          h3 OSCARS 
+                      li
+                        a.menutag(href='/tag/nycbartseries')
+                          h3 NYCBArtSeries
+                      li
+                        a.menutag(href='/tag/museumweek')
+                          h3 MuseumWeek
+                      li
+                        a.menutag(href='/tag/smw15')
+                          h3 SMW15
+                      li
+                        a.menutag(href='/tag/sxsw')
+                          h3 SXSW
+                // /morphsearch-content
+              span.morphsearch-close
+
+
+          
       #demo.viz-block
       #headerLabel.viz-block
       div#wrapper

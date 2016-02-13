@@ -15,12 +15,19 @@ var _ = require('underscore')
     , v = require('./templates/helpers')
     , sd = require('sharify').data
     , io = require('socket.io-browserify')
-    , socket = io.connect(window.location.origin)
+    , jqb = require('jquery-bridget')
+    , clientNS = '/tag/'+sd.hashtag
+    , socket = io.connect(window.location.origin+clientNS,  {
+       query: 'ns='+clientNS,
+       resource: "socket.io"
+    })
     , Backbone = require('backbone')
+    , Isotope = require('isotope-layout')
     , Hashtags = require('../../collections/hashtag_items.js')
     , listTemplate = function() {
       return require('./templates/list.jade').apply(null, arguments)
     }
+    , moment = require('moment')
     , view = null;
 
 Backbone.$ = $;
@@ -36,6 +43,14 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
           model:[]
           , strata: []
           , stream:{}
+          , related:{
+              hashtags: []
+            , people: []
+          }
+          , history: {
+              hashtags: []
+            , people: []
+          }
     }
     , sedimentation:{
         token:{
@@ -46,54 +61,173 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
             decay:{power:1.02}
         }
     }
-
+    , options:{
+      layout:false
+    }
+    , chart:{
+    }
   }
   , oneDay : 24*60*60
 
   , sceneData : {
-      'instagram' : {
-        label:"Instagram"
-        , unit: 24*60*60
-        , old:null
-        , value:parseFloat(_.random(1,8))+.1618
-        , ttl:0.993
-      }
-      , 'twitter' : {
+      'twitter' : {
         label:"Twitter"
         , unit: 24*60*60
         , old:null
         , value:parseFloat(_.random(1,8))+.3237
         , ttl:0.993
       }
+      , 'instagram' : {
+        label:"Instagram"
+        , unit: 24*60*60
+        , old:null
+        , value:parseFloat(_.random(1,8))+.1618
+        , ttl:0.993
+      }
+  }
+
+  , events: {
+      "click a.updates-toggle": 'bindNewMediaToggle',
+      "keydown": 'keyControls'
+  }
+
+  , keyControls: function(e) {
+      var self = this;
+      switch(e.keyCode) {
+          case 32:
+              // spacebar pressed
+              console.log('spacebar');
+              e.preventDefault();
+              self.bindNewMediaToggle();
+              return false;
+              break;
+      }   
   }
 
   , initialize: function() {
-    _.bindAll(this,'render_viz','scene_setup');
-
-    this.collection.reset(sd.HASHTAGS);
+    _.bindAll(this,'render','render_viz','scene_setup','keyControls','bindNewMediaToggle');
 
     this.scene_setup();
 
-    this.scene = this.$("#demo").vs(this.sceneSetting).data('visualSedimentation')
+    // this.scene = this.$("#demo").vs(this.sceneSetting).data('visualSedimentation')
 
-    this.render_viz();
+    this.isotope_setup();
+
+    // this.render_viz();
+
+    this.search_setup();
 
     this.on('socket:parsed', this.socket_parsed, this);
     this.on('socket:error', this.socket_error, this);
 
-    this.collection.on('sync', this.render, this);
+    this.collection.on('reset', this.render, this);
   }
 
-  , render: function() {
-    this.$('#hashtag-items').html(listTemplate({ hashtags: this.collection.models }));
+  // , render: function() {
+  //   console.log('actual render');
+  //   this.$('#hashtag-items').html(listTemplate({ hashtags: this.collection.models }));
+  // }
+
+  , bindNewMediaToggle: function() { 
+      this.wrapper.isotope('updateSortData').isotope();
+
+      $('a.updates-toggle').toggleClass('hover');
+       
+      if($('.container').hasClass('paused')){
+        $('.container').css('background','#222').css('background-opacity',1)
+        $('.container').toggleClass('paused');
+      }else{
+        $('.container').toggleClass('paused');
+      }
+
+      this.newMediaToggle ? this.unbindNewMedia() : this.bindNewMedia();
+  }
+  , bindNewMedia: function() { 
+      // $(document).bind("newMedia", this.onNewMedia);
+      this.newMediaToggle = true;
+  }
+  , unbindNewMedia: function() { 
+      // $(document).unbind("newMedia");
+      this.newMediaToggle = false;
   }
 
-  , socket_parsed: function(e){
-    var src = 'instagram';
-    this.createToken(src,this.sceneData[src]);
-    v.debug('e')
-    v.debug(e)
-    v.debug('socket_parsed')
+  , onNewMedia: function(d){
+      if(d.channelName==sd.hashtag && this.newMediaToggle){
+        // #TODO ensure newMedia has no #ISSUE in filtering logic
+        var newMedia = _.reject(d.media,function(m){
+          return _.contains($('.element[data-uid]').map(function(){ return $(this).data('uid')}).get(),m.id);
+        });
+
+      var flat_tags;
+      flat_tags = _.reduceRight(newMedia, function(a, b) { 
+        return a.concat(b.tags); 
+      }, []) 
+
+      var flat_people;
+      flat_people = _.reduceRight(newMedia, function(a, b) { 
+        return a.concat(b.user); 
+      }, []) 
+
+      v.debug(flat_people);
+
+      this.sceneSetting.data.related.hashtags = _.union(this.sceneSetting.data.related.hashtags,flat_tags);
+      this.sceneSetting.data.related.people = _.union(this.sceneSetting.data.related.people,flat_people);
+
+      var $extraElems = this.wrapper.isotope('getItemElements')
+      $extraElems = $extraElems.sort(function(a, b) {
+        return $(a).data('created') - $(b).data('created');
+      })
+      $extraElems = $extraElems.slice(0,-24+newMedia.length);
+
+
+      console.log("onNewMedia", d.channelName,$extraElems.length);
+
+      var d = new Date();
+
+      this.wrapper.isotope( 'remove', $extraElems)
+        .isotope('layout'); 
+
+
+      var self = this;
+      $(newMedia).each(function(index, media){
+        var caption = (media.caption==null? "": media.caption.text) + " via " + media.user.username;
+        var figdesc = (media.caption!=null && media.tags.length < 7 ?  media.tags.join(' ') + ' <br/><small> ' + media.caption.text + ' </small> ' : media.tags.join(' '));
+        var figlink = media.link;
+        if( /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ) {
+          figlink = "instagram://media?id="+media.id;
+        }
+        var figtime = '<a target="_blank" href="'+figlink+'" title="'+caption+'">'+moment.unix(parseInt(media.created_time)).fromNoww()+'</a>';
+        var figcaption = '<figcaption class="item-meta"><h3>'+figdesc+'</h3><span>'+media.user.username+'</span><div><a target="_blank" href="'+figlink+'" title="'+caption+'">Take a Look</a></div>'
+        var figcaption_time = '<figcaption class="item-time"><h5>'+figtime+'</h5></figcaption>'
+
+        var fig = '<figure><div><img data-uid="'+media.id+'" src="'+media.images.low_resolution.url+'" alt="'+caption+'" data-adaptive-background="1"/></div>'+figcaption_time+figcaption+'</figure>';
+        var $newItems = $('<div class="element" data-created="'+media.created_time+'" data-uid="'+media.id+'">'+fig+'</div>');
+        self.wrapper.prepend($newItems).isotope('prepended',$newItems );
+        self.wrapper.isotope('updateSortData').isotope();
+      });
+
+
+
+    }
+
+
+  }
+
+  , socket_parsed: function(d){
+    var src = "";
+    if(d.channelSrc=="twitter"){
+      src = "twitter";
+      // console.log('twitter');
+      // console.log(d);
+      // this.createToken(src,this.sceneData[src]);
+    }else{
+      src = "instagram";
+      //incoming instagram data contains the last twenty media items
+      // this.createToken(src,this.sceneData[src]);
+      this.onNewMedia(d);
+    }
+    // v.debug('socket_parsed')
+    // v.debug(d)
   }
 
   , socket_error: function(e){
@@ -101,9 +235,9 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
   }
 
   // customize tokens before create it  
-  , createToken: function(i,data){
-     var token = { 
-        category: (i=="instagram" ? 1 : 0),
+  , createToken: function(src,data){
+      var token = { 
+        category: (src=="instagram" ? 1 : 0),
         callback:{
          draw:function(token){
            var size = token.attr("size")
@@ -111,14 +245,110 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
          }
         }
       }
-    if(typeof(data.texture)!="undefined"){
-     token.texture = {}
-     token.texture.src = data.texture
-    }
-    if(typeof(data.size)!="undefined"){
-      token.size = data.size
-    }
-    this.scene.addToken(token);
+      if(typeof(data.texture)!="undefined"){
+        token.texture = {}
+        token.texture.src = data.texture
+      }
+      if(typeof(data.size)!="undefined"){
+        token.size = data.size
+      }
+      this.scene.addToken(token);
+  }
+
+  , search_setup: function(){
+      var self = this;
+      var morphSearch = document.getElementById( 'morphsearch' ),
+        input = morphSearch.querySelector( 'input.morphsearch-input' ),
+        ctrlClose = morphSearch.querySelector( 'span.morphsearch-close' ),
+        isOpen = isAnimating = false,
+        // show/hide search area
+        toggleSearch = function(evt) {
+          // return if open and the input gets focused
+          if( evt.type.toLowerCase() === 'focus' && isOpen ) return false;
+
+          var offsets = morphsearch.getBoundingClientRect();
+          if( isOpen ) {
+            $(morphSearch).removeClass( 'open' );
+
+            // trick to hide input text once the search overlay closes 
+            // todo: hardcoded times, should be done after transition ends
+            if( input.value !== '' ) {
+              setTimeout(function() {
+                $( morphSearch ).addClass( 'hideInput' );
+                setTimeout(function() {
+                 $( morphSearch ).removeClass( 'hideInput' );
+                  input.value = '';
+                }, 300 );
+              }, 500);
+            }
+            
+            input.blur();
+          }
+          else {
+            $( morphSearch ).addClass( 'open' );
+            self.search_data();
+          }
+          isOpen = !isOpen;
+        };
+
+      // events
+      input.addEventListener( 'focus', toggleSearch );
+      ctrlClose.addEventListener( 'click', toggleSearch );
+      // esc key closes search overlay
+      // keyboard navigation events
+      document.addEventListener( 'keydown', function( ev ) {
+        var keyCode = ev.keyCode || ev.which;
+        if( keyCode === 27 && isOpen ) {
+          toggleSearch(ev);
+        }
+      } );
+
+
+      morphSearch.querySelector( 'button[type="submit"]' )
+        .addEventListener( 'click', function(ev) { 
+            ev.preventDefault();
+            window.location.assign('/tag/'+$('.morphsearch-input').val());
+        } );
+
+  }
+
+  , search_data: function(){
+      var tplString_personitem = "<li><a target='_blank' class='menuperson' href='http://instagram.com/<%= username %>'><img class='round' src='<%= profile_picture %>'/><h3><%= username %></h3></a></li>";
+      var tpl_personitem = _.template(tplString_personitem);
+      var $relatedColumn = $('.related-people ul.items');
+      $relatedColumn.html('');
+      _.each( this.sceneSetting.data.related.people.slice(0,7), function(p){
+        $relatedColumn.append(tpl_personitem(p));
+      });
+      // var tplString_hashtagitem = "<a class='menutag' href='<%= tag_path %><img src='<%= tag_img %>' alt=''/><h3><%= tag_title %></h3></a>";
+      var tplString_hashtagitem = "<li><a class='menutag' href='/tag/<%= tag %>'<h3><%= tag %></h3></a></li>";
+      var tpl_hashtagitem = _.template(tplString_hashtagitem);
+      $relatedColumn = $('.related-tags ul.items');
+      $relatedColumn.html('');
+      _.each( this.sceneSetting.data.related.hashtags.slice(0,7), function(t){
+        $relatedColumn.append(tpl_hashtagitem({tag: t}));
+      });
+  
+  }
+
+  , isotope_setup: function(){
+      $.bridget('isotope', Isotope);
+      this.wrapper = $('#wrapper').isotope({
+        // options
+        sortAscending: false,
+        getSortData: {
+            date: function (el) {
+                return new Date(parseInt($(el).data('created'))*1000);
+            }
+        },
+        sortBy: 'date',
+        itemSelector : '.element',
+        masonry: {
+          columnWidth: 4,//'.grid-sizer'  ,
+          isFitWidth: true
+        }
+      });
+
   }
 
   , render_viz: function(){
@@ -133,6 +363,7 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
 
     // start the clock 
     var self = this;
+    /*
     var clock = window.setInterval(
                   function (){
                    time = new Date()
@@ -145,19 +376,20 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
                   for (var s in srcs) {
                     var src = srcs[s];
                     self.sceneData[src].now = Math.round(milliSecondsToday*self.sceneData[src].value/1000)
-                    if(self.sceneData[src].now!=self.sceneData[src].old && _.random(1)==1) self.createToken(src,self.sceneData[src])
+                    if(self.sceneData[src].now!=self.sceneData[src].old && _.random(2)==1) self.createToken(src,self.sceneData[src])
                     self.sceneData[src].old = self.sceneData[src].now
                   };
                  }
                  , 1000); 
+    */
 
     // add legends 
     var labeling =function(setting,container){
-    var divWidth = Math.round(setting.width/setting.data.model.length)
+      var divWidth = Math.round(setting.width/setting.data.model.length)
 
-     for (var i = setting.data.model.length-1; i >= 0 ; i--) {
+      for (var i in setting.data.model) {
        $('#'+container).append('<div class="label" style="width:'+divWidth+'px;">'+setting.data.model[i].label+'</div>');
-     }
+      }
     }
     labeling(this.sceneSetting,"headerLabel")
 
@@ -165,36 +397,41 @@ module.exports.HashtagsView = HashtagsView = Backbone.View.extend({
   }
 
   , scene_setup : function(){
-    for (src in this.sceneData) {
-      this.sceneSetting.data.model.push({label:this.sceneData[src].label})
-      var source_value_init = this.collection.count_source[(this.sceneData[src].label).toLowerCase()];
-      this.sceneSetting.data.strata.push([{initValue: source_value_init, label: this.sceneData[src].label + " Strata "}])
-    };
+      window.addEventListener("keydown", this.keyControls, false);
+
+      this.sceneSetting.data.related.hashtags = _.union(this.sceneSetting.data.related.hashtags,sd.related.hashtags);
+      this.sceneSetting.data.related.people = _.union(this.sceneSetting.data.related.people,sd.related.people);
+
+      this.newMediaToggle = true;
+
+      for (src in this.sceneData) {
+        this.sceneSetting.data.model.push({label:this.sceneData[src].label})
+        var source_value_init = this.collection.count_source[src];
+        this.sceneSetting.data.strata.push([{initValue: parseInt(source_value_init), label: this.sceneData[src].label + " Strata "}])
+      };
   }
 
 });
 
 module.exports.init = function() {
   view = new HashtagsView({
-    el: $('body'),
+    el: "document",
     collection: new Hashtags(null, { hashtag: sd.hashtag })
   });
 
-  socket.on('message', function(update){ 
-    var data;
+  socket.on('message', function(data){ 
     try{
-      data = $.parseJSON(update);
+      v.debug('SOCKET update')
       view.trigger('socket:parsed',data);
-      v.debug('incoming socket message')
     }catch(e){
+      v.debug('SOCKET ERROR update')
       view.trigger('socket:error',update);
       v.debug(e);
     }
   });
 
-
 };
-},{"../../collections/hashtag_items.js":6,"./templates/helpers":2,"./templates/list.jade":4,"backbone":8,"jquery":12,"sharify":14,"socket.io-browserify":15,"underscore":16}],2:[function(require,module,exports){
+},{"../../collections/hashtag_items.js":6,"./templates/helpers":2,"./templates/list.jade":4,"backbone":8,"isotope-layout":9,"jquery":27,"jquery-bridget":26,"moment":28,"sharify":29,"socket.io-browserify":30,"underscore":31}],2:[function(require,module,exports){
 var _ = require('underscore')
 	, moment = require('moment')
   	, sd = require('sharify').data;
@@ -221,7 +458,7 @@ exports.debug = debug;
 
 exports.moment = moment;
 exports._ = _;
-},{"moment":13,"sharify":14,"underscore":16}],3:[function(require,module,exports){
+},{"moment":28,"sharify":29,"underscore":31}],3:[function(require,module,exports){
 /*
  * Visual Sedimentation Library v0.01
  * http://www.visualsedimentation.org/
@@ -259,7 +496,7 @@ exports._ = _;
 
 $ = require('jquery');
 (function(){if(!Date.now){Date.now=function(){return +new Date}}try{document.createElement("div").style.setProperty("opacity",0,"")}catch(DF){var Bv=CSSStyleDeclaration.prototype,D4=Bv.setProperty;Bv.setProperty=function(e,Ew,Ev){D4.call(this,e,Ew+"",Ev)}}d3={version:"2.8.1"};function Ep(Ex,Ew){try{for(var Ev in Ew){Object.defineProperty(Ex.prototype,Ev,{value:Ew[Ev],enumerable:false})}}catch(Ey){Ex.prototype=Ew}}var B2=At;function En(Ev){var e=-1,Ex=Ev.length,Ew=[];while(++e<Ex){Ew.push(Ev[e])}return Ew}function At(e){return Array.prototype.slice.call(e)}try{B2(document.documentElement.childNodes)[0].nodeType}catch(EM){B2=En}var Ci=[].__proto__?function(Ev,e){Ev.__proto__=e}:function(Ew,e){for(var Ev in e){Ew[Ev]=e[Ev]}};d3.map=function(e){var Ew=new AK;for(var Ev in e){Ew.set(Ev,e[Ev])}return Ew};function AK(){}Ep(AK,{has:function(e){return Er+e in this},get:function(e){return this[Er+e]},set:function(e,Ev){return this[Er+e]=Ev},remove:function(e){e=Er+e;return e in this&&delete this[e]},keys:function(){var e=[];this.forEach(function(Ev){e.push(Ev)});return e},values:function(){var e=[];this.forEach(function(Ev,Ew){e.push(Ew)});return e},entries:function(){var e=[];this.forEach(function(Ev,Ew){e.push({key:Ev,value:Ew})});return e},forEach:function(Ev){for(var e in this){if(e.charCodeAt(0)===Bx){Ev.call(this,e.substring(1),this[e])}}}});var Er="\0",Bx=Er.charCodeAt(0);function t(){return this}d3.functor=function(e){return typeof e==="function"?e:function(){return e}};d3.rebind=function(Ew,Ev){var e=1,Ey=arguments.length,Ex;while(++e<Ey){Ew[Ex=arguments[e]]=CT(Ew,Ev,Ev[Ex])}return Ew};function CT(Ev,e,Ew){return function(){var Ex=Ew.apply(e,arguments);return arguments.length?Ev:Ex}}d3.ascending=function(Ev,e){return Ev<e?-1:Ev>e?1:Ev>=e?0:NaN};d3.descending=function(Ev,e){return e<Ev?-1:e>Ev?1:e>=Ev?0:NaN};d3.mean=function(E0,Ey){var Ez=E0.length,Ev,e=0,Ex=-1,Ew=0;if(arguments.length===1){while(++Ex<Ez){if(ET(Ev=E0[Ex])){e+=(Ev-e)/++Ew}}}else{while(++Ex<Ez){if(ET(Ev=Ey.call(E0,E0[Ex],Ex))){e+=(Ev-e)/++Ew}}}return Ew?e:undefined};d3.median=function(Ev,e){if(arguments.length>1){Ev=Ev.map(e)}Ev=Ev.filter(ET);return Ev.length?d3.quantile(Ev.sort(d3.ascending),0.5):undefined};d3.min=function(Ez,Ex){var Ew=-1,Ey=Ez.length,Ev,e;if(arguments.length===1){while(++Ew<Ey&&((Ev=Ez[Ew])==null||Ev!=Ev)){Ev=undefined}while(++Ew<Ey){if((e=Ez[Ew])!=null&&Ev>e){Ev=e}}}else{while(++Ew<Ey&&((Ev=Ex.call(Ez,Ez[Ew],Ew))==null||Ev!=Ev)){Ev=undefined}while(++Ew<Ey){if((e=Ex.call(Ez,Ez[Ew],Ew))!=null&&Ev>e){Ev=e}}}return Ev};d3.max=function(Ez,Ex){var Ew=-1,Ey=Ez.length,Ev,e;if(arguments.length===1){while(++Ew<Ey&&((Ev=Ez[Ew])==null||Ev!=Ev)){Ev=undefined}while(++Ew<Ey){if((e=Ez[Ew])!=null&&e>Ev){Ev=e}}}else{while(++Ew<Ey&&((Ev=Ex.call(Ez,Ez[Ew],Ew))==null||Ev!=Ev)){Ev=undefined}while(++Ew<Ey){if((e=Ex.call(Ez,Ez[Ew],Ew))!=null&&e>Ev){Ev=e}}}return Ev};d3.extent=function(E0,Ex){var Ew=-1,Ez=E0.length,Ev,e,Ey;if(arguments.length===1){while(++Ew<Ez&&((Ev=Ey=E0[Ew])==null||Ev!=Ev)){Ev=Ey=undefined}while(++Ew<Ez){if((e=E0[Ew])!=null){if(Ev>e){Ev=e}if(Ey<e){Ey=e}}}}else{while(++Ew<Ez&&((Ev=Ey=Ex.call(E0,E0[Ew],Ew))==null||Ev!=Ev)){Ev=undefined}while(++Ew<Ez){if((e=Ex.call(E0,E0[Ew],Ew))!=null){if(Ev>e){Ev=e}if(Ey<e){Ey=e}}}}return[Ev,Ey]};d3.random={normal:function(e,Ev){if(arguments.length<2){Ev=1}if(arguments.length<1){e=0}return function(){var Ew,Ey,Ex;do{Ew=Math.random()*2-1;Ey=Math.random()*2-1;Ex=Ew*Ew+Ey*Ey}while(!Ex||Ex>1);return e+Ev*Ew*Math.sqrt(-2*Math.log(Ex)/Ex)}}};function ET(e){return e!=null&&!isNaN(e)}d3.sum=function(Ez,Ex){var Ew=0,Ey=Ez.length,e,Ev=-1;if(arguments.length===1){while(++Ev<Ey){if(!isNaN(e=+Ez[Ev])){Ew+=e}}}else{while(++Ev<Ey){if(!isNaN(e=+Ex.call(Ez,Ez[Ev],Ev))){Ew+=e}}}return Ew};d3.quantile=function(Ew,E0){var Ex=(Ew.length-1)*E0+1,Ey=Math.floor(Ex),Ev=Ew[Ey-1],Ez=Ex-Ey;return Ez?Ev+Ez*(Ew[Ey]-Ev):Ev};d3.transpose=function(e){return d3.zip.apply(d3,e)};d3.zip=function(){if(!(Ez=arguments.length)){return[]}for(var Ex=-1,e=d3.min(arguments,Cz),Ew=new Array(e);++Ex<e;){for(var Ev=-1,Ez,Ey=Ew[Ex]=new Array(Ez);++Ev<Ez;){Ey[Ev]=arguments[Ev][Ex]}}return Ew};function Cz(e){return e.length}d3.bisector=function(e){return{left:function(Ew,Ev,Ez,Ey){if(arguments.length<3){Ez=0}if(arguments.length<4){Ey=Ew.length}while(Ez<Ey){var Ex=Ez+Ey>>1;if(e.call(Ew,Ew[Ex],Ex)<Ev){Ez=Ex+1}else{Ey=Ex}}return Ez},right:function(Ew,Ev,Ez,Ey){if(arguments.length<3){Ez=0}if(arguments.length<4){Ey=Ew.length}while(Ez<Ey){var Ex=Ez+Ey>>1;if(Ev<e.call(Ew,Ew[Ex],Ex)){Ey=Ex}else{Ez=Ex+1}}return Ez}}};var Do=d3.bisector(function(e){return e});d3.bisectLeft=Do.left;d3.bisect=d3.bisectRight=Do.right;d3.first=function(Ez,Ex){var Ew=0,Ey=Ez.length,Ev=Ez[0],e;if(arguments.length===1){Ex=d3.ascending}while(++Ew<Ey){if(Ex.call(Ez,Ev,e=Ez[Ew])>0){Ev=e}}return Ev};d3.last=function(Ez,Ex){var Ew=0,Ey=Ez.length,Ev=Ez[0],e;if(arguments.length===1){Ex=d3.ascending}while(++Ew<Ey){if(Ex.call(Ez,Ev,e=Ez[Ew])<=0){Ev=e}}return Ev};d3.nest=function(){var Ex={},Ew=[],E0=[],Ev,Ey;function Ez(E8,E6){if(E6>=Ew.length){return Ey?Ey.call(Ex,E8):(Ev?E8.sort(Ev):E8)}var E7=-1,E2=E8.length,FA=Ew[E6++],E5,E4,E3=new AK,E9,E1={};while(++E7<E2){if(E9=E3.get(E5=FA(E4=E8[E7]))){E9.push(E4)}else{E3.set(E5,[E4])}}E3.forEach(function(FB){E1[FB]=Ez(E3.get(FB),E6)});return E1}function e(E4,E5){if(E5>=Ew.length){return E4}var E1=[],E2=E0[E5++],E3;for(E3 in E4){E1.push({key:E3,values:e(E4[E3],E5)})}if(E2){E1.sort(function(E7,E6){return E2(E7.key,E6.key)})}return E1}Ex.map=function(E1){return Ez(E1,0)};Ex.entries=function(E1){return e(Ez(E1,0),0)};Ex.key=function(E1){Ew.push(E1);return Ex};Ex.sortKeys=function(E1){E0[Ew.length-1]=E1;return Ex};Ex.sortValues=function(E1){Ev=E1;return Ex};Ex.rollup=function(E1){Ey=E1;return Ex};return Ex};d3.keys=function(Ew){var Ev=[];for(var e in Ew){Ev.push(e)}return Ev};d3.values=function(Ew){var e=[];for(var Ev in Ew){e.push(Ew[Ev])}return e};d3.entries=function(Ew){var e=[];for(var Ev in Ew){e.push({key:Ev,value:Ew[Ev]})}return e};d3.permute=function(Ey,Ev){var e=[],Ew=-1,Ex=Ev.length;while(++Ew<Ex){e[Ew]=Ey[Ev[Ew]]}return e};d3.merge=function(e){return Array.prototype.concat.apply([],e)};d3.split=function(E0,Ey){var Ex=[],e=[],Ew,Ev=-1,Ez=E0.length;if(arguments.length<2){Ey=Cg}while(++Ev<Ez){if(Ey.call(e,Ew=E0[Ev],Ev)){e=[]}else{if(!e.length){Ex.push(e)}e.push(Ew)}}return Ex};function Cg(e){return e==null}function BR(e){return e.replace(/(^\s+)|(\s+$)/g,"").replace(/\s+/g," ")}d3.range=function(E0,Ey,Ez){if(arguments.length<3){Ez=1;if(arguments.length<2){Ey=E0;E0=0}}if((Ey-E0)/Ez===Infinity){throw new Error("infinite range")}var Ev=[],e=Dl(Math.abs(Ez)),Ex=-1,Ew;E0*=e,Ey*=e,Ez*=e;if(Ez<0){while((Ew=E0+Ez*++Ex)>Ey){Ev.push(Ew/e)}}else{while((Ew=E0+Ez*++Ex)<Ey){Ev.push(Ew/e)}}return Ev};function Dl(e){var Ev=1;while(e*Ev%1){Ev*=10}return Ev}d3.requote=function(e){return e.replace(Bg,"\\$&")};var Bg=/[\\\^\$\*\+\?\|\[\]\(\)\.\{\}]/g;d3.round=function(e,Ev){return Ev?Math.round(e*(Ev=Math.pow(10,Ev)))/Ev:Math.round(e)};d3.xhr=function(e,Ew,Ex){var Ev=new XMLHttpRequest;if(arguments.length<3){Ex=Ew,Ew=null}else{if(Ew&&Ev.overrideMimeType){Ev.overrideMimeType(Ew)}}Ev.open("GET",e,true);if(Ew){Ev.setRequestHeader("Accept",Ew)}Ev.onreadystatechange=function(){if(Ev.readyState===4){Ex(Ev.status<300?Ev:null)}};Ev.send(null)};d3.text=function(e,Ew,Ex){function Ev(Ey){Ex(Ey&&Ey.responseText)}if(arguments.length<3){Ex=Ew;Ew=null}d3.xhr(e,Ew,Ev)};d3.json=function(e,Ev){d3.text(e,"application/json",function(Ew){Ev(Ew?JSON.parse(Ew):null)})};d3.html=function(e,Ev){d3.text(e,"text/html",function(Ex){if(Ex!=null){var Ew=document.createRange();Ew.selectNode(document.body);Ex=Ew.createContextualFragment(Ex)}Ev(Ex)})};d3.xml=function(e,Ew,Ex){function Ev(Ey){Ex(Ey&&Ey.responseXML)}if(arguments.length<3){Ex=Ew;Ew=null}d3.xhr(e,Ew,Ev)};var CJ={svg:"http://www.w3.org/2000/svg",xhtml:"http://www.w3.org/1999/xhtml",xlink:"http://www.w3.org/1999/xlink",xml:"http://www.w3.org/XML/1998/namespace",xmlns:"http://www.w3.org/2000/xmlns/"};d3.ns={prefix:CJ,qualify:function(e){var Ev=e.indexOf(":"),Ew=e;if(Ev>=0){Ew=e.substring(0,Ev);e=e.substring(Ev+1)}return CJ.hasOwnProperty(Ew)?{space:CJ[Ew],local:e}:e}};d3.dispatch=function(){var e=new Ce,Ev=-1,Ew=arguments.length;while(++Ev<Ew){e[arguments[Ev]]=C2(e)}return e};function Ce(){}Ce.prototype.on=function(Ew,Ex){var Ev=Ew.indexOf("."),e="";if(Ev>0){e=Ew.substring(Ev+1);Ew=Ew.substring(0,Ev)}return arguments.length<2?this[Ew].on(e):this[Ew].on(e,Ex)};function C2(e){var Ew=[],Ev=new AK;function Ex(){var E0=Ew,Ez=-1,E1=E0.length,Ey;while(++Ez<E1){if(Ey=E0[Ez].on){Ey.apply(this,arguments)}}return e}Ex.on=function(Ez,E1){var Ey=Ev.get(Ez),E0;if(arguments.length<2){return Ey&&Ey.on}if(Ey){Ey.on=null;Ew=Ew.slice(0,E0=Ew.indexOf(Ey)).concat(Ew.slice(E0+1));Ev.remove(Ez)}if(E1){Ew.push(Ev.set(Ez,{on:E1}))}return e};return Ex}d3.format=function(E2){var Ez=BK.exec(E2),E4=Ez[1]||" ",Ev=Ez[3]||"",Ex=Ez[5],e=+Ez[6],E5=Ez[7],E0=Ez[8],E1=Ez[9],Ew=1,E3="",Ey=false;if(E0){E0=+E0.substring(1)}if(Ex){E4="0";if(E5){e-=Math.floor((e-1)/4)}}switch(E1){case"n":E5=true;E1="g";break;case"%":Ew=100;E3="%";E1="f";break;case"p":Ew=100;E3="%";E1="r";break;case"d":Ey=true;E0=0;break;case"s":Ew=-1;E1="r";break}if(E1=="r"&&!E0){E1="g"}E1=R.get(E1)||Ag;return function(E9){if(Ey&&(E9%1)){return""}var E6=(E9<0)&&(E9=-E9)?"\u2212":Ev;if(Ew<0){var E8=d3.formatPrefix(E9,E0);E9*=E8.scale;E3=E8.symbol}else{E9*=Ew}E9=E1(E9,E0);if(Ex){var E7=E9.length+E6.length;if(E7<e){E9=new Array(e-E7+1).join(E4)+E9}if(E5){E9=Bj(E9)}E9=E6+E9}else{if(E5){E9=Bj(E9)}E9=E6+E9;var E7=E9.length;if(E7<e){E9=new Array(e-E7+1).join(E4)+E9}}return E9+E3}};var BK=/(?:([^{])?([<>=^]))?([+\- ])?(#)?(0)?([0-9]+)?(,)?(\.[0-9]+)?([a-zA-Z%])?/;var R=d3.map({g:function(e,Ev){return e.toPrecision(Ev)},e:function(e,Ev){return e.toExponential(Ev)},f:function(e,Ev){return e.toFixed(Ev)},r:function(e,Ev){return d3.round(e,Ev=CL(e,Ev)).toFixed(Math.max(0,Math.min(20,Ev)))}});function CL(e,Ev){return Ev-(e?1+Math.floor(Math.log(e+Math.pow(10,1+Math.floor(Math.log(e)/Math.LN10)-Ev))/Math.LN10):1)}function Ag(e){return e+""}function Bj(Ex){var Ev=Ex.lastIndexOf("."),Ew=Ev>=0?Ex.substring(Ev):(Ev=Ex.length,""),e=[];while(Ev>0){e.push(Ex.substring(Ev-=3,Ev+3))}return e.reverse().join(",")+Ew}var BH=["y","z","a","f","p","n","μ","m","","k","M","G","T","P","E","Z","Y"].map(B1);d3.formatPrefix=function(Ew,e){var Ev=0;if(Ew){if(Ew<0){Ew*=-1}if(e){Ew=d3.round(Ew,CL(Ew,e))}Ev=1+Math.floor(1e-12+Math.log(Ew)/Math.LN10);Ev=Math.max(-24,Math.min(24,Math.floor((Ev<=0?Ev+1:Ev-1)/3)*3))}return BH[8+Ev/3]};function B1(Ev,e){return{scale:Math.pow(10,(8-e)*3),symbol:Ev}}var A2=AP(2),Y=AP(3),EO=function(){return Bi};var p=d3.map({linear:EO,poly:AP,quad:function(){return A2},cubic:function(){return Y},sin:function(){return Df},exp:function(){return DC},circle:function(){return CH},elastic:o,back:ED,bounce:function(){return BB}});var I=d3.map({"in":Bi,out:U,"in-out":AW,"out-in":function(e){return AW(U(e))}});d3.ease=function(Ev){var Ex=Ev.indexOf("-"),Ew=Ex>=0?Ev.substring(0,Ex):Ev,e=Ex>=0?Ev.substring(Ex+1):"in";Ew=p.get(Ew)||EO;e=I.get(e)||Bi;return DJ(e(Ew.apply(null,Array.prototype.slice.call(arguments,1))))};function DJ(e){return function(Ev){return Ev<=0?0:Ev>=1?1:e(Ev)}}function U(e){return function(Ev){return 1-e(1-Ev)}}function AW(e){return function(Ev){return 0.5*(Ev<0.5?e(2*Ev):(2-e(2-2*Ev)))}}function Bi(e){return e}function AP(Ev){return function(e){return Math.pow(e,Ev)}}function Df(e){return 1-Math.cos(e*Math.PI/2)}function DC(e){return Math.pow(2,10*(e-1))}function CH(e){return 1-Math.sqrt(1-e*e)}function o(e,Ew){var Ev;if(arguments.length<2){Ew=0.45}if(arguments.length<1){e=1;Ev=Ew/4}else{Ev=Ew/(2*Math.PI)*Math.asin(1/e)}return function(Ex){return 1+e*Math.pow(2,10*-Ex)*Math.sin((Ex-Ev)*2*Math.PI/Ew)}}function ED(e){if(!e){e=1.70158}return function(Ev){return Ev*Ev*((e+1)*Ev-e)}}function BB(e){return e<1/2.75?7.5625*e*e:e<2/2.75?7.5625*(e-=1.5/2.75)*e+0.75:e<2.5/2.75?7.5625*(e-=2.25/2.75)*e+0.9375:7.5625*(e-=2.625/2.75)*e+0.984375}d3.event=null;function Ee(){d3.event.stopPropagation();d3.event.preventDefault()}function u(){var Ew=d3.event,Ev;while(Ev=Ew.sourceEvent){Ew=Ev}return Ew}function EN(Ew){var e=new Ce,Ev=0,Ex=arguments.length;while(++Ev<Ex){e[arguments[Ev]]=C2(e)}e.of=function(Ez,Ey){return function(E0){try{var E1=E0.sourceEvent=d3.event;E0.target=Ew;d3.event=E0;e[E0.type].apply(Ez,Ey)}finally{d3.event=E1}}};return e}d3.interpolate=function(Ev,e){var Ew=d3.interpolators.length,Ex;while(--Ew>=0&&!(Ex=d3.interpolators[Ew](Ev,e))){}return Ex};d3.interpolateNumber=function(Ev,e){e-=Ev;return function(Ew){return Ev+e*Ew}};d3.interpolateRound=function(Ev,e){e-=Ev;return function(Ew){return Math.round(Ev+e*Ew)}};d3.interpolateString=function(E1,E0){var Ex,Ez,Ey,E3=0,E2=0,E4=[],e=[],Ew,Ev;DS.lastIndex=0;for(Ez=0;Ex=DS.exec(E0);++Ez){if(Ex.index){E4.push(E0.substring(E3,E2=Ex.index))}e.push({i:E4.length,x:Ex[0]});E4.push(null);E3=DS.lastIndex}if(E3<E0.length){E4.push(E0.substring(E3))}for(Ez=0,Ew=e.length;(Ex=DS.exec(E1))&&Ez<Ew;++Ez){Ev=e[Ez];if(Ev.x==Ex[0]){if(Ev.i){if(E4[Ev.i+1]==null){E4[Ev.i-1]+=Ev.x;E4.splice(Ev.i,1);for(Ey=Ez+1;Ey<Ew;++Ey){e[Ey].i--}}else{E4[Ev.i-1]+=Ev.x+E4[Ev.i+1];E4.splice(Ev.i,2);for(Ey=Ez+1;Ey<Ew;++Ey){e[Ey].i-=2}}}else{if(E4[Ev.i+1]==null){E4[Ev.i]=Ev.x}else{E4[Ev.i]=Ev.x+E4[Ev.i+1];E4.splice(Ev.i+1,1);for(Ey=Ez+1;Ey<Ew;++Ey){e[Ey].i--}}}e.splice(Ez,1);Ew--;Ez--}else{Ev.x=d3.interpolateNumber(parseFloat(Ex[0]),parseFloat(Ev.x))}}while(Ez<Ew){Ev=e.pop();if(E4[Ev.i+1]==null){E4[Ev.i]=Ev.x}else{E4[Ev.i]=Ev.x+E4[Ev.i+1];E4.splice(Ev.i+1,1)}Ew--}if(E4.length===1){return E4[0]==null?e[0].x:function(){return E0}}return function(E5){for(Ez=0;Ez<Ew;++Ez){E4[(Ev=e[Ez]).i]=Ev.x(E5)}return E4.join("")}};d3.interpolateTransform=function(E7,E6){var E8=[],Ev=[],Ez,Ey=d3.transform(E7),Ex=d3.transform(E6),E3=Ey.translate,E2=Ex.translate,Ew=Ey.rotate,e=Ex.rotate,E1=Ey.skew,E0=Ex.skew,E5=Ey.scale,E4=Ex.scale;if(E3[0]!=E2[0]||E3[1]!=E2[1]){E8.push("translate(",null,",",null,")");Ev.push({i:1,x:d3.interpolateNumber(E3[0],E2[0])},{i:3,x:d3.interpolateNumber(E3[1],E2[1])})}else{if(E2[0]||E2[1]){E8.push("translate("+E2+")")}else{E8.push("")}}if(Ew!=e){Ev.push({i:E8.push(E8.pop()+"rotate(",null,")")-2,x:d3.interpolateNumber(Ew,e)})}else{if(e){E8.push(E8.pop()+"rotate("+e+")")}}if(E1!=E0){Ev.push({i:E8.push(E8.pop()+"skewX(",null,")")-2,x:d3.interpolateNumber(E1,E0)})}else{if(E0){E8.push(E8.pop()+"skewX("+E0+")")}}if(E5[0]!=E4[0]||E5[1]!=E4[1]){Ez=E8.push(E8.pop()+"scale(",null,",",null,")");Ev.push({i:Ez-4,x:d3.interpolateNumber(E5[0],E4[0])},{i:Ez-2,x:d3.interpolateNumber(E5[1],E4[1])})}else{if(E4[0]!=1||E4[1]!=1){E8.push(E8.pop()+"scale("+E4+")")}}Ez=Ev.length;return function(FA){var E9=-1,FB;while(++E9<Ez){E8[(FB=Ev[E9]).i]=FB.x(FA)}return E8.join("")}};d3.interpolateRgb=function(Ev,e){Ev=d3.rgb(Ev);e=d3.rgb(e);var Ex=Ev.r,Ew=Ev.g,E0=Ev.b,Ez=e.r-Ex,Ey=e.g-Ew,E1=e.b-E0;return function(E2){return"#"+BI(Math.round(Ex+Ez*E2))+BI(Math.round(Ew+Ey*E2))+BI(Math.round(E0+E1*E2))}};d3.interpolateHsl=function(Ew,e){Ew=d3.hsl(Ew);e=d3.hsl(e);var E1=Ew.h,E0=Ew.s,Ex=Ew.l,Ez=e.h-E1,Ey=e.s-E0,Ev=e.l-Ex;return function(E2){return Ac(E1+Ez*E2,E0+Ey*E2,Ex+Ev*E2).toString()}};d3.interpolateArray=function(Ey,Ew){var Ev=[],E1=[],Ex=Ey.length,e=Ew.length,E0=Math.min(Ey.length,Ew.length),Ez;for(Ez=0;Ez<E0;++Ez){Ev.push(d3.interpolate(Ey[Ez],Ew[Ez]))}for(;Ez<Ex;++Ez){E1[Ez]=Ey[Ez]}for(;Ez<e;++Ez){E1[Ez]=Ew[Ez]}return function(E2){for(Ez=0;Ez<E0;++Ez){E1[Ez]=Ev[Ez](E2)}return E1}};d3.interpolateObject=function(Ev,e){var Ex={},Ey={},Ew;for(Ew in Ev){if(Ew in e){Ex[Ew]=DD(Ew)(Ev[Ew],e[Ew])}else{Ey[Ew]=Ev[Ew]}}for(Ew in e){if(!(Ew in Ev)){Ey[Ew]=e[Ew]}}return function(Ez){for(Ew in Ex){Ey[Ew]=Ex[Ew](Ez)}return Ey}};var DS=/[-+]?(?:\d*\.?\d+)(?:[eE][-+]?\d+)?/g;function DD(e){return e=="transform"?d3.interpolateTransform:d3.interpolate}d3.interpolators=[d3.interpolateObject,function(Ev,e){return(e instanceof Array)&&d3.interpolateArray(Ev,e)},function(Ev,e){return(typeof Ev==="string"||typeof e==="string")&&d3.interpolateString(Ev+"",e+"")},function(Ev,e){return(typeof e==="string"?x.has(e)||/^(#|rgb\(|hsl\()/.test(e):e instanceof Ct||e instanceof DB)&&d3.interpolateRgb(Ev,e)},function(Ev,e){return !isNaN(Ev=+Ev)&&!isNaN(e=+e)&&d3.interpolateNumber(Ev,e)}];function EW(Ev,e){e=e-(Ev=+Ev)?1/(e-Ev):0;return function(Ew){return(Ew-Ev)*e}}function AF(Ev,e){e=e-(Ev=+Ev)?1/(e-Ev):0;return function(Ew){return Math.max(0,Math.min(1,(Ew-Ev)*e))}}d3.rgb=function(Ew,Ev,e){return arguments.length===1?(Ew instanceof Ct?CO(Ew.r,Ew.g,Ew.b):AR(""+Ew,CO,Ac)):CO(~~Ew,~~Ev,~~e)};function CO(Ew,Ev,e){return new Ct(Ew,Ev,e)}function Ct(Ew,Ev,e){this.r=Ew;this.g=Ev;this.b=e}Ct.prototype.brighter=function(Ev){Ev=Math.pow(0.7,arguments.length?Ev:1);var Ey=this.r,Ex=this.g,e=this.b,Ew=30;if(!Ey&&!Ex&&!e){return CO(Ew,Ew,Ew)}if(Ey&&Ey<Ew){Ey=Ew}if(Ex&&Ex<Ew){Ex=Ew}if(e&&e<Ew){e=Ew}return CO(Math.min(255,Math.floor(Ey/Ev)),Math.min(255,Math.floor(Ex/Ev)),Math.min(255,Math.floor(e/Ev)))};Ct.prototype.darker=function(e){e=Math.pow(0.7,arguments.length?e:1);return CO(Math.floor(e*this.r),Math.floor(e*this.g),Math.floor(e*this.b))};Ct.prototype.hsl=function(){return Ds(this.r,this.g,this.b)};Ct.prototype.toString=function(){return"#"+BI(this.r)+BI(this.g)+BI(this.b)};function BI(e){return e<16?"0"+Math.max(0,e).toString(16):Math.min(255,e).toString(16)}function AR(Ez,Ex,E0){var e=0,Ew=0,Ey=0,E2,E1,Ev;E2=/([a-z]+)\((.*)\)/i.exec(Ez);if(E2){E1=E2[2].split(",");switch(E2[1]){case"hsl":return E0(parseFloat(E1[0]),parseFloat(E1[1])/100,parseFloat(E1[2])/100);case"rgb":return Ex(Ch(E1[0]),Ch(E1[1]),Ch(E1[2]))}}if(Ev=x.get(Ez)){return Ex(Ev.r,Ev.g,Ev.b)}if(Ez!=null&&Ez.charAt(0)==="#"){if(Ez.length===4){e=Ez.charAt(1);e+=e;Ew=Ez.charAt(2);Ew+=Ew;Ey=Ez.charAt(3);Ey+=Ey}else{if(Ez.length===7){e=Ez.substring(1,3);Ew=Ez.substring(3,5);Ey=Ez.substring(5,7)}}e=parseInt(e,16);Ew=parseInt(Ew,16);Ey=parseInt(Ey,16)}return Ex(e,Ew,Ey)}function Ds(e,Ey,E0){var Ew=Math.min(e/=255,Ey/=255,E0/=255),E1=Math.max(e,Ey,E0),Ez=E1-Ew,Ex,E2,Ev=(E1+Ew)/2;if(Ez){E2=Ev<0.5?Ez/(E1+Ew):Ez/(2-E1-Ew);if(e==E1){Ex=(Ey-E0)/Ez+(Ey<E0?6:0)}else{if(Ey==E1){Ex=(E0-e)/Ez+2}else{Ex=(e-Ey)/Ez+4}}Ex*=60}else{E2=Ex=0}return CX(Ex,E2,Ev)}function Ch(Ev){var e=parseFloat(Ev);return Ev.charAt(Ev.length-1)==="%"?Math.round(e*2.55):e}var x=d3.map({aliceblue:"#f0f8ff",antiquewhite:"#faebd7",aqua:"#00ffff",aquamarine:"#7fffd4",azure:"#f0ffff",beige:"#f5f5dc",bisque:"#ffe4c4",black:"#000000",blanchedalmond:"#ffebcd",blue:"#0000ff",blueviolet:"#8a2be2",brown:"#a52a2a",burlywood:"#deb887",cadetblue:"#5f9ea0",chartreuse:"#7fff00",chocolate:"#d2691e",coral:"#ff7f50",cornflowerblue:"#6495ed",cornsilk:"#fff8dc",crimson:"#dc143c",cyan:"#00ffff",darkblue:"#00008b",darkcyan:"#008b8b",darkgoldenrod:"#b8860b",darkgray:"#a9a9a9",darkgreen:"#006400",darkgrey:"#a9a9a9",darkkhaki:"#bdb76b",darkmagenta:"#8b008b",darkolivegreen:"#556b2f",darkorange:"#ff8c00",darkorchid:"#9932cc",darkred:"#8b0000",darksalmon:"#e9967a",darkseagreen:"#8fbc8f",darkslateblue:"#483d8b",darkslategray:"#2f4f4f",darkslategrey:"#2f4f4f",darkturquoise:"#00ced1",darkviolet:"#9400d3",deeppink:"#ff1493",deepskyblue:"#00bfff",dimgray:"#696969",dimgrey:"#696969",dodgerblue:"#1e90ff",firebrick:"#b22222",floralwhite:"#fffaf0",forestgreen:"#228b22",fuchsia:"#ff00ff",gainsboro:"#dcdcdc",ghostwhite:"#f8f8ff",gold:"#ffd700",goldenrod:"#daa520",gray:"#808080",green:"#008000",greenyellow:"#adff2f",grey:"#808080",honeydew:"#f0fff0",hotpink:"#ff69b4",indianred:"#cd5c5c",indigo:"#4b0082",ivory:"#fffff0",khaki:"#f0e68c",lavender:"#e6e6fa",lavenderblush:"#fff0f5",lawngreen:"#7cfc00",lemonchiffon:"#fffacd",lightblue:"#add8e6",lightcoral:"#f08080",lightcyan:"#e0ffff",lightgoldenrodyellow:"#fafad2",lightgray:"#d3d3d3",lightgreen:"#90ee90",lightgrey:"#d3d3d3",lightpink:"#ffb6c1",lightsalmon:"#ffa07a",lightseagreen:"#20b2aa",lightskyblue:"#87cefa",lightslategray:"#778899",lightslategrey:"#778899",lightsteelblue:"#b0c4de",lightyellow:"#ffffe0",lime:"#00ff00",limegreen:"#32cd32",linen:"#faf0e6",magenta:"#ff00ff",maroon:"#800000",mediumaquamarine:"#66cdaa",mediumblue:"#0000cd",mediumorchid:"#ba55d3",mediumpurple:"#9370db",mediumseagreen:"#3cb371",mediumslateblue:"#7b68ee",mediumspringgreen:"#00fa9a",mediumturquoise:"#48d1cc",mediumvioletred:"#c71585",midnightblue:"#191970",mintcream:"#f5fffa",mistyrose:"#ffe4e1",moccasin:"#ffe4b5",navajowhite:"#ffdead",navy:"#000080",oldlace:"#fdf5e6",olive:"#808000",olivedrab:"#6b8e23",orange:"#ffa500",orangered:"#ff4500",orchid:"#da70d6",palegoldenrod:"#eee8aa",palegreen:"#98fb98",paleturquoise:"#afeeee",palevioletred:"#db7093",papayawhip:"#ffefd5",peachpuff:"#ffdab9",peru:"#cd853f",pink:"#ffc0cb",plum:"#dda0dd",powderblue:"#b0e0e6",purple:"#800080",red:"#ff0000",rosybrown:"#bc8f8f",royalblue:"#4169e1",saddlebrown:"#8b4513",salmon:"#fa8072",sandybrown:"#f4a460",seagreen:"#2e8b57",seashell:"#fff5ee",sienna:"#a0522d",silver:"#c0c0c0",skyblue:"#87ceeb",slateblue:"#6a5acd",slategray:"#708090",slategrey:"#708090",snow:"#fffafa",springgreen:"#00ff7f",steelblue:"#4682b4",tan:"#d2b48c",teal:"#008080",thistle:"#d8bfd8",tomato:"#ff6347",turquoise:"#40e0d0",violet:"#ee82ee",wheat:"#f5deb3",white:"#ffffff",whitesmoke:"#f5f5f5",yellow:"#ffff00",yellowgreen:"#9acd32"});x.forEach(function(e,Ev){x.set(e,AR(Ev,CO,Ac))});d3.hsl=function(Ew,Ev,e){return arguments.length===1?(Ew instanceof DB?CX(Ew.h,Ew.s,Ew.l):AR(""+Ew,Ds,CX)):CX(+Ew,+Ev,+e)};function CX(Ew,Ev,e){return new DB(Ew,Ev,e)}function DB(Ew,Ev,e){this.h=Ew;this.s=Ev;this.l=e}DB.prototype.brighter=function(e){e=Math.pow(0.7,arguments.length?e:1);return CX(this.h,this.s,this.l/e)};DB.prototype.darker=function(e){e=Math.pow(0.7,arguments.length?e:1);return CX(this.h,this.s,e*this.l)};DB.prototype.rgb=function(){return Ac(this.h,this.s,this.l)};DB.prototype.toString=function(){return this.rgb().toString()};function Ac(Ez,Ey,e){var Ex,Ew;Ez=Ez%360;if(Ez<0){Ez+=360}Ey=Ey<0?0:Ey>1?1:Ey;e=e<0?0:e>1?1:e;Ew=e<=0.5?e*(1+Ey):e+Ey-e*Ey;Ex=2*e-Ew;function Ev(E1){if(E1>360){E1-=360}else{if(E1<0){E1+=360}}if(E1<60){return Ex+(Ew-Ex)*E1/60}if(E1<180){return Ew}if(E1<240){return Ex+(Ew-Ex)*(240-E1)/60}return Ex}function E0(E1){return Math.round(Ev(E1)*255)}return CO(E0(Ez+120),E0(Ez),E0(Ez-120))}function CA(e){Ci(e,B9);return e}var Bn=function(e,Ev){return Ev.querySelector(e)},Db=function(e,Ev){return Ev.querySelectorAll(e)},CW=document.documentElement,B=CW.matchesSelector||CW.webkitMatchesSelector||CW.mozMatchesSelector||CW.msMatchesSelector||CW.oMatchesSelector,A=function(Ev,e){return B.call(Ev,e)};if(typeof Sizzle==="function"){Bn=function(e,Ev){return Sizzle(e,Ev)[0]};Db=function(e,Ev){return Sizzle.uniqueSort(Sizzle(e,Ev))};A=Sizzle.matchesSelector}var B9=[];d3.selection=function(){return D7};d3.selection.prototype=B9;B9.select=function(Ez){var Ew=[],E3,e,E2,Ex;if(typeof Ez!=="function"){Ez=S(Ez)}for(var E0=-1,Ey=this.length;++E0<Ey;){Ew.push(E3=[]);E3.parentNode=(E2=this[E0]).parentNode;for(var E1=-1,Ev=E2.length;++E1<Ev;){if(Ex=E2[E1]){E3.push(e=Ez.call(Ex,Ex.__data__,E1));if(e&&"__data__" in Ex){e.__data__=Ex.__data__}}else{E3.push(null)}}}return CA(Ew)};function S(e){return function(){return Bn(e,this)}}B9.selectAll=function(Ey){var Ev=[],E2,Ew;if(typeof Ey!=="function"){Ey=Bc(Ey)}for(var Ez=-1,Ex=this.length;++Ez<Ex;){for(var E1=this[Ez],E0=-1,e=E1.length;++E0<e;){if(Ew=E1[E0]){Ev.push(E2=B2(Ey.call(Ew,Ew.__data__,E0)));E2.parentNode=Ew}}}return CA(Ev)};function Bc(e){return function(){return Db(e,this)}}B9.attr=function(Ev,E1){Ev=d3.ns.qualify(Ev);if(arguments.length<2){var Ez=this.node();return Ev.local?Ez.getAttributeNS(Ev.space,Ev.local):Ez.getAttribute(Ev)}function Ew(){this.removeAttribute(Ev)}function Ey(){this.removeAttributeNS(Ev.space,Ev.local)}function E2(){this.setAttribute(Ev,E1)}function Ex(){this.setAttributeNS(Ev.space,Ev.local,E1)}function E0(){var E3=E1.apply(this,arguments);if(E3==null){this.removeAttribute(Ev)}else{this.setAttribute(Ev,E3)}}function e(){var E3=E1.apply(this,arguments);if(E3==null){this.removeAttributeNS(Ev.space,Ev.local)}else{this.setAttributeNS(Ev.space,Ev.local,E3)}}return this.each(E1==null?(Ev.local?Ey:Ew):(typeof E1==="function"?(Ev.local?e:E0):(Ev.local?Ex:E2)))};B9.classed=function(e,Ew){var Ex=e.split(G),Ey=Ex.length,Ev=-1;if(arguments.length>1){while(++Ev<Ey){Dy.call(this,Ex[Ev],Ew)}return this}else{while(++Ev<Ey){if(!Dy.call(this,Ex[Ev])){return false}}return true}};var G=/\s+/g;function Dy(e,Ey){var Ev=new RegExp("(^|\\s+)"+d3.requote(e)+"(\\s+|$)","g");if(arguments.length<2){var Ex=this.node();if(E1=Ex.classList){return E1.contains(e)}var E1=Ex.className;Ev.lastIndex=0;return Ev.test(E1.baseVal!=null?E1.baseVal:E1)}function E0(){if(E4=this.classList){return E4.add(e)}var E4=this.className,E2=E4.baseVal!=null,E3=E2?E4.baseVal:E4;Ev.lastIndex=0;if(!Ev.test(E3)){E3=BR(E3+" "+e);if(E2){E4.baseVal=E3}else{this.className=E3}}}function Ez(){if(E4=this.classList){return E4.remove(e)}var E4=this.className,E2=E4.baseVal!=null,E3=E2?E4.baseVal:E4;E3=BR(E3.replace(Ev," "));if(E2){E4.baseVal=E3}else{this.className=E3}}function Ew(){(Ey.apply(this,arguments)?E0:Ez).call(this)}return this.each(typeof Ey==="function"?Ew:Ey?E0:Ez)}B9.style=function(Ew,Ez,Ex){if(arguments.length<3){Ex=""}if(arguments.length<2){return window.getComputedStyle(this.node(),null).getPropertyValue(Ew)}function Ev(){this.style.removeProperty(Ew)}function Ey(){this.style.setProperty(Ew,Ez,Ex)}function e(){var E0=Ez.apply(this,arguments);if(E0==null){this.style.removeProperty(Ew)}else{this.style.setProperty(Ew,E0,Ex)}}return this.each(Ez==null?Ev:(typeof Ez==="function"?e:Ey))};B9.property=function(Ev,Ex){if(arguments.length<2){return this.node()[Ev]}function e(){delete this[Ev]}function Ew(){this[Ev]=Ex}function Ey(){var Ez=Ex.apply(this,arguments);if(Ez==null){delete this[Ev]}else{this[Ev]=Ez}}return this.each(Ex==null?e:(typeof Ex==="function"?Ey:Ew))};B9.text=function(e){return arguments.length<1?this.node().textContent:this.each(typeof e==="function"?function(){var Ev=e.apply(this,arguments);this.textContent=Ev==null?"":Ev}:e==null?function(){this.textContent=""}:function(){this.textContent=e})};B9.html=function(e){return arguments.length<1?this.node().innerHTML:this.each(typeof e==="function"?function(){var Ev=e.apply(this,arguments);this.innerHTML=Ev==null?"":Ev}:e==null?function(){this.innerHTML=""}:function(){this.innerHTML=e})};B9.append=function(Ev){Ev=d3.ns.qualify(Ev);function e(){return this.appendChild(document.createElementNS(this.namespaceURI,Ev))}function Ew(){return this.appendChild(document.createElementNS(Ev.space,Ev.local))}return this.select(Ev.local?Ew:e)};B9.insert=function(e,Ew){e=d3.ns.qualify(e);function Ev(){return this.insertBefore(document.createElementNS(this.namespaceURI,e),Bn(Ew,this))}function Ex(){return this.insertBefore(document.createElementNS(e.space,e.local),Bn(Ew,this))}return this.select(e.local?Ex:Ev)};B9.remove=function(){return this.each(function(){var e=this.parentNode;if(e){e.removeChild(this)}})};B9.data=function(E1,E3){var Ey=-1,Ev=this.length,E2,Ew;if(!arguments.length){E1=new Array(Ev=(E2=this[0]).length);while(++Ey<Ev){if(Ew=E2[Ey]){E1[Ey]=Ew.__data__}}return E1}function Ez(FG,E8){var FB,E5=FG.length,E7=E8.length,FE=Math.min(E5,E7),FD=Math.max(E5,E7),FI=[],FF=[],FC=[],E6,E4;if(E3){var FJ=new AK,FH=[],FA,E9=E8.length;for(FB=-1;++FB<E5;){FA=E3.call(E6=FG[FB],E6.__data__,FB);if(FJ.has(FA)){FC[E9++]=E6}else{FJ.set(FA,E6)}FH.push(FA)}for(FB=-1;++FB<E7;){FA=E3.call(E8,E4=E8[FB],FB);if(FJ.has(FA)){FI[FB]=E6=FJ.get(FA);E6.__data__=E4;FF[FB]=FC[FB]=null}else{FF[FB]=b(E4);FI[FB]=FC[FB]=null}FJ.remove(FA)}for(FB=-1;++FB<E5;){if(FJ.has(FH[FB])){FC[FB]=FG[FB]}}}else{for(FB=-1;++FB<FE;){E6=FG[FB];E4=E8[FB];if(E6){E6.__data__=E4;FI[FB]=E6;FF[FB]=FC[FB]=null}else{FF[FB]=b(E4);FI[FB]=FC[FB]=null}}for(;FB<E7;++FB){FF[FB]=b(E8[FB]);FI[FB]=FC[FB]=null}for(;FB<FD;++FB){FC[FB]=FG[FB];FF[FB]=FI[FB]=null}}FF.update=FI;FF.parentNode=FI.parentNode=FC.parentNode=FG.parentNode;E0.push(FF);Ex.push(FI);e.push(FC)}var E0=Az([]),Ex=CA([]),e=CA([]);if(typeof E1==="function"){while(++Ey<Ev){Ez(E2=this[Ey],E1.call(E2,E2.parentNode.__data__,Ey))}}else{while(++Ey<Ev){Ez(E2=this[Ey],E1)}}Ex.enter=function(){return E0};Ex.exit=function(){return e};return Ex};function b(e){return{__data__:e}}B9.datum=B9.map=function(e){return arguments.length<1?this.property("__data__"):this.property("__data__",e)};B9.filter=function(e){var Ew=[],E2,E1,Ex;if(typeof e!=="function"){e=AY(e)}for(var Ez=0,Ey=this.length;Ez<Ey;Ez++){Ew.push(E2=[]);E2.parentNode=(E1=this[Ez]).parentNode;for(var E0=0,Ev=E1.length;E0<Ev;E0++){if((Ex=E1[E0])&&e.call(Ex,Ex.__data__,E0)){E2.push(Ex)}}}return CA(Ew)};function AY(e){return function(){return A(this,e)}}B9.order=function(){for(var Ev=-1,e=this.length;++Ev<e;){for(var Ez=this[Ev],Ew=Ez.length-1,Ex=Ez[Ew],Ey;--Ew>=0;){if(Ey=Ez[Ew]){if(Ex&&Ex!==Ey.nextSibling){Ex.parentNode.insertBefore(Ey,Ex)}Ex=Ey}}}return this};B9.sort=function(Ev){Ev=D3.apply(this,arguments);for(var Ew=-1,e=this.length;++Ew<e;){this[Ew].sort(Ev)}return this.order()};function D3(e){if(!arguments.length){e=d3.ascending}return function(Ew,Ev){return e(Ew&&Ew.__data__,Ev&&Ev.__data__)}}B9.on=function(Ex,Ey,e){if(arguments.length<3){e=false}var Ev="__on"+Ex,Ew=Ex.indexOf(".");if(Ew>0){Ex=Ex.substring(0,Ew)}if(arguments.length<2){return(Ew=this.node()[Ev])&&Ew._}return this.each(function(E3,E0){var E1=this,E2=E1[Ev];if(E2){E1.removeEventListener(Ex,E2,E2.$);delete E1[Ev]}if(Ey){E1.addEventListener(Ex,E1[Ev]=Ez,Ez.$=e);Ez._=Ey}function Ez(E4){var E5=d3.event;d3.event=E4;try{Ey.call(E1,E1.__data__,E0)}finally{d3.event=E5}}})};B9.each=function(E0){for(var Ev=-1,e=this.length;++Ev<e;){for(var Ey=this[Ev],Ew=-1,Ez=Ey.length;++Ew<Ez;){var Ex=Ey[Ew];if(Ex){E0.call(Ex,Ex.__data__,Ew,Ev)}}}return this};B9.call=function(e){e.apply(this,(arguments[0]=this,arguments));return this};B9.empty=function(){return !this.node()};B9.node=function(E0){for(var Ev=0,e=this.length;Ev<e;Ev++){for(var Ey=this[Ev],Ew=0,Ez=Ey.length;Ew<Ez;Ew++){var Ex=Ey[Ew];if(Ex){return Ex}}}return null};B9.transition=function(){var Ev=[],Ew,Ez;for(var Ex=-1,e=this.length;++Ex<e;){Ev.push(Ew=[]);for(var E0=this[Ex],Ey=-1,E1=E0.length;++Ey<E1;){Ew.push((Ez=E0[Ey])?{node:Ez,delay:Cn,duration:EE}:null)}}return D5(Ev,EL||++EZ,Date.now())};var D7=CA([[document]]);D7[0].parentNode=CW;d3.select=function(e){return typeof e==="string"?D7.select(e):CA([[e]])};d3.selectAll=function(e){return typeof e==="string"?D7.selectAll(e):CA([B2(e)])};function Az(e){Ci(e,Cq);return e}var Cq=[];d3.selection.enter=Az;d3.selection.enter.prototype=Cq;Cq.append=B9.append;Cq.insert=B9.insert;Cq.empty=B9.empty;Cq.node=B9.node;Cq.select=function(Ez){var Ew=[],E4,e,E2,E3,Ey;for(var E0=-1,Ex=this.length;++E0<Ex;){E2=(E3=this[E0]).update;Ew.push(E4=[]);E4.parentNode=E3.parentNode;for(var E1=-1,Ev=E3.length;++E1<Ev;){if(Ey=E3[E1]){E4.push(E2[E1]=e=Ez.call(E3.parentNode,Ey.__data__,E1));e.__data__=Ey.__data__}else{E4.push(null)}}}return CA(Ew)};function D5(e,Ez,Ex){Ci(e,CR);var Ew=new AK,Ev=d3.dispatch("start","end"),Ey=Ad;e.id=Ez;e.time=Ex;e.tween=function(E0,E1){if(arguments.length<2){return Ew.get(E0)}if(E1==null){Ew.remove(E0)}else{Ew.set(E0,E1)}return e};e.ease=function(E0){if(!arguments.length){return Ey}Ey=typeof E0==="function"?E0:d3.ease.apply(d3,arguments);return e};e.each=function(E0,E1){if(arguments.length<2){return B3.call(e,E0)}Ev.on(E0,E1);return e};d3.timer(function(E0){e.each(function(E8,E5,E4){var FA=[],E2=this,E6=e[E4][E5].delay,E3=e[E4][E5].duration,FB=E2.__transition__||(E2.__transition__={active:0,count:0});++FB.count;E6<=E0?E1(E0):d3.timer(E1,E6,Ex);function E1(FC){if(FB.active>Ez){return E9()}FB.active=Ez;Ew.forEach(function(FD,FE){if(tween=FE.call(E2,E8,E5)){FA.push(tween)}});Ev.start.call(E2,E8,E5);if(!E7(FC)){d3.timer(E7,0,Ex)}return 1}function E7(FC){if(FB.active!==Ez){return E9()}var FD=(FC-E6)/E3,FE=Ey(FD),FF=FA.length;while(FF>0){FA[--FF].call(E2,FE)}if(FD>=1){E9();EL=Ez;Ev.end.call(E2,E8,E5);EL=0;return 1}}function E9(){if(!--FB.count){delete E2.__transition__}return 1}});return 1},0,Ex);return e}var Q={};function EC(Ew,Ev,e){return e!=""&&Q}function E(Ex,e){var Ew=DD(Ex);function Ev(E2,E1,Ez){var E0=e.call(this,E2,E1);return E0==null?Ez!=""&&Q:Ez!=E0&&Ew(Ez,E0)}function Ey(E1,E0,Ez){return Ez!=e&&Ew(Ez,e)}return typeof e==="function"?Ev:e==null?EC:(e+="",Ey)}var CR=[],EZ=0,EL=0,D=0,EA=250,C3=d3.ease("cubic-in-out"),Cn=D,EE=EA,Ad=C3;CR.call=B9.call;d3.transition=function(e){return arguments.length?(EL?e.transition():e):D7.transition()};d3.transition.prototype=CR;CR.select=function(Ez){var Ew=[],E3,e,Ex;if(typeof Ez!=="function"){Ez=S(Ez)}for(var E0=-1,Ey=this.length;++E0<Ey;){Ew.push(E3=[]);for(var E2=this[E0],E1=-1,Ev=E2.length;++E1<Ev;){if((Ex=E2[E1])&&(e=Ez.call(Ex.node,Ex.node.__data__,E1))){if("__data__" in Ex.node){e.__data__=Ex.node.__data__}E3.push({node:e,delay:Ex.delay,duration:Ex.duration})}else{E3.push(null)}}}return D5(Ew,this.id,this.time).ease(this.ease())};CR.selectAll=function(E0){var Ex=[],E5,e,Ey;if(typeof E0!=="function"){E0=Bc(E0)}for(var E2=-1,Ez=this.length;++E2<Ez;){for(var E4=this[E2],E3=-1,Ew=E4.length;++E3<Ew;){if(Ey=E4[E3]){e=E0.call(Ey.node,Ey.node.__data__,E3);Ex.push(E5=[]);for(var E1=-1,Ev=e.length;++E1<Ev;){E5.push({node:e[E1],delay:Ey.delay,duration:Ey.duration})}}}}return D5(Ex,this.id,this.time).ease(this.ease())};CR.attr=function(e,Ev){return this.attrTween(e,E(e,Ev))};CR.attrTween=function(e,Ew){var Ev=d3.ns.qualify(e);function Ex(E1,Ez){var E0=Ew.call(this,E1,Ez,this.getAttribute(Ev));return E0===Q?(this.removeAttribute(Ev),null):E0&&function(E2){this.setAttribute(Ev,E0(E2))}}function Ey(E1,Ez){var E0=Ew.call(this,E1,Ez,this.getAttributeNS(Ev.space,Ev.local));return E0===Q?(this.removeAttributeNS(Ev.space,Ev.local),null):E0&&function(E2){this.setAttributeNS(Ev.space,Ev.local,E0(E2))}}return this.tween("attr."+e,Ev.local?Ey:Ex)};CR.style=function(e,Ew,Ev){if(arguments.length<3){Ev=""}return this.styleTween(e,E(e,Ew),Ev)};CR.styleTween=function(e,Ew,Ev){if(arguments.length<3){Ev=""}return this.tween("style."+e,function(Ez,Ex){var Ey=Ew.call(this,Ez,Ex,window.getComputedStyle(this,null).getPropertyValue(e));return Ey===Q?(this.style.removeProperty(e),null):Ey&&function(E0){this.style.setProperty(e,Ey(E0),Ev)}})};CR.text=function(e){return this.tween("text",function(Ew,Ev){this.textContent=typeof e==="function"?e.call(this,Ew,Ev):e})};CR.remove=function(){return this.each("end.transition",function(){var e;if(!this.__transition__&&(e=this.parentNode)){e.removeChild(this)}})};CR.delay=function(Ev){var e=this;return e.each(typeof Ev==="function"?function(Ey,Ex,Ew){e[Ew][Ex].delay=Ev.apply(this,arguments)|0}:(Ev=Ev|0,function(Ey,Ex,Ew){e[Ew][Ex].delay=Ev}))};CR.duration=function(Ev){var e=this;return e.each(typeof Ev==="function"?function(Ey,Ex,Ew){e[Ew][Ex].duration=Math.max(1,Ev.apply(this,arguments)|0)}:(Ev=Math.max(1,Ev|0),function(Ey,Ex,Ew){e[Ew][Ex].duration=Ev}))};function B3(E4){var e=EL,Ey=Ad,E2=Cn,Ez=EE;EL=this.id;Ad=this.ease();for(var E0=0,Ex=this.length;E0<Ex;E0++){for(var E3=this[E0],E1=0,Ev=E3.length;E1<Ev;E1++){var Ew=E3[E1];if(Ew){Cn=this[E0][E1].delay;EE=this[E0][E1].duration;E4.call(Ew=Ew.node,Ew.__data__,E1,E0)}}}EL=e;Ad=Ey;Cn=E2;EE=Ez;return this}CR.transition=function(){return this.select(t)};var A6=null,BE,C1;d3.timer=function(Ez,e,Ey){var Ex=false,Ew,Ev=A6;if(arguments.length<3){if(arguments.length<2){e=0}else{if(!isFinite(e)){return}}Ey=Date.now()}while(Ev){if(Ev.callback===Ez){Ev.then=Ey;Ev.delay=e;Ex=true;break}Ew=Ev;Ev=Ev.next}if(!Ex){A6={callback:Ez,then:Ey,delay:e,next:A6}}if(!BE){C1=clearTimeout(C1);BE=1;EU(EV)}};function EV(){var e,Ew=Date.now(),Ex=A6;while(Ex){e=Ew-Ex.then;if(e>=Ex.delay){Ex.flush=Ex.callback(e)}Ex=Ex.next}var Ev=Cs()-Ew;if(Ev>24){if(isFinite(Ev)){clearTimeout(C1);C1=setTimeout(EV,Ev)}BE=0}else{BE=1;EU(EV)}}d3.timer.flush=function(){var e,Ev=Date.now(),Ew=A6;while(Ew){e=Ev-Ew.then;if(!Ew.delay){Ew.flush=Ew.callback(e)}Ew=Ew.next}Cs()};function Cs(){var Ev=null,e=A6,Ew=Infinity;while(e){if(e.flush){e=Ev?Ev.next=e.next:A6=e.next}else{Ew=Math.min(Ew,e.then+e.delay);e=(Ev=e).next}}return Ew}var EU=window.requestAnimationFrame||window.webkitRequestAnimationFrame||window.mozRequestAnimationFrame||window.oRequestAnimationFrame||window.msRequestAnimationFrame||function(e){setTimeout(e,17)};d3.transform=function(Ev){var Ew=document.createElementNS(d3.ns.prefix.svg,"g"),e={a:1,b:0,c:0,d:1,e:0,f:0};return(d3.transform=function(Ex){Ew.setAttribute("transform",Ex);var Ey=Ew.transform.baseVal.consolidate();return new N(Ey?Ey.matrix:e)})(Ev)};function N(e){var Ex=[e.a,e.b],Ev=[e.c,e.d],Ez=DA(Ex),Ew=Cj(Ex,Ev),Ey=DA(Ax(Ev,Ex,-Ew))||0;if(Ex[0]*Ev[1]<Ev[0]*Ex[1]){Ex[0]*=-1;Ex[1]*=-1;Ez*=-1;Ew*=-1}this.rotate=(Ez?Math.atan2(Ex[1],Ex[0]):Math.atan2(-Ev[0],Ev[1]))*CY;this.translate=[e.e,e.f];this.scale=[Ez,Ey];this.skew=Ey?Math.atan2(Ew,Ey)*CY:0}N.prototype.toString=function(){return"translate("+this.translate+")rotate("+this.rotate+")skewX("+this.skew+")scale("+this.scale+")"};function Cj(Ev,e){return Ev[0]*e[0]+Ev[1]*e[1]}function DA(e){var Ev=Math.sqrt(Cj(e,e));if(Ev){e[0]/=Ev;e[1]/=Ev}return Ev}function Ax(Ev,e,Ew){Ev[0]+=Ew*e[0];Ev[1]+=Ew*e[1];return Ev}var CY=180/Math.PI;d3.mouse=function(e){return AS(e,u())};var BP=/WebKit/.test(navigator.userAgent)?-1:0;function AS(Ex,E0){var Ey=Ex.ownerSVGElement||Ex;if(Ey.createSVGPoint){var Ev=Ey.createSVGPoint();if((BP<0)&&(window.scrollX||window.scrollY)){Ey=d3.select(document.body).append("svg").style("position","absolute").style("top",0).style("left",0);var Ew=Ey[0][0].getScreenCTM();BP=!(Ew.f||Ew.e);Ey.remove()}if(BP){Ev.x=E0.pageX;Ev.y=E0.pageY}else{Ev.x=E0.clientX;Ev.y=E0.clientY}Ev=Ev.matrixTransform(Ex.getScreenCTM().inverse());return[Ev.x,Ev.y]}var Ez=Ex.getBoundingClientRect();return[E0.clientX-Ez.left-Ex.clientLeft,E0.clientY-Ez.top-Ex.clientTop]}d3.touches=function(e,Ev){if(arguments.length<2){Ev=u().touches}return Ev?B2(Ev).map(function(Ex){var Ew=AS(e,Ex);Ew.identifier=Ex.identifier;return Ew}):[]};function AJ(){}d3.scale={};function CP(Ev){var Ew=Ev[0],e=Ev[Ev.length-1];return Ew<e?[Ew,e]:[e,Ew]}function AT(e){return e.rangeExtent?e.rangeExtent():CP(e.range())}function Dk(E0,Ey){var Ez=0,Ex=E0.length-1,Ew=E0[Ez],Ev=E0[Ex],e;if(Ev<Ew){e=Ez;Ez=Ex;Ex=e;e=Ew;Ew=Ev;Ev=e}if(e=Ev-Ew){Ey=Ey(e);E0[Ez]=Ey.floor(Ew);E0[Ex]=Ey.ceil(Ev)}return E0}function Cc(){return Math}d3.scale.linear=function(){return CM([0,1],[0,1],d3.interpolate,false)};function CM(Ez,Ex,Ey,E1){var Ew,Ev;function e(){var E2=Math.min(Ez.length,Ex.length)>2?f:AI,E3=E1?AF:EW;Ew=E2(Ez,Ex,E3,Ey);Ev=E2(Ex,Ez,E3,d3.interpolate);return E0}function E0(E2){return Ew(E2)}E0.invert=function(E2){return Ev(E2)};E0.domain=function(E2){if(!arguments.length){return Ez}Ez=E2.map(Number);return e()};E0.range=function(E2){if(!arguments.length){return Ex}Ex=E2;return e()};E0.rangeRound=function(E2){return E0.range(E2).interpolate(d3.interpolateRound)};E0.clamp=function(E2){if(!arguments.length){return E1}E1=E2;return e()};E0.interpolate=function(E2){if(!arguments.length){return Ey}Ey=E2;return e()};E0.ticks=function(E2){return Cm(Ez,E2)};E0.tickFormat=function(E2){return Cw(Ez,E2)};E0.nice=function(){Dk(Ez,AM);return e()};E0.copy=function(){return CM(Ez,Ex,Ey,E1)};return e()}function Dc(Ev,e){return d3.rebind(Ev,e,"range","rangeRound","interpolate","clamp")}function AM(e){e=Math.pow(10,Math.round(Math.log(e)/Math.LN10)-1);return{floor:function(Ev){return Math.floor(Ev/e)*e},ceil:function(Ev){return Math.ceil(Ev/e)*e}}}function O(Ez,e){var Ew=CP(Ez),Ev=Ew[1]-Ew[0],Ey=Math.pow(10,Math.floor(Math.log(Ev/e)/Math.LN10)),Ex=e/Ev*Ey;if(Ex<=0.15){Ey*=10}else{if(Ex<=0.35){Ey*=5}else{if(Ex<=0.75){Ey*=2}}}Ew[0]=Math.ceil(Ew[0]/Ey)*Ey;Ew[1]=Math.floor(Ew[1]/Ey)*Ey+Ey*0.5;Ew[2]=Ey;return Ew}function Cm(Ev,e){return d3.range.apply(d3,O(Ev,e))}function Cw(Ev,e){return d3.format(",."+Math.max(0,-Math.floor(Math.log(O(Ev,e)[2])/Math.LN10+0.01))+"f")}function AI(Ey,e,Ez,Ew){var Ev=Ez(Ey[0],Ey[1]),Ex=Ew(e[0],e[1]);return function(E0){return Ex(Ev(E0))}}function f(E0,Ev,E1,Ey){var Ex=[],Ez=[],Ew=0,e=Math.min(E0.length,Ev.length)-1;if(E0[e]<E0[0]){E0=E0.slice().reverse();Ev=Ev.slice().reverse()}while(++Ew<=e){Ex.push(E1(E0[Ew-1],E0[Ew]));Ez.push(Ey(Ev[Ew-1],Ev[Ew]))}return function(E2){var E3=d3.bisect(E0,E2,1,e)-1;return Ez[E3](Ex[E3](E2))}}d3.scale.log=function(){return D1(d3.scale.linear(),Dd)};function D1(e,Ev){var Ew=Ev.pow;function Ex(Ey){return e(Ev(Ey))}Ex.invert=function(Ey){return Ew(e.invert(Ey))};Ex.domain=function(Ey){if(!arguments.length){return e.domain().map(Ew)}Ev=Ey[0]<0?Dg:Dd;Ew=Ev.pow;e.domain(Ey.map(Ev));return Ex};Ex.nice=function(){e.domain(Dk(e.domain(),Cc));return Ex};Ex.ticks=function(){var E3=CP(e.domain()),E4=[];if(E3.every(isFinite)){var E2=Math.floor(E3[0]),E1=Math.ceil(E3[1]),E0=Ew(E3[0]),Ez=Ew(E3[1]);if(Ev===Dg){E4.push(Ew(E2));for(;E2++<E1;){for(var Ey=9;Ey>0;Ey--){E4.push(Ew(E2)*Ey)}}}else{for(;E2<E1;E2++){for(var Ey=1;Ey<10;Ey++){E4.push(Ew(E2)*Ey)}}E4.push(Ew(E2))}for(E2=0;E4[E2]<E0;E2++){}for(E1=E4.length;E4[E1-1]>Ez;E1--){}E4=E4.slice(E2,E1)}return E4};Ex.tickFormat=function(E2,E1){if(arguments.length<2){E1=Bo}if(arguments.length<1){return E1}var Ey=E2/Ex.ticks().length,Ez=Ev===Dg?(E0=-1e-12,Math.floor):(E0=1e-12,Math.ceil),E0;return function(E3){return E3/Ew(Ez(Ev(E3)+E0))<Ey?E1(E3):""}};Ex.copy=function(){return D1(e.copy(),Ev)};return Dc(Ex,e)}var Bo=d3.format(".0e");function Dd(e){return Math.log(e<0?0:e)/Math.LN10}function Dg(e){return -Math.log(e>0?0:-e)/Math.LN10}Dd.pow=function(e){return Math.pow(10,e)};Dg.pow=function(e){return -Math.pow(10,-e)};d3.scale.pow=function(){return Dp(d3.scale.linear(),1)};function Dp(e,Ew){var Ev=DU(Ew),Ex=DU(1/Ew);function Ey(Ez){return e(Ev(Ez))}Ey.invert=function(Ez){return Ex(e.invert(Ez))};Ey.domain=function(Ez){if(!arguments.length){return e.domain().map(Ex)}e.domain(Ez.map(Ev));return Ey};Ey.ticks=function(Ez){return Cm(Ey.domain(),Ez)};Ey.tickFormat=function(Ez){return Cw(Ey.domain(),Ez)};Ey.nice=function(){return Ey.domain(Dk(Ey.domain(),AM))};Ey.exponent=function(Ez){if(!arguments.length){return Ew}var E0=Ey.domain();Ev=DU(Ew=Ez);Ex=DU(1/Ew);return Ey.domain(E0)};Ey.copy=function(){return Dp(e.copy(),Ew)};return Dc(Ey,e)}function DU(Ev){return function(e){return e<0?-Math.pow(-e,Ev):Math.pow(e,Ev)}}d3.scale.sqrt=function(){return d3.scale.pow().exponent(0.5)};d3.scale.ordinal=function(){return BF([],{t:"range",x:[]})};function BF(Ez,Ew){var Ey,Ev,Ex;function E0(E1){return Ev[((Ey.get(E1)||Ey.set(E1,Ez.push(E1)))-1)%Ev.length]}function e(E2,E1){return d3.range(Ez.length).map(function(E3){return E2+E1*E3})}E0.domain=function(E1){if(!arguments.length){return Ez}Ez=[];Ey=new AK;var E3=-1,E4=E1.length,E2;while(++E3<E4){if(!Ey.has(E2=E1[E3])){Ey.set(E2,Ez.push(E2))}}return E0[Ew.t](Ew.x,Ew.p)};E0.range=function(E1){if(!arguments.length){return Ev}Ev=E1;Ex=0;Ew={t:"range",x:E1};return E0};E0.rangePoints=function(E1,E4){if(arguments.length<2){E4=0}var E5=E1[0],E2=E1[1],E3=(E2-E5)/(Ez.length-1+E4);Ev=e(Ez.length<2?(E5+E2)/2:E5+E3*E4/2,E3);Ex=0;Ew={t:"rangePoints",x:E1,p:E4};return E0};E0.rangeBands=function(E1,E5){if(arguments.length<2){E5=0}var E2=E1[1]<E1[0],E6=E1[E2-0],E3=E1[1-E2],E4=(E3-E6)/(Ez.length+E5);Ev=e(E6+E4*E5,E4);if(E2){Ev.reverse()}Ex=E4*(1-E5);Ew={t:"rangeBands",x:E1,p:E5};return E0};E0.rangeRoundBands=function(E1,E6){if(arguments.length<2){E6=0}var E3=E1[1]<E1[0],E7=E1[E3-0],E4=E1[1-E3],E5=Math.floor((E4-E7)/(Ez.length+E6)),E2=E4-E7-(Ez.length-E6)*E5;Ev=e(E7+Math.round(E2/2),E5);if(E3){Ev.reverse()}Ex=Math.round(E5*(1-E6));Ew={t:"rangeRoundBands",x:E1,p:E6};return E0};E0.rangeBand=function(){return Ex};E0.rangeExtent=function(){return CP(Ew.x)};E0.copy=function(){return BF(Ez,Ew)};return E0.domain(Ez)}d3.scale.category10=function(){return d3.scale.ordinal().range(BM)};d3.scale.category20=function(){return d3.scale.ordinal().range(BA)};d3.scale.category20b=function(){return d3.scale.ordinal().range(EK)};d3.scale.category20c=function(){return d3.scale.ordinal().range(EJ)};var BM=["#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd","#8c564b","#e377c2","#7f7f7f","#bcbd22","#17becf"];var BA=["#1f77b4","#aec7e8","#ff7f0e","#ffbb78","#2ca02c","#98df8a","#d62728","#ff9896","#9467bd","#c5b0d5","#8c564b","#c49c94","#e377c2","#f7b6d2","#7f7f7f","#c7c7c7","#bcbd22","#dbdb8d","#17becf","#9edae5"];var EK=["#393b79","#5254a3","#6b6ecf","#9c9ede","#637939","#8ca252","#b5cf6b","#cedb9c","#8c6d31","#bd9e39","#e7ba52","#e7cb94","#843c39","#ad494a","#d6616b","#e7969c","#7b4173","#a55194","#ce6dbd","#de9ed6"];var EJ=["#3182bd","#6baed6","#9ecae1","#c6dbef","#e6550d","#fd8d3c","#fdae6b","#fdd0a2","#31a354","#74c476","#a1d99b","#c7e9c0","#756bb1","#9e9ac8","#bcbddc","#dadaeb","#636363","#969696","#bdbdbd","#d9d9d9"];d3.scale.quantile=function(){return V([],[])};function V(Ew,Ev){var Ex;function e(){var Ez=0,E1=Ew.length,E0=Ev.length;Ex=[];while(++Ez<E0){Ex[Ez-1]=d3.quantile(Ew,Ez/E0)}return Ey}function Ey(Ez){if(isNaN(Ez=+Ez)){return NaN}return Ev[d3.bisect(Ex,Ez)]}Ey.domain=function(Ez){if(!arguments.length){return Ew}Ew=Ez.filter(function(E0){return !isNaN(E0)}).sort(d3.ascending);return e()};Ey.range=function(Ez){if(!arguments.length){return Ev}Ev=Ez;return e()};Ey.quantiles=function(){return Ex};Ey.copy=function(){return V(Ew,Ev)};return e()}d3.scale.quantize=function(){return By(0,1,[0,1])};function By(Ey,Ew,Ev){var Ez,Ex;function E0(E1){return Ev[Math.max(0,Math.min(Ex,Math.floor(Ez*(E1-Ey))))]}function e(){Ez=Ev.length/(Ew-Ey);Ex=Ev.length-1;return E0}E0.domain=function(E1){if(!arguments.length){return[Ey,Ew]}Ey=+E1[0];Ew=+E1[E1.length-1];return e()};E0.range=function(E1){if(!arguments.length){return Ev}Ev=E1;return e()};E0.copy=function(){return By(Ey,Ew,Ev)};return e()}d3.scale.identity=function(){return Cd([0,1])};function Cd(Ev){function e(Ew){return +Ew}e.invert=e;e.domain=e.range=function(Ew){if(!arguments.length){return Ev}Ev=Ew.map(e);return e};e.ticks=function(Ew){return Cm(Ev,Ew)};e.tickFormat=function(Ew){return Cw(Ev,Ew)};e.copy=function(){return Cd(Ev)};return e}d3.svg={};d3.svg.arc=function(){var Ey=An,Ex=BV,Ew=Dh,e=AA;function Ev(){var E2=Ey.apply(this,arguments),E1=Ex.apply(this,arguments),E0=Ew.apply(this,arguments)+Ec,Ez=e.apply(this,arguments)+Ec,E8=(Ez<E0&&(E8=E0,E0=Ez,Ez=E8),Ez-E0),E5=E8<Math.PI?"0":"1",E4=Math.cos(E0),E7=Math.sin(E0),E3=Math.cos(Ez),E6=Math.sin(Ez);return E8>=Eh?(E2?"M0,"+E1+"A"+E1+","+E1+" 0 1,1 0,"+(-E1)+"A"+E1+","+E1+" 0 1,1 0,"+E1+"M0,"+E2+"A"+E2+","+E2+" 0 1,0 0,"+(-E2)+"A"+E2+","+E2+" 0 1,0 0,"+E2+"Z":"M0,"+E1+"A"+E1+","+E1+" 0 1,1 0,"+(-E1)+"A"+E1+","+E1+" 0 1,1 0,"+E1+"Z"):(E2?"M"+E1*E4+","+E1*E7+"A"+E1+","+E1+" 0 "+E5+",1 "+E1*E3+","+E1*E6+"L"+E2*E3+","+E2*E6+"A"+E2+","+E2+" 0 "+E5+",0 "+E2*E4+","+E2*E7+"Z":"M"+E1*E4+","+E1*E7+"A"+E1+","+E1+" 0 "+E5+",1 "+E1*E3+","+E1*E6+"L0,0Z")}Ev.innerRadius=function(Ez){if(!arguments.length){return Ey}Ey=d3.functor(Ez);return Ev};Ev.outerRadius=function(Ez){if(!arguments.length){return Ex}Ex=d3.functor(Ez);return Ev};Ev.startAngle=function(Ez){if(!arguments.length){return Ew}Ew=d3.functor(Ez);return Ev};Ev.endAngle=function(Ez){if(!arguments.length){return e}e=d3.functor(Ez);return Ev};Ev.centroid=function(){var E0=(Ey.apply(this,arguments)+Ex.apply(this,arguments))/2,Ez=(Ew.apply(this,arguments)+e.apply(this,arguments))/2+Ec;return[Math.cos(Ez)*E0,Math.sin(Ez)*E0]};return Ev};var Ec=-Math.PI/2,Eh=2*Math.PI-0.000001;function An(e){return e.innerRadius}function BV(e){return e.outerRadius}function Dh(e){return e.startAngle}function AA(e){return e.endAngle}function Cv(Ev){var e=D9,E0=D8,Ex=CE,Ez=A7.get(Ex),Ey=0.7;function Ew(E1){return E1.length<1?null:"M"+Ez(Ev(AH(this,E1,e,E0)),Ey)}Ew.x=function(E1){if(!arguments.length){return e}e=E1;return Ew};Ew.y=function(E1){if(!arguments.length){return E0}E0=E1;return Ew};Ew.interpolate=function(E1){if(!arguments.length){return Ex}if(!A7.has(E1+="")){E1=CE}Ez=A7.get(Ex=E1);return Ew};Ew.tension=function(E1){if(!arguments.length){return Ey}Ey=E1;return Ew};return Ew}d3.svg.line=function(){return Cv(Object)};function AH(E3,Ey,E0,Ez){var E2=[],Ex=-1,e=Ey.length,Ew=typeof E0==="function",Ev=typeof Ez==="function",E1;if(Ew&&Ev){while(++Ex<e){E2.push([E0.call(E3,E1=Ey[Ex],Ex),Ez.call(E3,E1,Ex)])}}else{if(Ew){while(++Ex<e){E2.push([E0.call(E3,Ey[Ex],Ex),Ez])}}else{if(Ev){while(++Ex<e){E2.push([E0,Ez.call(E3,Ey[Ex],Ex)])}}else{while(++Ex<e){E2.push([E0,Ez])}}}}return E2}function D9(e){return e[0]}function D8(e){return e[1]}var CE="linear";var A7=d3.map({linear:Ek,"step-before":Ah,"step-after":EY,basis:C0,"basis-open":Ae,"basis-closed":BT,bundle:BU,cardinal:B7,"cardinal-open":A4,"cardinal-closed":P,monotone:Bl});function Ek(Ev){var e=0,Ey=Ev.length,Ex=Ev[0],Ew=[Ex[0],",",Ex[1]];while(++e<Ey){Ew.push("L",(Ex=Ev[e])[0],",",Ex[1])}return Ew.join("")}function Ah(Ev){var e=0,Ey=Ev.length,Ex=Ev[0],Ew=[Ex[0],",",Ex[1]];while(++e<Ey){Ew.push("V",(Ex=Ev[e])[1],"H",Ex[0])}return Ew.join("")}function EY(Ev){var e=0,Ey=Ev.length,Ex=Ev[0],Ew=[Ex[0],",",Ex[1]];while(++e<Ey){Ew.push("H",(Ex=Ev[e])[0],"V",Ex[1])}return Ew.join("")}function A4(Ev,e){return Ev.length<4?Ek(Ev):Ev[1]+BZ(Ev.slice(1,Ev.length-1),A0(Ev,e))}function P(Ev,e){return Ev.length<3?Ek(Ev):Ev[0]+BZ((Ev.push(Ev[0]),Ev),A0([Ev[Ev.length-2]].concat(Ev,[Ev[1]]),e))}function B7(Ew,Ev,e){return Ew.length<3?Ek(Ew):Ew[0]+BZ(Ew,A0(Ew,Ev))}function BZ(E0,Ez){if(Ez.length<1||(E0.length!=Ez.length&&E0.length!=Ez.length+2)){return Ek(E0)}var E1=E0.length!=Ez.length,E4="",E2=E0[0],e=E0[1],Ey=Ez[0],E3=Ey,Ew=1;if(E1){E4+="Q"+(e[0]-Ey[0]*2/3)+","+(e[1]-Ey[1]*2/3)+","+e[0]+","+e[1];E2=E0[1];Ew=2}if(Ez.length>1){E3=Ez[1];e=E0[Ew];Ew++;E4+="C"+(E2[0]+Ey[0])+","+(E2[1]+Ey[1])+","+(e[0]-E3[0])+","+(e[1]-E3[1])+","+e[0]+","+e[1];for(var Ev=2;Ev<Ez.length;Ev++,Ew++){e=E0[Ew];E3=Ez[Ev];E4+="S"+(e[0]-E3[0])+","+(e[1]-E3[1])+","+e[0]+","+e[1]}}if(E1){var Ex=E0[Ew];E4+="Q"+(e[0]+E3[0]*2/3)+","+(e[1]+E3[1]*2/3)+","+Ex[0]+","+Ex[1]}return E4}function A0(E0,Ey){var Ew=[],Ex=(1-Ey)/2,E2,E1=E0[0],Ez=E0[1],Ev=1,e=E0.length;while(++Ev<e){E2=E1;E1=Ez;Ez=E0[Ev];Ew.push([Ex*(Ez[0]-E2[0]),Ex*(Ez[1]-E2[1])])}return Ew}function C0(E1){if(E1.length<3){return Ek(E1)}var Ew=1,Ev=E1.length,Ex=E1[0],e=Ex[0],Ez=Ex[1],E0=[e,e,e,(Ex=E1[1])[0]],Ey=[Ez,Ez,Ez,Ex[1]],E2=[e,",",Ez];Au(E2,E0,Ey);while(++Ew<Ev){Ex=E1[Ew];E0.shift();E0.push(Ex[0]);Ey.shift();Ey.push(Ex[1]);Au(E2,E0,Ey)}Ew=-1;while(++Ew<2){E0.shift();E0.push(Ex[0]);Ey.shift();Ey.push(Ex[1]);Au(E2,E0,Ey)}return E2.join("")}function Ae(Ex){if(Ex.length<4){return Ek(Ex)}var Ez=[],Ew=-1,E0=Ex.length,Ey,Ev=[0],e=[0];while(++Ew<3){Ey=Ex[Ew];Ev.push(Ey[0]);e.push(Ey[1])}Ez.push(Dn(EP,Ev)+","+Dn(EP,e));--Ew;while(++Ew<E0){Ey=Ex[Ew];Ev.shift();Ev.push(Ey[0]);e.shift();e.push(Ey[1]);Au(Ez,Ev,e)}return Ez.join("")}function BT(Ey){var E0,Ex=-1,E1=Ey.length,e=E1+4,Ez,Ew=[],Ev=[];while(++Ex<4){Ez=Ey[Ex%E1];Ew.push(Ez[0]);Ev.push(Ez[1])}E0=[Dn(EP,Ew),",",Dn(EP,Ev)];--Ex;while(++Ex<e){Ez=Ey[Ex%E1];Ew.shift();Ew.push(Ez[0]);Ev.shift();Ev.push(Ez[1]);Au(E0,Ew,Ev)}return E0.join("")}function BU(E0,Ez){var Ew=E0.length-1,Ev=E0[0][0],Ey=E0[0][1],E3=E0[Ew][0]-Ev,E2=E0[Ew][1]-Ey,Ex=-1,e,E1;while(++Ex<=Ew){e=E0[Ex];E1=Ex/Ew;e[0]=Ez*e[0]+(1-Ez)*(Ev+E1*E3);e[1]=Ez*e[1]+(1-Ez)*(Ey+E1*E2)}return C0(E0)}function Dn(Ev,e){return Ev[0]*e[0]+Ev[1]*e[1]+Ev[2]*e[2]+Ev[3]*e[3]}var ES=[0,2/3,1/3,0],EQ=[0,1/3,2/3,0],EP=[0,1/6,2/3,1/6];function Au(Ev,e,Ew){Ev.push("C",Dn(ES,e),",",Dn(ES,Ew),",",Dn(EQ,e),",",Dn(EQ,Ew),",",Dn(EP,e),",",Dn(EP,Ew))}function Eq(Ev,e){return(e[1]-Ev[1])/(e[0]-Ev[0])}function CI(Ex){var Ew=0,Ev=Ex.length-1,e=[],E0=Ex[0],Ez=Ex[1],Ey=e[0]=Eq(E0,Ez);while(++Ew<Ev){e[Ew]=Ey+(Ey=Eq(E0=Ez,Ez=Ex[Ew+1]))}e[Ew]=Ey;return e}function AC(E1){var Ey=[],Ex,E0,Ez,E2,e=CI(E1),Ew=-1,Ev=E1.length-1;while(++Ew<Ev){Ex=Eq(E1[Ew],E1[Ew+1]);if(Math.abs(Ex)<0.000001){e[Ew]=e[Ew+1]=0}else{E0=e[Ew]/Ex;Ez=e[Ew+1]/Ex;E2=E0*E0+Ez*Ez;if(E2>9){E2=Ex*3/Math.sqrt(E2);e[Ew]=E2*E0;e[Ew+1]=E2*Ez}}}Ew=-1;while(++Ew<=Ev){E2=(E1[Math.min(Ev,Ew+1)][0]-E1[Math.max(0,Ew-1)][0])/(6*(1+e[Ew]*e[Ew]));Ey.push([E2||0,e[Ew]*E2||0])}return Ey}function Bl(e){return e.length<3?Ek(e):e[0]+BZ(e,AC(e))}d3.svg.line.radial=function(){var e=Cv(h);e.radius=e.x,delete e.x;e.angle=e.y,delete e.y;return e};function h(Ex){var e,Ew=-1,Ez=Ex.length,Ey,Ev;while(++Ew<Ez){e=Ex[Ew];Ey=e[0];Ev=e[1]+Ec;e[0]=Ey*Math.cos(Ev);e[1]=Ey*Math.sin(Ev)}return Ex}function Es(Ez){var Ew=D9,Ev=D9,E3=0,E1=D8,E0,Ey,Ex,E2=0.7;function e(E6){if(E6.length<1){return null}var E5=AH(this,E6,Ew,E3),E4=AH(this,E6,Ew===Ev?Bq(E5):Ev,E3===E1?Bp(E5):E1);return"M"+Ey(Ez(E4),E2)+"L"+Ex(Ez(E5.reverse()),E2)+"Z"}e.x=function(E4){if(!arguments.length){return Ev}Ew=Ev=E4;return e};e.x0=function(E4){if(!arguments.length){return Ew}Ew=E4;return e};e.x1=function(E4){if(!arguments.length){return Ev}Ev=E4;return e};e.y=function(E4){if(!arguments.length){return E1}E3=E1=E4;return e};e.y0=function(E4){if(!arguments.length){return E3}E3=E4;return e};e.y1=function(E4){if(!arguments.length){return E1}E1=E4;return e};e.interpolate=function(E4){if(!arguments.length){return E0}if(!A7.has(E4+="")){E4=CE}Ey=A7.get(E0=E4);Ex=Ey.reverse||Ey;return e};e.tension=function(E4){if(!arguments.length){return E2}E2=E4;return e};return e.interpolate("linear")}Ah.reverse=EY;EY.reverse=Ah;d3.svg.area=function(){return Es(Object)};function Bq(e){return function(Ew,Ev){return e[Ev][0]}}function Bp(e){return function(Ew,Ev){return e[Ev][1]}}d3.svg.area.radial=function(){var e=Es(h);e.radius=e.x,delete e.x;e.innerRadius=e.x0,delete e.x0;e.outerRadius=e.x1,delete e.x1;e.angle=e.y,delete e.y;e.startAngle=e.y0,delete e.y0;e.endAngle=e.y1,delete e.y1;return e};d3.svg.chord=function(){var e=AB,E1=AL,E0=X,E2=Dh,Ey=AA;function Ez(E7,E5){var E6=E3(this,e,E7,E5),E4=E3(this,E1,E7,E5);return"M"+E6.p0+Ev(E6.r,E6.p1,E6.a1-E6.a0)+(Ew(E6,E4)?Ex(E6.r,E6.p1,E6.r,E6.p0):Ex(E6.r,E6.p1,E4.r,E4.p0)+Ev(E4.r,E4.p1,E4.a1-E4.a0)+Ex(E4.r,E4.p1,E6.r,E6.p0))+"Z"}function E3(E7,FA,FB,E8){var E6=FA.call(E7,FB,E8),E9=E0.call(E7,E6,E8),E5=E2.call(E7,E6,E8)+Ec,E4=Ey.call(E7,E6,E8)+Ec;return{r:E9,a0:E5,a1:E4,p0:[E9*Math.cos(E5),E9*Math.sin(E5)],p1:[E9*Math.cos(E4),E9*Math.sin(E4)]}}function Ew(E5,E4){return E5.a0==E4.a0&&E5.a1==E4.a1}function Ev(E5,E6,E4){return"A"+E5+","+E5+" 0 "+ +(E4>Math.PI)+",1 "+E6}function Ex(E5,E7,E4,E6){return"Q 0,0 "+E6}Ez.radius=function(E4){if(!arguments.length){return E0}E0=d3.functor(E4);return Ez};Ez.source=function(E4){if(!arguments.length){return e}e=d3.functor(E4);return Ez};Ez.target=function(E4){if(!arguments.length){return E1}E1=d3.functor(E4);return Ez};Ez.startAngle=function(E4){if(!arguments.length){return E2}E2=d3.functor(E4);return Ez};Ez.endAngle=function(E4){if(!arguments.length){return Ey}Ey=d3.functor(E4);return Ez};return Ez};function AB(e){return e.source}function AL(e){return e.target}function X(e){return e.radius}function Dx(e){return e.startAngle}function CQ(e){return e.endAngle}d3.svg.diagonal=function(){var Ew=AB,Ex=AL,e=L;function Ev(E2,Ez){var E3=Ew.call(this,E2,Ez),E0=Ex.call(this,E2,Ez),Ey=(E3.y+E0.y)/2,E1=[E3,{x:E3.x,y:Ey},{x:E0.x,y:Ey},E0];E1=E1.map(e);return"M"+E1[0]+"C"+E1[1]+" "+E1[2]+" "+E1[3]}Ev.source=function(Ey){if(!arguments.length){return Ew}Ew=d3.functor(Ey);return Ev};Ev.target=function(Ey){if(!arguments.length){return Ex}Ex=d3.functor(Ey);return Ev};Ev.projection=function(Ey){if(!arguments.length){return e}e=Ey;return Ev};return Ev};function L(e){return[e.x,e.y]}d3.svg.diagonal.radial=function(){var Ew=d3.svg.diagonal(),e=L,Ev=Ew.projection;Ew.projection=function(Ex){return arguments.length?Ev(M(e=Ex)):e};return Ew};function M(e){return function(){var Ex=e.apply(this,arguments),Ew=Ex[0],Ev=Ex[1]+Ec;return[Ew*Math.cos(Ev),Ew*Math.sin(Ev)]}}d3.svg.mouse=d3.mouse;d3.svg.touches=d3.touches;d3.svg.symbol=function(){var Ev=AQ,e=Cr;function Ew(Ey,Ex){return(Ei.get(Ev.call(this,Ey,Ex))||A8)(e.call(this,Ey,Ex))}Ew.type=function(Ex){if(!arguments.length){return Ev}Ev=d3.functor(Ex);return Ew};Ew.size=function(Ex){if(!arguments.length){return e}e=d3.functor(Ex);return Ew};return Ew};function Cr(){return 64}function AQ(){return"circle"}function A8(e){var Ev=Math.sqrt(e/Math.PI);return"M0,"+Ev+"A"+Ev+","+Ev+" 0 1,1 0,"+(-Ev)+"A"+Ev+","+Ev+" 0 1,1 0,"+Ev+"Z"}var Ei=d3.map({circle:A8,cross:function(e){var Ev=Math.sqrt(e/5)/2;return"M"+-3*Ev+","+-Ev+"H"+-Ev+"V"+-3*Ev+"H"+Ev+"V"+-Ev+"H"+3*Ev+"V"+Ev+"H"+Ev+"V"+3*Ev+"H"+-Ev+"V"+Ev+"H"+-3*Ev+"Z"},diamond:function(e){var Ev=Math.sqrt(e/(2*BC)),Ew=Ev*BC;return"M0,"+-Ev+"L"+Ew+",0 0,"+Ev+" "+-Ew+",0Z"},square:function(e){var Ev=Math.sqrt(e)/2;return"M"+-Ev+","+-Ev+"L"+Ev+","+-Ev+" "+Ev+","+Ev+" "+-Ev+","+Ev+"Z"},"triangle-down":function(e){var Ew=Math.sqrt(e/A5),Ev=Ew*A5/2;return"M0,"+Ev+"L"+Ew+","+-Ev+" "+-Ew+","+-Ev+"Z"},"triangle-up":function(e){var Ew=Math.sqrt(e/A5),Ev=Ew*A5/2;return"M0,"+-Ev+"L"+Ew+","+Ev+" "+-Ew+","+Ev+"Z"}});d3.svg.symbolTypes=Ei.keys();var A5=Math.sqrt(3),BC=Math.tan(30*Math.PI/180);d3.svg.axis=function(){var Ex=d3.scale.linear(),E0="bottom",Ey=6,e=6,Ev=6,E4=3,E3=[10],Ez=null,E2,E1=0;function Ew(E5){E5.each(function(){var FO=d3.select(this);var FP=Ez==null?(Ex.ticks?Ex.ticks.apply(Ex,E3):Ex.domain()):Ez,FI=E2==null?(Ex.tickFormat?Ex.tickFormat.apply(Ex,E3):String):E2;var FA=BW(Ex,FP,E1),E9=FO.selectAll(".minor").data(FA,String),FL=E9.enter().insert("line","g").attr("class","tick minor").style("opacity",0.000001),FJ=d3.transition(E9.exit()).style("opacity",0.000001).remove(),E7=d3.transition(E9).style("opacity",1);var FN=FO.selectAll("g").data(FP,String),FF=FN.enter().insert("g","path").style("opacity",0.000001),FH=d3.transition(FN.exit()).style("opacity",0.000001).remove(),FB=d3.transition(FN).style("opacity",1),E6;var FE=AT(Ex),FG=FO.selectAll(".domain").data([0]),E8=FG.enter().append("path").attr("class","domain"),FQ=d3.transition(FG);var FK=Ex.copy(),FM=this.__chart__||FK;this.__chart__=FK;FF.append("line").attr("class","tick");FF.append("text");FB.select("text").text(FI);switch(E0){case"bottom":E6=C7;FL.attr("y2",e);E7.attr("x2",0).attr("y2",e);FF.select("line").attr("y2",Ey);FF.select("text").attr("y",Math.max(Ey,0)+E4);FB.select("line").attr("x2",0).attr("y2",Ey);FB.select("text").attr("x",0).attr("y",Math.max(Ey,0)+E4).attr("dy",".71em").attr("text-anchor","middle");FQ.attr("d","M"+FE[0]+","+Ev+"V0H"+FE[1]+"V"+Ev);break;case"top":E6=C7;FL.attr("y2",-e);E7.attr("x2",0).attr("y2",-e);FF.select("line").attr("y2",-Ey);FF.select("text").attr("y",-(Math.max(Ey,0)+E4));FB.select("line").attr("x2",0).attr("y2",-Ey);FB.select("text").attr("x",0).attr("y",-(Math.max(Ey,0)+E4)).attr("dy","0em").attr("text-anchor","middle");FQ.attr("d","M"+FE[0]+","+-Ev+"V0H"+FE[1]+"V"+-Ev);break;case"left":E6=C5;FL.attr("x2",-e);E7.attr("x2",-e).attr("y2",0);FF.select("line").attr("x2",-Ey);FF.select("text").attr("x",-(Math.max(Ey,0)+E4));FB.select("line").attr("x2",-Ey).attr("y2",0);FB.select("text").attr("x",-(Math.max(Ey,0)+E4)).attr("y",0).attr("dy",".32em").attr("text-anchor","end");FQ.attr("d","M"+-Ev+","+FE[0]+"H0V"+FE[1]+"H"+-Ev);break;case"right":E6=C5;FL.attr("x2",e);E7.attr("x2",e).attr("y2",0);FF.select("line").attr("x2",Ey);FF.select("text").attr("x",Math.max(Ey,0)+E4);FB.select("line").attr("x2",Ey).attr("y2",0);FB.select("text").attr("x",Math.max(Ey,0)+E4).attr("y",0).attr("dy",".32em").attr("text-anchor","start");FQ.attr("d","M"+Ev+","+FE[0]+"H0V"+FE[1]+"H"+Ev);break}if(Ex.ticks){FF.call(E6,FM);FB.call(E6,FK);FH.call(E6,FK);FL.call(E6,FM);E7.call(E6,FK);FJ.call(E6,FK)}else{var FD=FK.rangeBand()/2,FC=function(FR){return FK(FR)+FD};FF.call(E6,FC);FB.call(E6,FC)}})}Ew.scale=function(E5){if(!arguments.length){return Ex}Ex=E5;return Ew};Ew.orient=function(E5){if(!arguments.length){return E0}E0=E5;return Ew};Ew.ticks=function(){if(!arguments.length){return E3}E3=arguments;return Ew};Ew.tickValues=function(E5){if(!arguments.length){return Ez}Ez=E5;return Ew};Ew.tickFormat=function(E5){if(!arguments.length){return E2}E2=E5;return Ew};Ew.tickSize=function(E5,E8,E6){if(!arguments.length){return Ey}var E7=arguments.length-1;Ey=+E5;e=E7>1?+E8:Ey;Ev=E7>0?+arguments[E7]:Ey;return Ew};Ew.tickPadding=function(E5){if(!arguments.length){return E4}E4=+E5;return Ew};Ew.tickSubdivide=function(E5){if(!arguments.length){return E1}E1=+E5;return Ew};return Ew};function C7(Ev,e){Ev.attr("transform",function(Ew){return"translate("+e(Ew)+",0)"})}function C5(e,Ev){e.attr("transform",function(Ew){return"translate(0,"+Ev(Ew)+")"})}function BW(Ew,E0,Ev){E1=[];if(Ev&&E0.length>1){var E3=CP(Ew.domain()),E1,Ey=-1,e=E0.length,Ez=(E0[1]-E0[0])/++Ev,Ex,E2;while(++Ey<e){for(Ex=Ev;--Ex>0;){if((E2=+E0[Ey]-Ex*Ez)>=E3[0]){E1.push(E2)}}}for(--Ey,Ex=0;++Ex<Ev&&(E2=+E0[Ey]+Ex*Ez)<E3[1];){E1.push(E2)}}return E1}d3.svg.brush=function(){var e=EN(Ey,"brushstart","brush","brushend"),E0=null,Ez=null,E1=AD[0],E4=[[0,0],[0,0]],Ev;function Ey(E5){E5.each(function(){var E8=d3.select(this),E7=E8.selectAll(".background").data([0]),E6=E8.selectAll(".extent").data([0]),FA=E8.selectAll(".resize").data(E1,String),E9;E8.style("pointer-events","all").on("mousedown.brush",E2).on("touchstart.brush",E2);E7.enter().append("rect").attr("class","background").style("visibility","hidden").style("cursor","crosshair");E6.enter().append("rect").attr("class","extent").style("cursor","move");FA.enter().append("g").attr("class",function(FB){return"resize "+FB}).style("cursor",function(FB){return Cf[FB]}).append("rect").attr("x",function(FB){return/[ew]$/.test(FB)?-3:null}).attr("y",function(FB){return/^[ns]/.test(FB)?-3:null}).attr("width",6).attr("height",6).style("visibility","hidden");FA.style("display",Ey.empty()?"none":null);FA.exit().remove();if(E0){E9=AT(E0);E7.attr("x",E9[0]).attr("width",E9[1]-E9[0]);Ex(E8)}if(Ez){E9=AT(Ez);E7.attr("y",E9[0]).attr("height",E9[1]-E9[0]);Ew(E8)}E3(E8)})}function E3(E5){E5.selectAll(".resize").attr("transform",function(E6){return"translate("+E4[+/e$/.test(E6)][0]+","+E4[+/^s/.test(E6)][1]+")"})}function Ex(E5){E5.select(".extent").attr("x",E4[0][0]);E5.selectAll(".extent,.n>rect,.s>rect").attr("width",E4[1][0]-E4[0][0])}function Ew(E5){E5.select(".extent").attr("y",E4[0][1]);E5.selectAll(".extent,.e>rect,.w>rect").attr("height",E4[1][1]-E4[0][1])}function E2(){var FO=this,E6=d3.select(d3.event.target),FC=e.of(FO,arguments),FJ=d3.select(FO),FL=E6.datum(),FH=!/^(n|s)$/.test(FL)&&E0,FF=!/^(e|w)$/.test(FL)&&Ez,FG=E6.classed("extent"),FM,FN=FD(),E7;var FA=d3.select(window).on("mousemove.brush",FB).on("mouseup.brush",E5).on("touchmove.brush",FB).on("touchend.brush",E5).on("keydown.brush",FE).on("keyup.brush",E9);if(FG){FN[0]=E4[0][0]-FN[0];FN[1]=E4[0][1]-FN[1]}else{if(FL){var FK=+/w$/.test(FL),FI=+/^n/.test(FL);E7=[E4[1-FK][0]-FN[0],E4[1-FI][1]-FN[1]];FN[0]=E4[FK][0];FN[1]=E4[FI][1]}else{if(d3.event.altKey){FM=FN.slice()}}}FJ.style("pointer-events","none").selectAll(".resize").style("display",null);d3.select("body").style("cursor",E6.style("cursor"));FC({type:"brushstart"});FB();Ee();function FD(){var FP=d3.event.changedTouches;return FP?d3.touches(FO,FP)[0]:d3.mouse(FO)}function FE(){if(d3.event.keyCode==32){if(!FG){FM=null;FN[0]-=E4[1][0];FN[1]-=E4[1][1];FG=2}Ee()}}function E9(){if(d3.event.keyCode==32&&FG==2){FN[0]+=E4[1][0];FN[1]+=E4[1][1];FG=0;Ee()}}function FB(){var FP=FD(),FQ=false;if(E7){FP[0]+=E7[0];FP[1]+=E7[1]}if(!FG){if(d3.event.altKey){if(!FM){FM=[(E4[0][0]+E4[1][0])/2,(E4[0][1]+E4[1][1])/2]}FN[0]=E4[+(FP[0]<FM[0])][0];FN[1]=E4[+(FP[1]<FM[1])][1]}else{FM=null}}if(FH&&E8(FP,E0,0)){Ex(FJ);FQ=true}if(FF&&E8(FP,Ez,1)){Ew(FJ);FQ=true}if(FQ){E3(FJ);FC({type:"brush",mode:FG?"move":"resize"})}}function E8(FX,FR,FT){var FU=AT(FR),FQ=FU[0],FP=FU[1],FV=FN[FT],FY=E4[1][FT]-E4[0][FT],FS,FW;if(FG){FQ-=FV;FP-=FY+FV}FS=Math.max(FQ,Math.min(FP,FX[FT]));if(FG){FW=(FS+=FV)+FY}else{if(FM){FV=Math.max(FQ,Math.min(FP,2*FM[FT]-FS))}if(FV<FS){FW=FS;FS=FV}else{FW=FV}}if(E4[0][FT]!==FS||E4[1][FT]!==FW){Ev=null;E4[0][FT]=FS;E4[1][FT]=FW;return true}}function E5(){FB();FJ.style("pointer-events","all").selectAll(".resize").style("display",Ey.empty()?"none":null);d3.select("body").style("cursor",null);FA.on("mousemove.brush",null).on("mouseup.brush",null).on("touchmove.brush",null).on("touchend.brush",null).on("keydown.brush",null).on("keyup.brush",null);FC({type:"brushend"});Ee()}}Ey.x=function(E5){if(!arguments.length){return E0}E0=E5;E1=AD[!E0<<1|!Ez];return Ey};Ey.y=function(E5){if(!arguments.length){return Ez}Ez=E5;E1=AD[!E0<<1|!Ez];return Ey};Ey.extent=function(FA){var E7,E5,E9,E8,E6;if(!arguments.length){FA=Ev||E4;if(E0){E7=FA[0][0],E5=FA[1][0];if(!Ev){E7=E4[0][0],E5=E4[1][0];if(E0.invert){E7=E0.invert(E7),E5=E0.invert(E5)}if(E5<E7){E6=E7,E7=E5,E5=E6}}}if(Ez){E9=FA[0][1],E8=FA[1][1];if(!Ev){E9=E4[0][1],E8=E4[1][1];if(Ez.invert){E9=Ez.invert(E9),E8=Ez.invert(E8)}if(E8<E9){E6=E9,E9=E8,E8=E6}}}return E0&&Ez?[[E7,E9],[E5,E8]]:E0?[E7,E5]:Ez&&[E9,E8]}Ev=[[0,0],[0,0]];if(E0){E7=FA[0],E5=FA[1];if(Ez){E7=E7[0],E5=E5[0]}Ev[0][0]=E7,Ev[1][0]=E5;if(E0.invert){E7=E0(E7),E5=E0(E5)}if(E5<E7){E6=E7,E7=E5,E5=E6}E4[0][0]=E7|0,E4[1][0]=E5|0}if(Ez){E9=FA[0],E8=FA[1];if(E0){E9=E9[1],E8=E8[1]}Ev[0][1]=E9,Ev[1][1]=E8;if(Ez.invert){E9=Ez(E9),E8=Ez(E8)}if(E8<E9){E6=E9,E9=E8,E8=E6}E4[0][1]=E9|0,E4[1][1]=E8|0}return Ey};Ey.clear=function(){Ev=null;E4[0][0]=E4[0][1]=E4[1][0]=E4[1][1]=0;return Ey};Ey.empty=function(){return(E0&&E4[0][0]===E4[1][0])||(Ez&&E4[0][1]===E4[1][1])};return d3.rebind(Ey,e,"on")};var Cf={n:"ns-resize",e:"ew-resize",s:"ns-resize",w:"ew-resize",nw:"nwse-resize",ne:"nesw-resize",se:"nwse-resize",sw:"nesw-resize"};var AD=[["n","e","s","w","nw","ne","se","sw"],["e","w"],["n","s"],[]];d3.behavior={};d3.behavior.drag=function(){var Ex=EN(Ew,"drag","dragstart","dragend"),e=null;function Ew(){this.on("mousedown.drag",Ev).on("touchstart.drag",Ev)}function Ev(){var E0=this,E4=Ex.of(E0,arguments),E3=d3.event.target,Ez,E1=E6(),E2=0;var E5=d3.select(window).on("mousemove.drag",E7).on("touchmove.drag",E7).on("mouseup.drag",Ey,true).on("touchend.drag",Ey,true);if(e){Ez=e.apply(E0,arguments);Ez=[Ez.x-E1[0],Ez.y-E1[1]]}else{Ez=[0,0]}E4({type:"dragstart"});function E6(){var FA=E0.parentNode,E9=d3.event.changedTouches;return E9?d3.touches(FA,E9)[0]:d3.mouse(FA)}function E7(){if(!E0.parentNode){return Ey()}var FB=E6(),FA=FB[0]-E1[0],E9=FB[1]-E1[1];E2|=FA|E9;E1=FB;Ee();E4({type:"drag",x:FB[0]+Ez[0],y:FB[1]+Ez[1],dx:FA,dy:E9})}function Ey(){E4({type:"dragend"});if(E2){Ee();if(d3.event.target===E3){E5.on("click.drag",E8,true)}}E5.on("mousemove.drag",null).on("touchmove.drag",null).on("mouseup.drag",null).on("touchend.drag",null)}function E8(){Ee();E5.on("click.drag",null)}}Ew.origin=function(Ey){if(!arguments.length){return e}e=Ey;return Ew};return d3.rebind(Ew,Ex,"on")};d3.behavior.zoom=function(){var E1=[0,0],FC,FG=1,E8,Ew=DV,E7=EN(e,"zoom"),FB,E9,Ey,Ex,E0;function e(){this.on("mousedown.zoom",E5).on("mousewheel.zoom",E4).on("mousemove.zoom",FD).on("DOMMouseScroll.zoom",E4).on("dblclick.zoom",E2).on("touchstart.zoom",FA).on("touchmove.zoom",E3).on("touchend.zoom",FA)}e.translate=function(FH){if(!arguments.length){return E1}E1=FH.map(Number);return e};e.scale=function(FH){if(!arguments.length){return FG}FG=+FH;return e};e.scaleExtent=function(FH){if(!arguments.length){return Ew}Ew=FH==null?DV:FH.map(Number);return e};e.x=function(FH){if(!arguments.length){return E9}E9=FH;FB=FH.copy();return e};e.y=function(FH){if(!arguments.length){return Ex}Ex=FH;Ey=FH.copy();return e};function Ev(FH){return[(FH[0]-E1[0])/FG,(FH[1]-E1[1])/FG]}function E6(FH){return[FH[0]*FG+E1[0],FH[1]*FG+E1[1]]}function Ez(FH){FG=Math.max(Ew[0],Math.min(Ew[1],FH))}function FE(FI,FH){FH=E6(FH);E1[0]+=FI[0]-FH[0];E1[1]+=FI[1]-FH[1]}function FF(FH){if(E9){E9.domain(FB.range().map(function(FI){return(FI-E1[0])/FG}).map(FB.invert))}if(Ex){Ex.domain(Ey.range().map(function(FI){return(FI-E1[1])/FG}).map(Ey.invert))}d3.event.preventDefault();FH({type:"zoom",scale:FG,translate:E1})}function E5(){var FK=this,FN=E7.of(FK,arguments),FM=d3.event.target,FL=0,FO=d3.select(window).on("mousemove.zoom",FJ).on("mouseup.zoom",FI),FH=Ev(d3.mouse(FK));window.focus();Ee();function FJ(){FL=1;FE(d3.mouse(FK),FH);FF(FN)}function FI(){if(FL){Ee()}FO.on("mousemove.zoom",null).on("mouseup.zoom",null);if(FL&&d3.event.target===FM){FO.on("click.zoom",FP)}}function FP(){Ee();FO.on("click.zoom",null)}}function E4(){if(!FC){FC=Ev(d3.mouse(this))}Ez(Math.pow(2,BJ()*0.002)*FG);FE(d3.mouse(this),FC);FF(E7.of(this,arguments))}function FD(){FC=null}function E2(){var FI=d3.mouse(this),FH=Ev(FI);Ez(d3.event.shiftKey?FG/2:FG*2);FE(FI,FH);FF(E7.of(this,arguments))}function FA(){var FK=d3.touches(this),FI=Date.now();E8=FG;FC={};FK.forEach(function(FL){FC[FL.identifier]=Ev(FL)});Ee();if((FK.length===1)&&(FI-E0<500)){var FJ=FK[0],FH=Ev(FK[0]);Ez(FG*2);FE(FJ,FH);FF(E7.of(this,arguments))}E0=FI}function E3(){var FJ=d3.touches(this),FL=FJ[0],FI=FC[FL.identifier];if(FK=FJ[1]){var FK,FH=FC[FK.identifier];FL=[(FL[0]+FK[0])/2,(FL[1]+FK[1])/2];FI=[(FI[0]+FH[0])/2,(FI[1]+FH[1])/2];Ez(d3.event.scale*E8)}FE(FL,FI);FF(E7.of(this,arguments))}return d3.rebind(e,E7,"on")};var CD,DV=[0,Infinity];function BJ(){if(!CD){CD=d3.select("body").append("div").style("visibility","hidden").style("top",0).style("height",0).style("width",0).style("overflow-y","scroll").append("div").style("height","2000px").node().parentNode}var Ew=d3.event,Ex;try{CD.scrollTop=1000;CD.dispatchEvent(Ew);Ex=1000-CD.scrollTop}catch(Ev){Ex=Ew.wheelDelta||(-Ew.detail*5)}return Ex}d3.layout={};d3.layout.bundle=function(){return function(e){var Ew=[],Ev=-1,Ex=e.length;while(++Ev<Ex){Ew.push(CZ(e[Ev]))}return Ew}};function CZ(Ex){var Ez=Ex.source,e=Ex.target,Ey=DQ(Ez,e),Ew=[Ez];while(Ez!==Ey){Ez=Ez.parent;Ew.push(Ez)}var Ev=Ew.length;while(e!==Ey){Ew.splice(Ev,0,e);e=e.parent}return Ew}function C9(Ew){var Ev=[],e=Ew.parent;while(e!=null){Ev.push(Ew);Ew=e;e=e.parent}Ev.push(Ew);return Ev}function DQ(Ex,Ev){if(Ex===Ev){return Ex}var Ew=C9(Ex),e=C9(Ev),Ey=Ew.pop(),Ez=e.pop(),E0=null;while(Ey===Ez){E0=Ey;Ey=Ew.pop();Ez=e.pop()}return E0}d3.layout.chord=function(){var Ez={},E0,Ex,E4,Ew,E3=0,e,Ev,Ey;function E2(){var E9={},FC=[],FK=d3.range(Ew),FG=[],FA,FI,E8,FD,FB;E0=[];Ex=[];FA=0,FD=-1;while(++FD<Ew){FI=0,FB=-1;while(++FB<Ew){FI+=E4[FD][FB]}FC.push(FI);FG.push(d3.range(Ew));FA+=FI}if(e){FK.sort(function(FM,FL){return e(FC[FM],FC[FL])})}if(Ev){FG.forEach(function(FM,FL){FM.sort(function(FO,FN){return Ev(E4[FL][FO],E4[FL][FN])})})}FA=(2*Math.PI-E3*Ew)/FA;FI=0,FD=-1;while(++FD<Ew){E8=FI,FB=-1;while(++FB<Ew){var FH=FK[FD],FF=FG[FH][FB],FJ=E4[FH][FF],E7=FI,E6=FI+=FJ*FA;E9[FH+"-"+FF]={index:FH,subindex:FF,startAngle:E7,endAngle:E6,value:FJ}}Ex.push({index:FH,startAngle:E8,endAngle:FI,value:(FI-E8)/FA});FI+=E3}FD=-1;while(++FD<Ew){FB=FD-1;while(++FB<Ew){var E5=E9[FD+"-"+FB],FE=E9[FB+"-"+FD];if(E5.value||FE.value){E0.push(E5.value<FE.value?{source:FE,target:E5}:{source:E5,target:FE})}}}if(Ey){E1()}}function E1(){E0.sort(function(E6,E5){return Ey((E6.source.value+E6.target.value)/2,(E5.source.value+E5.target.value)/2)})}Ez.matrix=function(E5){if(!arguments.length){return E4}Ew=(E4=E5)&&E4.length;E0=Ex=null;return Ez};Ez.padding=function(E5){if(!arguments.length){return E3}E3=E5;E0=Ex=null;return Ez};Ez.sortGroups=function(E5){if(!arguments.length){return e}e=E5;E0=Ex=null;return Ez};Ez.sortSubgroups=function(E5){if(!arguments.length){return Ev}Ev=E5;E0=null;return Ez};Ez.sortChords=function(E5){if(!arguments.length){return Ey}Ey=E5;if(E0){E1()}return Ez};Ez.chords=function(){if(!E0){E2()}return E0};Ez.groups=function(){if(!Ex){E2()}return Ex};return Ez};d3.layout.force=function(){var Ev={},E8=d3.dispatch("start","tick","end"),E4=[1,1],FA,Ey,E1=0.9,FC=DR,Ex=BG,E7=-30,Ez=0.1,E2=0.8,FB,E6=[],Ew=[],E0,e,E3;function E9(FD){return function(FK,FF,FJ,FE,FI){if(FK.point!==FD){var FM=FK.cx-FD.x,FL=FK.cy-FD.y,FH=1/Math.sqrt(FM*FM+FL*FL);if((FE-FF)*FH<E2){var FG=FK.charge*FH*FH;FD.px-=FM*FG;FD.py-=FL*FG;return true}if(FK.point&&isFinite(FH)){var FG=FK.pointCharge*FH*FH;FD.px-=FM*FG;FD.py-=FL*FG}}return !FK.charge}}Ev.tick=function(){if((Ey*=0.99)<0.005){E8.end({type:"end",alpha:Ey=0});return true}var FF=E6.length,FG=Ew.length,FD,FJ,FE,FN,FM,FH,FI,FL,FK;for(FJ=0;FJ<FG;++FJ){FE=Ew[FJ];FN=FE.source;FM=FE.target;FL=FM.x-FN.x;FK=FM.y-FN.y;if(FH=(FL*FL+FK*FK)){FH=Ey*e[FJ]*((FH=Math.sqrt(FH))-E0[FJ])/FH;FL*=FH;FK*=FH;FM.x-=FL*(FI=FN.weight/(FM.weight+FN.weight));FM.y-=FK*FI;FN.x+=FL*(FI=1-FI);FN.y+=FK*FI}}if(FI=Ey*Ez){FL=E4[0]/2;FK=E4[1]/2;FJ=-1;if(FI){while(++FJ<FF){FE=E6[FJ];FE.x+=(FL-FE.x)*FI;FE.y+=(FK-FE.y)*FI}}}if(E7){Dv(FD=d3.geom.quadtree(E6),Ey,E3);FJ=-1;while(++FJ<FF){if(!(FE=E6[FJ]).fixed){FD.visit(E9(FE))}}}FJ=-1;while(++FJ<FF){FE=E6[FJ];if(FE.fixed){FE.x=FE.px;FE.y=FE.py}else{FE.x-=(FE.px-(FE.px=FE.x))*E1;FE.y-=(FE.py-(FE.py=FE.y))*E1}}E8.tick({type:"tick",alpha:Ey})};Ev.nodes=function(FD){if(!arguments.length){return E6}E6=FD;return Ev};Ev.links=function(FD){if(!arguments.length){return Ew}Ew=FD;return Ev};Ev.size=function(FD){if(!arguments.length){return E4}E4=FD;return Ev};Ev.linkDistance=function(FD){if(!arguments.length){return FC}FC=d3.functor(FD);return Ev};Ev.distance=Ev.linkDistance;Ev.linkStrength=function(FD){if(!arguments.length){return Ex}Ex=d3.functor(FD);return Ev};Ev.friction=function(FD){if(!arguments.length){return E1}E1=FD;return Ev};Ev.charge=function(FD){if(!arguments.length){return E7}E7=typeof FD==="function"?FD:+FD;return Ev};Ev.gravity=function(FD){if(!arguments.length){return Ez}Ez=FD;return Ev};Ev.theta=function(FD){if(!arguments.length){return E2}E2=FD;return Ev};Ev.alpha=function(FD){if(!arguments.length){return Ey}if(Ey){if(FD>0){Ey=FD}else{Ey=0}}else{if(FD>0){E8.start({type:"start",alpha:Ey=FD});d3.timer(Ev.tick)}}return Ev};Ev.start=function(){var FH,FG,FE=E6.length,FF=Ew.length,FK=E4[0],FJ=E4[1],FM,FD;for(FH=0;FH<FE;++FH){(FD=E6[FH]).index=FH;FD.weight=0}E0=[];e=[];for(FH=0;FH<FF;++FH){FD=Ew[FH];if(typeof FD.source=="number"){FD.source=E6[FD.source]}if(typeof FD.target=="number"){FD.target=E6[FD.target]}E0[FH]=FC.call(this,FD,FH);e[FH]=Ex.call(this,FD,FH);++FD.source.weight;++FD.target.weight}for(FH=0;FH<FE;++FH){FD=E6[FH];if(isNaN(FD.x)){FD.x=FI("x",FK)}if(isNaN(FD.y)){FD.y=FI("y",FJ)}if(isNaN(FD.px)){FD.px=FD.x}if(isNaN(FD.py)){FD.py=FD.y}}E3=[];if(typeof E7==="function"){for(FH=0;FH<FE;++FH){E3[FH]=+E7.call(this,E6[FH],FH)}}else{for(FH=0;FH<FE;++FH){E3[FH]=E7}}function FI(FS,FR){var FQ=FL(FH),FP=-1,FO=FQ.length,FN;while(++FP<FO){if(!isNaN(FN=FQ[FP][FS])){return FN}}return Math.random()*FR}function FL(){if(!FM){FM=[];for(FG=0;FG<FE;++FG){FM[FG]=[]}for(FG=0;FG<FF;++FG){var FN=Ew[FG];FM[FN.source.index].push(FN.target);FM[FN.target.index].push(FN.source)}}return FM[FH]}return Ev.resume()};Ev.resume=function(){return Ev.alpha(0.1)};Ev.stop=function(){return Ev.alpha(0)};Ev.drag=function(){if(!FA){FA=d3.behavior.drag().origin(Object).on("dragstart",E5).on("drag",DE).on("dragend",Ck)}this.on("mouseover.force",J).on("mouseout.force",Du).call(FA)};function E5(FD){J(DK=FD);C6=Ev}return d3.rebind(Ev,E8,"on")};var C6,DK;function J(e){e.fixed|=2}function Du(e){if(e!==DK){e.fixed&=1}}function Ck(){DK.fixed&=1;C6=DK=null}function DE(){DK.px=d3.event.x;DK.py=d3.event.y;C6.resume()}function Dv(E3,Ey,E2){var Ez=0,Ew=0;E3.charge=0;if(!E3.leaf){var e=E3.nodes,Ev=e.length,E0=-1,E1;while(++E0<Ev){E1=e[E0];if(E1==null){continue}Dv(E1,Ey,E2);E3.charge+=E1.charge;Ez+=E1.charge*E1.cx;Ew+=E1.charge*E1.cy}}if(E3.point){if(!E3.leaf){E3.point.x+=Math.random()-0.5;E3.point.y+=Math.random()-0.5}var Ex=Ey*E2[E3.point.index];E3.charge+=E3.pointCharge=Ex;Ez+=Ex*E3.point.x;Ew+=Ex*E3.point.y}E3.cx=Ez/E3.charge;E3.cy=Ew/E3.charge}function DR(e){return 20}function BG(e){return 1}d3.layout.partition=function(){var Ew=d3.layout.hierarchy(),Ex=[1,1];function e(E1,E5,E7,E6){var Ez=E1.children;E1.x=E5;E1.y=E1.depth*E6;E1.dx=E7;E1.dy=E6;if(Ez&&(E0=Ez.length)){var E2=-1,E0,E4,E3;E7=E1.value?E7/E1.value:0;while(++E2<E0){e(E4=Ez[E2],E5,E3=E4.value*E7,E6);E5+=E3}}}function Ey(E1){var E0=E1.children,E2=0;if(E0&&(E3=E0.length)){var Ez=-1,E3;while(++Ez<E3){E2=Math.max(E2,Ey(E0[Ez]))}}return 1+E2}function Ev(E1,E0){var Ez=Ew.call(this,E1,E0);e(Ez[0],0,Ex[0],Ex[1]/Ey(Ez[0]));return Ez}Ev.size=function(Ez){if(!arguments.length){return Ex}Ex=Ez;return Ev};return Dq(Ev,Ew)};d3.layout.pie=function(){var Ey=Number,Ex=n,Ew=0,Ev=2*Math.PI;function e(E5,E3){var E1=E5.map(function(E7,E6){return +Ey.call(e,E7,E6)});var Ez=+(typeof Ew==="function"?Ew.apply(this,arguments):Ew);var E0=((typeof Ev==="function"?Ev.apply(this,arguments):Ev)-Ew)/d3.sum(E1);var E2=d3.range(E5.length);if(Ex!=null){E2.sort(Ex===n?function(E7,E6){return E1[E6]-E1[E7]}:function(E7,E6){return Ex(E5[E7],E5[E6])})}var E4=[];E2.forEach(function(E6){E4[E6]={data:E5[E6],value:d=E1[E6],startAngle:Ez,endAngle:Ez+=d*E0}});return E4}e.value=function(Ez){if(!arguments.length){return Ey}Ey=Ez;return e};e.sort=function(Ez){if(!arguments.length){return Ex}Ex=Ez;return e};e.startAngle=function(Ez){if(!arguments.length){return Ew}Ew=Ez;return e};e.endAngle=function(Ez){if(!arguments.length){return Ev}Ev=Ez;return e};return e};var n={};d3.layout.stack=function(){var Ex=Object,Ew=Av,Ez=DM,Ey=DN,Ev=z,E0=y;function e(E8,FA){var E9=E8.map(function(FD,FC){return Ex.call(e,FD,FC)});var FB=E9.map(function(FD,FC){return FD.map(function(FE,FF){return[Ev.call(e,FE,FF),E0.call(e,FE,FF)]})});var E5=Ew.call(e,FB,FA);E9=d3.permute(E9,E5);FB=d3.permute(FB,E5);var E4=Ez.call(e,FB,FA);var E2=E9.length,E3=E9[0].length,E7,E6,E1;for(E6=0;E6<E3;++E6){Ey.call(e,E9[0][E6],E1=E4[E6],FB[0][E6][1]);for(E7=1;E7<E2;++E7){Ey.call(e,E9[E7][E6],E1+=FB[E7-1][E6][1],FB[E7][E6][1])}}return E8}e.values=function(E1){if(!arguments.length){return Ex}Ex=E1;return e};e.order=function(E1){if(!arguments.length){return Ew}Ew=typeof E1==="function"?E1:AX.get(E1)||Av;return e};e.offset=function(E1){if(!arguments.length){return Ez}Ez=typeof E1==="function"?E1:w.get(E1)||DM;return e};e.x=function(E1){if(!arguments.length){return Ev}Ev=E1;return e};e.y=function(E1){if(!arguments.length){return E0}E0=E1;return e};e.out=function(E1){if(!arguments.length){return Ey}Ey=E1;return e};return e};function z(e){return e.x}function y(e){return e.y}function DN(Ev,e,Ew){Ev.y0=e;Ev.y=Ew}var AX=d3.map({"inside-out":function(Ey){var Ew=Ey.length,Ez,Ex,E3=Ey.map(A1),E0=Ey.map(Br),E1=d3.range(Ew).sort(function(E6,E5){return E3[E6]-E3[E5]}),E2=0,e=0,E4=[],Ev=[];for(Ez=0;Ez<Ew;++Ez){Ex=E1[Ez];if(E2<e){E2+=E0[Ex];E4.push(Ex)}else{e+=E0[Ex];Ev.push(Ex)}}return Ev.reverse().concat(E4)},reverse:function(e){return d3.range(e.length).reverse()},"default":Av});var w=d3.map({silhouette:function(Ey){var Ev=Ey.length,Ew=Ey[0].length,E0=[],E1=0,Ez,Ex,e,E2=[];for(Ex=0;Ex<Ew;++Ex){for(Ez=0,e=0;Ez<Ev;Ez++){e+=Ey[Ez][Ex][1]}if(e>E1){E1=e}E0.push(e)}for(Ex=0;Ex<Ew;++Ex){E2[Ex]=(E1-E0[Ex])/2}return E2},wiggle:function(E0){var Ev=E0.length,E4=E0[0],Ew=E4.length,E2=0,E1,Ez,Ey,E7,E6,E3,E8,e,Ex,E5=[];E5[0]=e=Ex=0;for(Ez=1;Ez<Ew;++Ez){for(E1=0,E7=0;E1<Ev;++E1){E7+=E0[E1][Ez][1]}for(E1=0,E6=0,E8=E4[Ez][0]-E4[Ez-1][0];E1<Ev;++E1){for(Ey=0,E3=(E0[E1][Ez][1]-E0[E1][Ez-1][1])/(2*E8);Ey<E1;++Ey){E3+=(E0[Ey][Ez][1]-E0[Ey][Ez-1][1])/E8}E6+=E3*E0[E1][Ez][1]}E5[Ez]=e-=E7?E6/E7*E8:0;if(e<Ex){Ex=e}}for(Ez=0;Ez<Ew;++Ez){E5[Ez]-=Ex}return E5},expand:function(Ez){var E1=Ez.length,e=Ez[0].length,Ev=1/E1,Ex,Ew,E0,Ey=[];for(Ew=0;Ew<e;++Ew){for(Ex=0,E0=0;Ex<E1;Ex++){E0+=Ez[Ex][Ew][1]}if(E0){for(Ex=0;Ex<E1;Ex++){Ez[Ex][Ew][1]/=E0}}else{for(Ex=0;Ex<E1;Ex++){Ez[Ex][Ew][1]=Ev}}}for(Ew=0;Ew<e;++Ew){Ey[Ew]=0}return Ey},zero:DM});function Av(e){return d3.range(e.length)}function DM(Ex){var Ev=-1,e=Ex[0].length,Ew=[];while(++Ev<e){Ew[Ev]=0}return Ew}function A1(Ez){var Ex=1,Ew=0,Ev=Ez[0][1],e,Ey=Ez.length;for(;Ex<Ey;++Ex){if((e=Ez[Ex][1])>Ev){Ew=Ex;Ev=e}}return Ew}function Br(e){return e.reduce(DL,0)}function DL(e,Ev){return e+Ev[1]}d3.layout.histogram=function(){var Ey=true,Ev=Number,e=Af,Ew=EX;function Ex(E2,E3){var E8=[],E6=E2.map(Ev,this),E4=e.call(this,E6,E3),E7=Ew.call(this,E4,E6,E3),E9,E3=-1,Ez=E6.length,E0=E7.length-1,E1=Ey?1:1/Ez,E5;while(++E3<E0){E9=E8[E3]=[];E9.dx=E7[E3+1]-(E9.x=E7[E3]);E9.y=0}E3=-1;while(++E3<Ez){E5=E6[E3];if((E5>=E4[0])&&(E5<=E4[1])){E9=E8[d3.bisect(E7,E5,1,E0)-1];E9.y+=E1;E9.push(E2[E3])}}return E8}Ex.value=function(Ez){if(!arguments.length){return Ev}Ev=Ez;return Ex};Ex.range=function(Ez){if(!arguments.length){return e}e=d3.functor(Ez);return Ex};Ex.bins=function(Ez){if(!arguments.length){return Ew}Ew=typeof Ez==="number"?function(E0){return F(E0,Ez)}:d3.functor(Ez);return Ex};Ex.frequency=function(Ez){if(!arguments.length){return Ey}Ey=!!Ez;return Ex};return Ex};function EX(Ev,e){return F(Ev,Math.ceil(Math.log(e.length)/Math.LN2+1))}function F(Ex,Ez){var Ew=-1,Ev=+Ex[0],e=(Ex[1]-Ev)/Ez,Ey=[];while(++Ew<=Ez){Ey[Ew]=e*Ew+Ev}return Ey}function Af(e){return[d3.min(e),d3.max(e)]}d3.layout.hierarchy=function(){var Ew=B5,Ev=AZ,Ey=Eg;function Ex(E5,E4,E0){var E7=Ev.call(e,E5,E4),E2=H?E5:{data:E5};E2.depth=E4;E0.push(E2);if(E7&&(E1=E7.length)){var E6=-1,E1,E8=E2.children=[],E9=0,E3=E4+1;while(++E6<E1){d=Ex(E7[E6],E3,E0);d.parent=E2;E8.push(d);E9+=d.value}if(Ew){E8.sort(Ew)}if(Ey){E2.value=E9}}else{if(Ey){E2.value=+Ey.call(e,E5,E4)||0}}return E2}function Ez(E4,E5){var E3=E4.children,E0=0;if(E3&&(E6=E3.length)){var E2=-1,E6,E1=E5+1;while(++E2<E6){E0+=Ez(E3[E2],E1)}}else{if(Ey){E0=+Ey.call(e,H?E4:E4.data,E5)||0}}if(Ey){E4.value=E0}return E0}function e(E1){var E0=[];Ex(E1,0,E0);return E0}e.sort=function(E0){if(!arguments.length){return Ew}Ew=E0;return e};e.children=function(E0){if(!arguments.length){return Ev}Ev=E0;return e};e.value=function(E0){if(!arguments.length){return Ey}Ey=E0;return e};e.revalue=function(E0){Ez(E0,0);return E0};return e};function Dq(Ev,e){d3.rebind(Ev,e,"sort","children","value");Ev.links=Dr;Ev.nodes=function(Ew){H=true;return(Ev.nodes=Ev)(Ew)};return Ev}function AZ(e){return e.children}function Eg(e){return e.value}function B5(Ev,e){return e.value-Ev.value}function Dr(e){return d3.merge(e.map(function(Ev){return(Ev.children||[]).map(function(Ew){return{source:Ev,target:Ew}})}))}var H=false;d3.layout.pack=function(){var e=d3.layout.hierarchy().sort(CU),Ew=[1,1];function Ev(E3,E1){var E0=e.call(this,E3,E1),Ey=E0[0];Ey.x=0;Ey.y=0;CF(Ey);var Ex=Ew[0],E2=Ew[1],Ez=1/Math.max(2*Ey.r/Ex,2*Ey.r/E2);C8(Ey,Ex/2,E2/2,Ez);return E0}Ev.size=function(Ex){if(!arguments.length){return Ew}Ew=Ex;return Ev};return Dq(Ev,e)};function CU(Ev,e){return Ev.value-e.value}function Aw(Ev,e){var Ew=Ev._pack_next;Ev._pack_next=e;e._pack_prev=Ev;e._pack_next=Ew;Ew._pack_prev=e}function Ab(Ev,e){Ev._pack_next=e;e._pack_prev=Ev}function CN(Ew,e){var Ex=e.x-Ew.x,Ev=e.y-Ew.y,Ey=Ew.r+e.r;return Ey*Ey-Ex*Ex-Ev*Ev>0.001}function k(E4){var E9=Infinity,FD=-Infinity,e=Infinity,Ey=-Infinity,E3=E4.length,FC,FB,FA,E7,E6;function Ew(FE){E9=Math.min(FE.x-FE.r,E9);FD=Math.max(FE.x+FE.r,FD);e=Math.min(FE.y-FE.r,e);Ey=Math.max(FE.y+FE.r,Ey)}E4.forEach(AO);FC=E4[0];FC.x=-FC.r;FC.y=0;Ew(FC);if(E3>1){FB=E4[1];FB.x=FB.r;FB.y=0;Ew(FB);if(E3>2){FA=E4[2];Aa(FC,FB,FA);Ew(FA);Aw(FC,FA);FC._pack_prev=FA;Aw(FA,FB);FB=FC._pack_next;for(var E8=3;E8<E3;E8++){Aa(FC,FB,FA=E4[E8]);var Ev=0,Ez=1,Ex=1;for(E7=FB._pack_next;E7!==FB;E7=E7._pack_next,Ez++){if(CN(E7,FA)){Ev=1;break}}if(Ev==1){for(E6=FC._pack_prev;E6!==E7._pack_prev;E6=E6._pack_prev,Ex++){if(CN(E6,FA)){break}}}if(Ev){if(Ez<Ex||(Ez==Ex&&FB.r<FC.r)){Ab(FC,FB=E7)}else{Ab(FC=E6,FB)}E8--}else{Aw(FC,FA);FB=FA;Ew(FA)}}}}var E1=(E9+FD)/2,E0=(e+Ey)/2,E2=0;for(var E8=0;E8<E3;E8++){var E5=E4[E8];E5.x-=E1;E5.y-=E0;E2=Math.max(E2,E5.r+Math.sqrt(E5.x*E5.x+E5.y*E5.y))}E4.forEach(Ca);return E2}function AO(e){e._pack_next=e._pack_prev=e}function Ca(e){delete e._pack_next;delete e._pack_prev}function CF(Ev){var e=Ev.children;if(e&&e.length){e.forEach(CF);Ev.r=k(e)}else{Ev.r=Math.sqrt(Ev.value)}}function C8(Ey,e,E0,Ev){var Ex=Ey.children;Ey.x=(e+=Ev*Ey.x);Ey.y=(E0+=Ev*Ey.y);Ey.r*=Ev;if(Ex){var Ew=-1,Ez=Ex.length;while(++Ew<Ez){C8(Ex[Ew],e,E0,Ev)}}}function Aa(Ez,Ex,Ev){var E2=Ez.r+Ev.r,E5=Ex.x-Ez.x,E3=Ex.y-Ez.y;if(E2&&(E5||E3)){var E4=Ex.r+Ev.r,E1=Math.sqrt(E5*E5+E3*E3),E0=Math.max(-1,Math.min(1,(E2*E2+E1*E1-E4*E4)/(2*E2*E1))),e=Math.acos(E0),Ey=E0*(E2/=E1),Ew=Math.sin(e)*E2;Ev.x=Ez.x+Ey*E5+Ew*E3;Ev.y=Ez.y+Ey*E3-Ew*E5}else{Ev.x=Ez.x+E2;Ev.y=Ez.y}}d3.layout.cluster=function(){var Ev=d3.layout.hierarchy().sort(null).value(null),Ex=Bu,Ew=[1,1];function e(E5,E2){var Ey=Ev.call(this,E5,E2),E6=Ey[0],E7,E8=0,E4,E3;Eb(E6,function(FB){var FA=FB.children;if(FA&&FA.length){FB.x=Al(FA);FB.y=Ak(FA)}else{FB.x=E7?E8+=Ex(FB,E7):0;FB.y=0;E7=FB}});var E1=CV(E6),E9=Bz(E6),E0=E1.x-Ex(E1,E9)/2,Ez=E9.x+Ex(E9,E1)/2;Eb(E6,function(FA){FA.x=(FA.x-E0)/(Ez-E0)*Ew[0];FA.y=(1-(E6.y?FA.y/E6.y:1))*Ew[1]});return Ey}e.separation=function(Ey){if(!arguments.length){return Ex}Ex=Ey;return e};e.size=function(Ey){if(!arguments.length){return Ew}Ew=Ey;return e};return Dq(e,Ev)};function Ak(e){return 1+d3.max(e,function(Ev){return Ev.y})}function Al(e){return e.reduce(function(Ev,Ew){return Ev+Ew.x},0)/e.length}function CV(Ev){var e=Ev.children;return e&&e.length?CV(e[0]):Ev}function Bz(Ev){var e=Ev.children,Ew;return e&&(Ew=e.length)?Bz(e[Ew-1]):Ev}d3.layout.tree=function(){var Ev=d3.layout.hierarchy().sort(null).value(null),Ex=Bu,Ew=[1,1];function e(E5,E3){var Ez=Ev.call(this,E5,E3),E7=Ez[0];function E4(FF,FB){var FD=FF.children,FI=FF._tree;if(FD&&(FE=FD.length)){var FE,FK=FD[0],FJ,FH=FK,FC,FG=-1;while(++FG<FE){FC=FD[FG];E4(FC,FJ);FH=Ey(FC,FJ,FH);FJ=FC}Bw(FF);var FL=0.5*(FK._tree.prelim+FC._tree.prelim);if(FB){FI.prelim=FB._tree.prelim+Ex(FF,FB);FI.mod=FI.prelim-FL}else{FI.prelim=FL}}else{if(FB){FI.prelim=FB._tree.prelim+Ex(FF,FB)}}}function E6(FE,FB){FE.x=FE._tree.prelim+FB;var FD=FE.children;if(FD&&(FF=FD.length)){var FC=-1,FF;FB+=FE._tree.mod;while(++FC<FF){E6(FD[FC],FB)}}}function Ey(FF,FB,FI){if(FB){var FE=FF,FD=FF,FH=FB,FG=FF.parent.children[0],FK=FE._tree.mod,FJ=FD._tree.mod,FM=FH._tree.mod,FL=FG._tree.mod,FC;while(FH=AG(FH),FE=Em(FE),FH&&FE){FG=Em(FG);FD=AG(FD);FD._tree.ancestor=FF;FC=FH._tree.prelim+FM-FE._tree.prelim-FK+Ex(FH,FE);if(FC>0){Eo(DX(FH,FF,FI),FF,FC);FK+=FC;FJ+=FC}FM+=FH._tree.mod;FK+=FE._tree.mod;FL+=FG._tree.mod;FJ+=FD._tree.mod}if(FH&&!AG(FD)){FD._tree.thread=FH;FD._tree.mod+=FM-FJ}if(FE&&!Em(FG)){FG._tree.thread=FE;FG._tree.mod+=FK-FL;FI=FF}}return FI}Eb(E7,function(FC,FB){FC._tree={ancestor:FC,prelim:0,mod:0,change:0,shift:0,number:FB?FB._tree.number+1:0}});E4(E7);E6(E7,-E7._tree.prelim);var E2=CC(E7,Ap),FA=CC(E7,Bb),E9=CC(E7,W),E1=E2.x-Ex(E2,FA)/2,E0=FA.x+Ex(FA,E2)/2,E8=E9.depth||1;Eb(E7,function(FB){FB.x=(FB.x-E1)/(E0-E1)*Ew[0];FB.y=FB.depth/E8*Ew[1];delete FB._tree});return Ez}e.separation=function(Ey){if(!arguments.length){return Ex}Ex=Ey;return e};e.size=function(Ey){if(!arguments.length){return Ew}Ew=Ey;return e};return Dq(e,Ev)};function Bu(Ev,e){return Ev.parent==e.parent?1:2}function Em(Ev){var e=Ev.children;return e&&e.length?e[0]:Ev._tree.thread}function AG(Ev){var e=Ev.children,Ew;return e&&(Ew=e.length)?e[Ew-1]:Ev._tree.thread}function CC(Ew,Ex){var Ev=Ew.children;if(Ev&&(Ey=Ev.length)){var Ez,Ey,e=-1;while(++e<Ey){if(Ex(Ez=CC(Ev[e],Ex),Ew)>0){Ew=Ez}}}return Ew}function Bb(Ev,e){return Ev.x-e.x}function Ap(Ev,e){return e.x-Ev.x}function W(Ev,e){return Ev.depth-e.depth}function Eb(Ev,Ew){function e(E1,E0){var Ez=E1.children;if(Ez&&(E2=Ez.length)){var E3,Ey=null,Ex=-1,E2;while(++Ex<E2){E3=Ez[Ex];e(E3,Ey);Ey=E3}}Ew(E1,E0)}e(Ev,null)}function Bw(Ex){var e=0,Ez=0,Ew=Ex.children,Ev=Ew.length,Ey;while(--Ev>=0){Ey=Ew[Ev]._tree;Ey.prelim+=e;Ey.mod+=e;e+=Ey.shift+(Ez+=Ey.change)}}function Eo(Ev,Ew,e){Ev=Ev._tree;Ew=Ew._tree;var Ex=e/(Ew.number-Ev.number);Ev.change+=Ex;Ew.change-=Ex;Ew.shift+=e;Ew.prelim+=e;Ew.mod+=e}function DX(e,Ew,Ev){return e._tree.ancestor.parent==Ew.parent?e._tree.ancestor:Ev}d3.layout.treemap=function(){var E1=d3.layout.hierarchy(),E5=Math.round,E7=[1,1],E2=null,e=Cu,E3=false,Ez,E0=0.5*(1+Math.sqrt(5));function Ev(FA,E8){var E9=-1,FD=FA.length,FC,FB;while(++E9<FD){FB=(FC=FA[E9]).value*(E8<0?0:E8);FC.area=isNaN(FB)||FB<=0?0:FB}}function Ex(FC){var E9=FC.children;if(E9&&E9.length){var FF=e(FC),FH=[],FE=E9.slice(),E8,FD=Infinity,FB,FG=Math.min(FF.dx,FF.dy),FA;Ev(FE,FF.dx*FF.dy/FC.value);FH.area=0;while((FA=FE.length)>0){FH.push(E8=FE[FA-1]);FH.area+=E8.area;if((FB=Ew(FH,FG))<=FD){FE.pop();FD=FB}else{FH.area-=FH.pop().area;Ey(FH,FG,FF,false);FG=Math.min(FF.dx,FF.dy);FH.length=FH.area=0;FD=Infinity}}if(FH.length){Ey(FH,FG,FF,true);FH.length=FH.area=0}E9.forEach(Ex)}}function E6(FB){var E8=FB.children;if(E8&&E8.length){var FA=e(FB),E9=E8.slice(),FD,FC=[];Ev(E9,FA.dx*FA.dy/FB.value);FC.area=0;while(FD=E9.pop()){FC.push(FD);FC.area+=FD.area;if(FD.z!=null){Ey(FC,FD.z?FA.dx:FA.dy,FA,!E9.length);FC.length=FC.area=0}}E8.forEach(E6)}}function Ew(FD,E9){var FB=FD.area,FC,FF=0,E8=Infinity,FA=-1,FE=FD.length;while(++FA<FE){if(!(FC=FD[FA].area)){continue}if(FC<E8){E8=FC}if(FC>FF){FF=FC}}FB*=FB;E9*=E9;return FB?Math.max((E9*FF*E0)/FB,FB/(E9*E8*E0)):Infinity}function Ey(FH,FG,FC,FF){var FA=-1,E9=FH.length,FD=FC.x,FB=FC.y,FE=FG?E5(FH.area/FG):0,E8;if(FG==FC.dx){if(FF||FE>FC.dy){FE=FC.dy}while(++FA<E9){E8=FH[FA];E8.x=FD;E8.y=FB;E8.dy=FE;FD+=E8.dx=Math.min(FC.x+FC.dx-FD,FE?E5(E8.area/FE):0)}E8.z=true;E8.dx+=FC.x+FC.dx-FD;FC.y+=FE;FC.dy-=FE}else{if(FF||FE>FC.dx){FE=FC.dx}while(++FA<E9){E8=FH[FA];E8.x=FD;E8.y=FB;E8.dx=FE;FB+=E8.dy=Math.min(FC.y+FC.dy-FB,FE?E5(E8.area/FE):0)}E8.z=false;E8.dy+=FC.y+FC.dy-FB;FC.x+=FE;FC.dx-=FE}}function E4(FA){var E9=Ez||E1(FA),E8=E9[0];E8.x=0;E8.y=0;E8.dx=E7[0];E8.dy=E7[1];if(Ez){E1.revalue(E8)}Ev([E8],E8.dx*E8.dy/E8.value);(Ez?E6:Ex)(E8);if(E3){Ez=E9}return E9}E4.size=function(E8){if(!arguments.length){return E7}E7=E8;return E4};E4.padding=function(E8){if(!arguments.length){return E2}function FB(FC){var FD=E8.call(E4,FC,FC.depth);return FD==null?Cu(FC):AU(FC,typeof FD==="number"?[FD,FD,FD,FD]:FD)}function FA(FC){return AU(FC,E8)}var E9;e=(E2=E8)==null?Cu:(E9=typeof E8)==="function"?FB:E9==="number"?(E8=[E8,E8,E8,E8],FA):FA;return E4};E4.round=function(E8){if(!arguments.length){return E5!=Number}E5=E8?Math.round:Number;return E4};E4.sticky=function(E8){if(!arguments.length){return E3}E3=E8;Ez=null;return E4};E4.ratio=function(E8){if(!arguments.length){return E0}E0=E8;return E4};return Dq(E4,E1)};function Cu(e){return{x:e.x,y:e.y,dx:e.dx,dy:e.dy}}function AU(Ex,Ey){var e=Ex.x+Ey[3],Ez=Ex.y+Ey[0],Ew=Ex.dx-Ey[1]-Ey[3],Ev=Ex.dy-Ey[0]-Ey[2];if(Ew<0){e+=Ew/2;Ew=0}if(Ev<0){Ez+=Ev/2;Ev=0}return{x:e,y:Ez,dx:Ew,dy:Ev}}d3.csv=function(e,Ev){d3.text(e,"text/csv",function(Ew){Ev(Ew&&d3.csv.parse(Ew))})};d3.csv.parse=function(e){var Ev;return d3.csv.parseRows(e,function(E0,Ey){if(Ey){var Ez={},Ex=-1,Ew=Ev.length;while(++Ex<Ew){Ez[Ev[Ex]]=E0[Ex]}return Ez}else{Ev=E0;return null}})};d3.csv.parseRows=function(E1,Ey){var Ev={},Ex={},E4=[],E2=/\r\n|[,\r\n]/g,e=0,E3,Ez;E2.lastIndex=0;function Ew(){if(E2.lastIndex>=E1.length){return Ex}if(Ez){Ez=false;return Ev}var E6=E2.lastIndex;if(E1.charCodeAt(E6)===34){var E7=E6;while(E7++<E1.length){if(E1.charCodeAt(E7)===34){if(E1.charCodeAt(E7+1)!==34){break}E7++}}E2.lastIndex=E7+2;var E8=E1.charCodeAt(E7+1);if(E8===13){Ez=true;if(E1.charCodeAt(E7+2)===10){E2.lastIndex++}}else{if(E8===10){Ez=true}}return E1.substring(E6+1,E7).replace(/""/g,'"')}var E5=E2.exec(E1);if(E5){Ez=E5[0].charCodeAt(0)!==44;return E1.substring(E6,E5.index)}E2.lastIndex=E1.length;return E1.substring(E6)}while((E3=Ew())!==Ex){var E0=[];while((E3!==Ev)&&(E3!==Ex)){E0.push(E3);E3=Ew()}if(Ey&&!(E0=Ey(E0,e++))){continue}E4.push(E0)}return E4};d3.csv.format=function(e){return e.map(CK).join("\n")};function CK(e){return e.map(AE).join(",")}function AE(e){return/[",\n]/.test(e)?'"'+e.replace(/\"/g,'""')+'"':e}d3.geo={};var Cb=Math.PI/180;d3.geo.azimuthal=function(){var Ez="orthographic",E2,Ex=200,Ew=[480,250],e,E1,Ey,E0;function Ev(FE){var E4=FE[0]*Cb-e,FD=FE[1]*Cb,E8=Math.cos(E4),E3=Math.sin(E4),E6=Math.cos(FD),FC=Math.sin(FD),E5=Ez!=="orthographic"?E0*FC+Ey*E6*E8:null,E9,E7=Ez==="stereographic"?1/(1+E5):Ez==="gnomonic"?1/E5:Ez==="equidistant"?(E9=Math.acos(E5),E9?E9/Math.sin(E9):0):Ez==="equalarea"?Math.sqrt(2/(1+E5)):1,FB=E7*E6*E3,FA=E7*(E0*E6*E8-Ey*FC);return[Ex*FB+Ew[0],Ex*FA+Ew[1]]}Ev.invert=function(E6){var E3=(E6[0]-Ew[0])/Ex,E9=(E6[1]-Ew[1])/Ex,E4=Math.sqrt(E3*E3+E9*E9),E8=Ez==="stereographic"?2*Math.atan(E4):Ez==="gnomonic"?Math.atan(E4):Ez==="equidistant"?E4:Ez==="equalarea"?2*Math.asin(0.5*E4):Math.asin(E4),E5=Math.sin(E8),E7=Math.cos(E8);return[(e+Math.atan2(E3*E5,E4*Ey*E7+E9*E0*E5))/Cb,Math.asin(E7*E0-(E4?(E9*E5*Ey)/E4:0))/Cb]};Ev.mode=function(E3){if(!arguments.length){return Ez}Ez=E3+"";return Ev};Ev.origin=function(E3){if(!arguments.length){return E2}E2=E3;e=E2[0]*Cb;E1=E2[1]*Cb;Ey=Math.cos(E1);E0=Math.sin(E1);return Ev};Ev.scale=function(E3){if(!arguments.length){return Ex}Ex=+E3;return Ev};Ev.translate=function(E3){if(!arguments.length){return Ew}Ew=[+E3[0],+E3[1]];return Ev};return Ev.origin([0,0])};d3.geo.albers=function(){var E2=[-98,38],E0=[29.5,45.5],Ez=1000,Ey=[480,250],E1,Ex,Ev,E3;function Ew(E6){var E4=Ex*(Cb*E6[0]-E1),E5=Math.sqrt(Ev-2*Ex*Math.sin(Cb*E6[1]))/Ex;return[Ez*E5*Math.sin(E4)+Ey[0],Ez*(E5*Math.cos(E4)-E3)+Ey[1]]}Ew.invert=function(E7){var E4=(E7[0]-Ey[0])/Ez,E9=(E7[1]-Ey[1])/Ez,E8=E3+E9,E5=Math.atan2(E4,E8),E6=Math.sqrt(E4*E4+E8*E8);return[(E1+E5/Ex)/Cb,Math.asin((Ev-E6*E6*Ex*Ex)/(2*Ex))/Cb]};function e(){var E5=Cb*E0[0],E4=Cb*E0[1],E8=Cb*E2[1],E6=Math.sin(E5),E7=Math.cos(E5);E1=Cb*E2[0];Ex=0.5*(E6+Math.sin(E4));Ev=E7*E7+2*Ex*E6;E3=Math.sqrt(Ev-2*Ex*Math.sin(E8))/Ex;return Ew}Ew.origin=function(E4){if(!arguments.length){return E2}E2=[+E4[0],+E4[1]];return e()};Ew.parallels=function(E4){if(!arguments.length){return E0}E0=[+E4[0],+E4[1]];return e()};Ew.scale=function(E4){if(!arguments.length){return Ez}Ez=+E4;return Ew};Ew.translate=function(E4){if(!arguments.length){return Ey}Ey=[+E4[0],+E4[1]];return Ew};return e()};d3.geo.albersUsa=function(){var e=d3.geo.albers();var Ey=d3.geo.albers().origin([-160,60]).parallels([55,65]);var Ex=d3.geo.albers().origin([-160,20]).parallels([8,18]);var Ew=d3.geo.albers().origin([-60,10]).parallels([8,18]);function Ev(E1){var E0=E1[0],Ez=E1[1];return(Ez>50?Ey:E0<-140?Ex:Ez<21?Ew:e)(E1)}Ev.scale=function(Ez){if(!arguments.length){return e.scale()}e.scale(Ez);Ey.scale(Ez*0.6);Ex.scale(Ez);Ew.scale(Ez*1.5);return Ev.translate(e.translate())};Ev.translate=function(E0){if(!arguments.length){return e.translate()}var Ez=e.scale()/1000,E2=E0[0],E1=E0[1];e.translate(E0);Ey.translate([E2-400*Ez,E1+170*Ez]);Ex.translate([E2-190*Ez,E1+200*Ez]);Ew.translate([E2+580*Ez,E1+430*Ez]);return Ev};return Ev.scale(e.scale())};d3.geo.bonne=function(){var Ez=200,Ey=[480,250],e,Ex,Ew,Ev;function E0(E4){var E1=E4[0]*Cb-e,E5=E4[1]*Cb-Ex;if(Ew){var E3=Ev+Ew-E5,E2=E1*Math.cos(E5)/E3;E1=E3*Math.sin(E2);E5=E3*Math.cos(E2)-Ev}else{E1*=Math.cos(E5);E5*=-1}return[Ez*E1+Ey[0],Ez*E5+Ey[1]]}E0.invert=function(E3){var E1=(E3[0]-Ey[0])/Ez,E5=(E3[1]-Ey[1])/Ez;if(Ew){var E4=Ev+E5,E2=Math.sqrt(E1*E1+E4*E4);E5=Ev+Ew-E2;E1=e+E2*Math.atan2(E1,E4)/Math.cos(E5)}else{E5*=-1;E1/=Math.cos(E5)}return[E1/Cb,E5/Cb]};E0.parallel=function(E1){if(!arguments.length){return Ew/Cb}Ev=1/Math.tan(Ew=E1*Cb);return E0};E0.origin=function(E1){if(!arguments.length){return[e/Cb,Ex/Cb]}e=E1[0]*Cb;Ex=E1[1]*Cb;return E0};E0.scale=function(E1){if(!arguments.length){return Ez}Ez=+E1;return E0};E0.translate=function(E1){if(!arguments.length){return Ey}Ey=[+E1[0],+E1[1]];return E0};return E0.origin([0,0]).parallel(45)};d3.geo.equirectangular=function(){var Ew=500,Ev=[480,250];function e(Ey){var Ex=Ey[0]/360,Ez=-Ey[1]/360;return[Ew*Ex+Ev[0],Ew*Ez+Ev[1]]}e.invert=function(Ey){var Ex=(Ey[0]-Ev[0])/Ew,Ez=(Ey[1]-Ev[1])/Ew;return[360*Ex,-360*Ez]};e.scale=function(Ex){if(!arguments.length){return Ew}Ew=+Ex;return e};e.translate=function(Ex){if(!arguments.length){return Ev}Ev=[+Ex[0],+Ex[1]];return e};return e};d3.geo.mercator=function(){var Ew=500,Ev=[480,250];function e(Ey){var Ex=Ey[0]/360,Ez=-(Math.log(Math.tan(Math.PI/4+Ey[1]*Cb/2))/Cb)/360;return[Ew*Ex+Ev[0],Ew*Math.max(-0.5,Math.min(0.5,Ez))+Ev[1]]}e.invert=function(Ey){var Ex=(Ey[0]-Ev[0])/Ew,Ez=(Ey[1]-Ev[1])/Ew;return[360*Ex,2*Math.atan(Math.exp(-360*Ez*Cb))/Cb-90]};e.scale=function(Ex){if(!arguments.length){return Ew}Ew=+Ex;return e};e.translate=function(Ex){if(!arguments.length){return Ev}Ev=[+Ex[0],+Ex[1]];return e};return e};function DI(Ev,e){return function(Ew){return Ew&&Ev.hasOwnProperty(Ew.type)?Ev[Ew.type](Ew):e}}d3.geo.path=function(){var E0=4.5,E4=Z(E0),Ez=d3.geo.albersUsa();function E3(E6,E5){if(typeof E0==="function"){E4=Z(E0.apply(this,arguments))}return Ev(E6)||null}function E1(E5){return Ez(E5).join(",")}var Ev=DI({FeatureCollection:function(E8){var E7=[],E6=E8.features,E5=-1,E9=E6.length;while(++E5<E9){E7.push(Ev(E6[E5].geometry))}return E7.join("")},Feature:function(E5){return Ev(E5.geometry)},Point:function(E5){return"M"+E1(E5.coordinates)+E4},MultiPoint:function(E8){var E6=[],E7=E8.coordinates,E5=-1,E9=E7.length;while(++E5<E9){E6.push("M",E1(E7[E5]),E4)}return E6.join("")},LineString:function(E8){var E6=["M"],E7=E8.coordinates,E5=-1,E9=E7.length;while(++E5<E9){E6.push(E1(E7[E5]),"L")}E6.pop();return E6.join("")},MultiLineString:function(FB){var E9=[],FA=FB.coordinates,E8=-1,FC=FA.length,E6,E7,E5;while(++E8<FC){E6=FA[E8];E7=-1;E5=E6.length;E9.push("M");while(++E7<E5){E9.push(E1(E6[E7]),"L")}E9.pop()}return E9.join("")},Polygon:function(FB){var E9=[],FA=FB.coordinates,E8=-1,FC=FA.length,E6,E7,E5;while(++E8<FC){E6=FA[E8];E7=-1;if((E5=E6.length-1)>0){E9.push("M");while(++E7<E5){E9.push(E1(E6[E7]),"L")}E9[E9.length-1]="Z"}}return E9.join("")},MultiPolygon:function(E6){var FF=[],FE=E6.coordinates,FD=-1,E7=FE.length,FA,FC,E8,FB,E9,E5;while(++FD<E7){FA=FE[FD];FC=-1;E8=FA.length;while(++FC<E8){FB=FA[FC];E9=-1;if((E5=FB.length-1)>0){FF.push("M");while(++E9<E5){FF.push(E1(FB[E9]),"L")}FF[FF.length-1]="Z"}}}return FF.join("")},GeometryCollection:function(E8){var E7=[],E6=E8.geometries,E5=-1,E9=E6.length;while(++E5<E9){E7.push(Ev(E6[E5]))}return E7.join("")}});var Ew=E3.area=DI({FeatureCollection:function(E8){var E7=0,E6=E8.features,E5=-1,E9=E6.length;while(++E5<E9){E7+=Ew(E6[E5])}return E7},Feature:function(E5){return Ew(E5.geometry)},Polygon:function(E5){return Ey(E5.coordinates)},MultiPolygon:function(E8){var E6=0,E7=E8.coordinates,E5=-1,E9=E7.length;while(++E5<E9){E6+=Ey(E7[E5])}return E6},GeometryCollection:function(E8){var E7=0,E6=E8.geometries,E5=-1,E9=E6.length;while(++E5<E9){E7+=Ew(E6[E5])}return E7}},0);function Ey(E7){var E6=Ex(E7[0]),E5=0,E8=E7.length;while(++E5<E8){E6-=Ex(E7[E5])}return E6}function e(FD){var FB=d3.geom.polygon(FD[0].map(Ez)),E5=FB.area(),E6=FB.centroid(E5<0?(E5*=-1,1):-1),FC=E6[0],FA=E6[1],E9=E5,E8=0,E7=FD.length;while(++E8<E7){FB=d3.geom.polygon(FD[E8].map(Ez));E5=FB.area();E6=FB.centroid(E5<0?(E5*=-1,1):-1);FC-=E6[0];FA-=E6[1];E9-=E5}return[FC,FA,6*E9]}var E2=E3.centroid=DI({Feature:function(E5){return E2(E5.geometry)},Polygon:function(E6){var E5=e(E6.coordinates);return[E5[0]/E5[2],E5[1]/E5[2]]},MultiPolygon:function(E6){var E5=0,FD=E6.coordinates,E7,FC=0,FB=0,FA=0,E9=-1,E8=FD.length;while(++E9<E8){E7=e(FD[E9]);FC+=E7[0];FB+=E7[1];FA+=E7[2]}return[FC/FA,FB/FA]}});function Ex(E5){return Math.abs(d3.geom.polygon(E5.map(Ez)).area())}E3.projection=function(E5){Ez=E5;return E3};E3.pointRadius=function(E5){if(typeof E5==="function"){E0=E5}else{E0=+E5;E4=Z(E0)}return E3};return E3};function Z(e){return"m0,"+e+"a"+e+","+e+" 0 1,1 0,"+(-2*e)+"a"+e+","+e+" 0 1,1 0,"+(+2*e)+"z"}d3.geo.bounds=function(Ew){var Ey=Infinity,e=Infinity,Ev=-Infinity,Ex=-Infinity;Bk(Ew,function(Ez,E0){if(Ez<Ey){Ey=Ez}if(Ez>Ev){Ev=Ez}if(E0<e){e=E0}if(E0>Ex){Ex=E0}});return[[Ey,e],[Ev,Ex]]};function Bk(Ev,e){if(D0.hasOwnProperty(Ev.type)){D0[Ev.type](Ev,e)}}var D0={Feature:Ef,FeatureCollection:De,GeometryCollection:Cy,LineString:Dj,MultiLineString:Dw,MultiPoint:Dj,MultiPolygon:Ed,Point:ER,Polygon:BQ};function Ef(Ev,e){Bk(Ev.geometry,e)}function De(Ex,Ew){for(var e=Ex.features,Ev=0,Ey=e.length;Ev<Ey;Ev++){Bk(e[Ev].geometry,Ew)}}function Cy(Ex,Ew){for(var e=Ex.geometries,Ev=0,Ey=e.length;Ev<Ey;Ev++){Bk(e[Ev],Ew)}}function Dj(Ex,Ew){for(var e=Ex.coordinates,Ev=0,Ey=e.length;Ev<Ey;Ev++){Ew.apply(null,e[Ev])}}function Dw(E0,Ez){for(var Ew=E0.coordinates,Ey=0,E1=Ew.length;Ey<E1;Ey++){for(var Ev=Ew[Ey],Ex=0,e=Ev.length;Ex<e;Ex++){Ez.apply(null,Ev[Ex])}}}function Ed(E0,Ez){for(var Ew=E0.coordinates,Ey=0,E1=Ew.length;Ey<E1;Ey++){for(var Ev=Ew[Ey][0],Ex=0,e=Ev.length;Ex<e;Ex++){Ez.apply(null,Ev[Ex])}}}function ER(Ev,e){e.apply(null,Ev.coordinates)}function BQ(Ex,Ew){for(var e=Ex.coordinates[0],Ev=0,Ey=e.length;Ev<Ey;Ev++){Ew.apply(null,e[Ev])}}d3.geo.circle=function(){var E2=[0,0],Ez=90-0.01,E0=Ez*Cb,Ew=d3.geo.greatArc().target(Object);function Ev(){}function Ex(E3){return Ew.distance(E3)<E0}Ev.clip=function(E3){Ew.source(typeof E2==="function"?E2.apply(this,arguments):E2);return E1(E3)};var E1=DI({FeatureCollection:function(E4){var E3=E4.features.map(E1).filter(Object);return E3&&(E4=Object.create(E4),E4.features=E3,E4)},Feature:function(E4){var E3=E1(E4.geometry);return E3&&(E4=Object.create(E4),E4.geometry=E3,E4)},Point:function(E3){return Ex(E3.coordinates)&&E3},MultiPoint:function(E4){var E3=E4.coordinates.filter(Ex);return E3.length&&{type:E4.type,coordinates:E3}},LineString:function(E4){var E3=Ey(E4.coordinates);return E3.length&&(E4=Object.create(E4),E4.coordinates=E3,E4)},MultiLineString:function(E4){var E3=E4.coordinates.map(Ey).filter(function(E5){return E5.length});return E3.length&&(E4=Object.create(E4),E4.coordinates=E3,E4)},Polygon:function(E4){var E3=E4.coordinates.map(Ey);return E3[0].length&&(E4=Object.create(E4),E4.coordinates=E3,E4)},MultiPolygon:function(E4){var E3=E4.coordinates.map(function(E5){return E5.map(Ey)}).filter(function(E5){return E5[0].length});return E3.length&&(E4=Object.create(E4),E4.coordinates=E3,E4)},GeometryCollection:function(E4){var E3=E4.geometries.map(E1).filter(Object);return E3.length&&(E4=Object.create(E4),E4.geometries=E3,E4)}});function Ey(E8){var E7=-1,E5=E8.length,E6=[],FB,FA,E9,E4,E3;while(++E7<E5){E3=Ew.distance(E9=E8[E7]);if(E3<E0){if(FA){E6.push(Eu(FA,E9)((E4-E0)/(E4-E3)))}E6.push(E9);FB=FA=null}else{FA=E9;if(!FB&&E6.length){E6.push(Eu(E6[E6.length-1],FA)((E0-E4)/(E3-E4)));FB=FA}}E4=E3}if(FA&&E6.length){E3=Ew.distance(E9=E6[0]);E6.push(Eu(FA,E9)((E4-E0)/(E4-E3)))}return e(E6)}function e(E9){var E7=0,FA=E9.length,E6,E3,E4=FA?[E9[0]]:E9,E8,E5=Ew.source();while(++E7<FA){E8=Ew.source(E9[E7-1])(E9[E7]).coordinates;for(E6=0,E3=E8.length;++E6<E3;){E4.push(E8[E6])}}Ew.source(E5);return E4}Ev.origin=function(E3){if(!arguments.length){return E2}E2=E3;return Ev};Ev.angle=function(E3){if(!arguments.length){return Ez}E0=(Ez=+E3)*Cb;return Ev};Ev.precision=function(E3){if(!arguments.length){return Ew.precision()}Ew.precision(E3);return Ev};return Ev};d3.geo.greatArc=function(){var Ew=Bh,Ex=Bm,Ev=6*Cb;function e(){var Ez=typeof Ew==="function"?Ew.apply(this,arguments):Ew,Ey=typeof Ex==="function"?Ex.apply(this,arguments):Ex,E1=Eu(Ez,Ey),E2=Ev/E1.d,E0=0,E3=[Ez];while((E0+=E2)<1){E3.push(E1(E0))}E3.push(Ey);return{type:"LineString",coordinates:E3}}e.distance=function(){var Ez=typeof Ew==="function"?Ew.apply(this,arguments):Ew,Ey=typeof Ex==="function"?Ex.apply(this,arguments):Ex;return Eu(Ez,Ey).d};e.source=function(Ey){if(!arguments.length){return Ew}Ew=Ey;return e};e.target=function(Ey){if(!arguments.length){return Ex}Ex=Ey;return e};e.precision=function(Ey){if(!arguments.length){return Ev/Cb}Ev=Ey*Cb;return e};return e};function Bh(e){return e.source}function Bm(e){return e.target}function Eu(E8,E5){var Ex=E8[0]*Cb,E4=Math.cos(Ex),Ew=Math.sin(Ex),FA=E8[1]*Cb,Ez=Math.cos(FA),E9=Math.sin(FA),Ev=E5[0]*Cb,E3=Math.cos(Ev),e=Math.sin(Ev),E7=E5[1]*Cb,Ey=Math.cos(E7),E6=Math.sin(E7),E2=E0.d=Math.acos(Math.max(-1,Math.min(1,E9*E6+Ez*Ey*Math.cos(Ev-Ex)))),E1=Math.sin(E2);function E0(FD){var FC=Math.sin(E2-(FD*=E2))/E1,FG=Math.sin(FD)/E1,FB=FC*Ez*E4+FG*Ey*E3,FF=FC*Ez*Ew+FG*Ey*e,FE=FC*E9+FG*E6;return[Math.atan2(FF,FB)/Cb,Math.atan2(FE,Math.sqrt(FB*FB+FF*FF))/Cb]}return E0}d3.geo.greatCircle=d3.geo.circle;d3.geom={};d3.geom.contour=function(e,Ev){var E3=Ev||K(e),Ez=[],E1=E3[0],E0=E3[1],E4=0,E2=0,Ex=NaN,Ew=NaN,Ey=0;do{Ey=0;if(e(E1-1,E0-1)){Ey+=1}if(e(E1,E0-1)){Ey+=2}if(e(E1-1,E0)){Ey+=4}if(e(E1,E0)){Ey+=8}if(Ey===6){E4=Ew===-1?-1:1;E2=0}else{if(Ey===9){E4=0;E2=Ex===1?-1:1}else{E4=Bf[Ey];E2=Bd[Ey]}}if(E4!=Ex&&E2!=Ew){Ez.push([E1,E0]);Ex=E4;Ew=E2}E1+=E4;E0+=E2}while(E3[0]!=E1||E3[1]!=E0);return Ez};var Bf=[1,0,1,1,-1,0,-1,1,0,0,0,0,-1,0,-1,NaN],Bd=[0,-1,0,0,0,-1,0,0,1,-1,1,1,0,-1,0,NaN];function K(Ev){var e=0,Ew=0;while(true){if(Ev(e,Ew)){return[e,Ew]}if(e===0){e=Ew+1;Ew=0}else{e=e-1;Ew=Ew+1}}}d3.geom.hull=function(E3){if(E3.length<3){return[]}var E2=E3.length,Ey=E2-1,E9=[],E5=[],E0,Ez,E1=0,Ex,E7,Ev,E4,FA,E8,E6,Ew;for(E0=1;E0<E2;++E0){if(E3[E0][1]<E3[E1][1]){E1=E0}else{if(E3[E0][1]==E3[E1][1]){E1=(E3[E0][0]<E3[E1][0]?E0:E1)}}}for(E0=0;E0<E2;++E0){if(E0===E1){continue}E7=E3[E0][1]-E3[E1][1];Ex=E3[E0][0]-E3[E1][0];E9.push({angle:Math.atan2(E7,Ex),index:E0})}E9.sort(function(FC,FB){return FC.angle-FB.angle});E6=E9[0].angle;E8=E9[0].index;FA=0;for(E0=1;E0<Ey;++E0){Ez=E9[E0].index;if(E6==E9[E0].angle){Ex=E3[E8][0]-E3[E1][0];E7=E3[E8][1]-E3[E1][1];Ev=E3[Ez][0]-E3[E1][0];E4=E3[Ez][1]-E3[E1][1];if((Ex*Ex+E7*E7)>=(Ev*Ev+E4*E4)){E9[E0].index=-1}else{E9[FA].index=-1;E6=E9[E0].angle;FA=E0;E8=Ez}}else{E6=E9[E0].angle;FA=E0;E8=Ez}}E5.push(E1);for(E0=0,Ez=0;E0<2;++Ez){if(E9[Ez].index!==-1){E5.push(E9[Ez].index);E0++}}Ew=E5.length;for(;Ez<Ey;++Ez){if(E9[Ez].index===-1){continue}while(!B0(E5[Ew-2],E5[Ew-1],E9[Ez].index,E3)){--Ew}E5[Ew++]=E9[Ez].index}var e=[];for(E0=0;E0<Ew;++E0){e.push(E3[E5[E0]])}return e};function B0(Ex,Ew,Ev,E4){var E5,E3,E2,E1,E0,Ez,Ey;E5=E4[Ex];E3=E5[0];E2=E5[1];E5=E4[Ew];E1=E5[0];E0=E5[1];E5=E4[Ev];Ez=E5[0];Ey=E5[1];return((Ey-E2)*(E1-E3)-(E0-E2)*(Ez-E3))>0}d3.geom.polygon=function(e){e.area=function(){var Ex=0,Ey=e.length,Ew=e[Ey-1][0]*e[0][1],Ev=e[Ey-1][1]*e[0][0];while(++Ex<Ey){Ew+=e[Ex-1][0]*e[Ex][1];Ev+=e[Ex-1][1]*e[Ex][0]}return(Ev-Ew)*0.5};e.centroid=function(Ey){var Ez=-1,E2=e.length,Ew=0,E1=0,Ex,Ev=e[E2-1],E0;if(!arguments.length){Ey=-1/(6*e.area())}while(++Ez<E2){Ex=Ev;Ev=e[Ez];E0=Ex[0]*Ev[1]-Ev[0]*Ex[1];Ew+=(Ex[0]+Ev[0])*E0;E1+=(Ex[1]+Ev[1])*E0}return[Ew*Ey,E1*Ey]};e.clip=function(E1){var E3,Ey=-1,Ev=e.length,Ex,Ew,E4=e[Ev-1],E2,E0,Ez;while(++Ey<Ev){E3=E1.slice();E1.length=0;E2=e[Ey];E0=E3[(Ew=E3.length)-1];Ex=-1;while(++Ex<Ew){Ez=E3[Ex];if(T(Ez,E4,E2)){if(!T(E0,E4,E2)){E1.push(Dm(E0,Ez,E4,E2))}E1.push(Ez)}else{if(T(E0,E4,E2)){E1.push(Dm(E0,Ez,E4,E2))}}E0=Ez}E4=E2}return E1};return e};function T(Ew,Ev,e){return(e[0]-Ev[0])*(Ew[1]-Ev[1])<(e[1]-Ev[1])*(Ew[0]-Ev[0])}function Dm(E7,E6,FA,E9){var E5=E7[0],E4=E6[0],E3=FA[0],E1=E9[0],Ex=E7[1],Ew=E6[1],Ev=FA[1],e=E9[1],FB=E5-E3,Ey=E4-E5,FC=E1-E3,Ez=Ex-Ev,E8=Ew-Ex,E0=e-Ev,E2=(FC*Ez-E0*FB)/(E0*Ey-FC*E8);return[E5+E2*Ey,Ex+E2*E8]}d3.geom.voronoi=function(Ev){var e=Ev.map(function(){return[]});D6(Ev,function(Ey){var E4,E3,Ex,Ew,E1,Ez;if(Ey.a===1&&Ey.b>=0){E4=Ey.ep.r;E3=Ey.ep.l}else{E4=Ey.ep.l;E3=Ey.ep.r}if(Ey.a===1){E1=E4?E4.y:-1000000;Ex=Ey.c-Ey.b*E1;Ez=E3?E3.y:1000000;Ew=Ey.c-Ey.b*Ez}else{Ex=E4?E4.x:-1000000;E1=Ey.c-Ey.a*Ex;Ew=E3?E3.x:1000000;Ez=Ey.c-Ey.a*Ew}var E2=[Ex,E1],E0=[Ew,Ez];e[Ey.region.l.index].push(E2,E0);e[Ey.region.r.index].push(E2,E0)});return e.map(function(Ey,Ex){var Ew=Ev[Ex][0],Ez=Ev[Ex][1];Ey.forEach(function(E0){E0.angle=Math.atan2(E0[0]-Ew,E0[1]-Ez)});return Ey.sort(function(E1,E0){return E1.angle-E0.angle}).filter(function(E1,E0){return !E0||(E1.angle-Ey[E0-1].angle>1e-10)})})};var Bs={l:"r",r:"l"};function D6(Ez,Ex){var FD={list:Ez.map(function(e,FF){return{index:FF,x:e[0],y:e[1]}}).sort(function(FF,e){return FF.y<e.y?-1:FF.y>e.y?1:FF.x<e.x?-1:FF.x>e.x?1:0}),bottomSite:null};var Ew={list:[],leftEnd:null,rightEnd:null,init:function(){Ew.leftEnd=Ew.createHalfEdge(null,"l");Ew.rightEnd=Ew.createHalfEdge(null,"l");Ew.leftEnd.r=Ew.rightEnd;Ew.rightEnd.l=Ew.leftEnd;Ew.list.unshift(Ew.leftEnd,Ew.rightEnd)},createHalfEdge:function(FF,e){return{edge:FF,side:e,vertex:null,l:null,r:null}},insert:function(FF,e){e.l=FF;e.r=FF.r;FF.r.l=e;FF.r=e},leftBound:function(FF){var e=Ew.leftEnd;do{e=e.r}while(e!=Ew.rightEnd&&FC.rightOf(e,FF));e=e.l;return e},del:function(e){e.l.r=e.r;e.r.l=e.l;e.edge=null},right:function(e){return e.r},left:function(e){return e.l},leftRegion:function(e){return e.edge==null?FD.bottomSite:e.edge.region[e.side]},rightRegion:function(e){return e.edge==null?FD.bottomSite:e.edge.region[Bs[e.side]]}};var FC={bisect:function(FI,FG){var FH={region:{l:FI,r:FG},ep:{l:null,r:null}};var FF=FG.x-FI.x,e=FG.y-FI.y,FK=FF>0?FF:-FF,FJ=e>0?e:-e;FH.c=FI.x*FF+FI.y*e+(FF*FF+e*e)*0.5;if(FK>FJ){FH.a=1;FH.b=e/FF;FH.c/=FF}else{FH.b=1;FH.a=FF/e;FH.c/=e}return FH},intersect:function(FI,FH){var FN=FI.edge,FM=FH.edge;if(!FN||!FM||(FN.region.r==FM.region.r)){return null}var FL=(FN.a*FM.b)-(FN.b*FM.a);if(Math.abs(FL)<1e-10){return null}var FG=(FN.c*FM.b-FM.c*FN.b)/FL,FQ=(FM.c*FN.a-FN.c*FM.a)/FL,FP=FN.region.r,FK=FM.region.r,FF,FJ;if((FP.y<FK.y)||(FP.y==FK.y&&FP.x<FK.x)){FF=FI;FJ=FN}else{FF=FH;FJ=FM}var FO=(FG>=FJ.region.r.x);if((FO&&(FF.side==="l"))||(!FO&&(FF.side==="r"))){return null}return{x:FG,y:FQ}},rightOf:function(FK,FF){var FO=FK.edge,FI=FO.region.r,FR=(FF.x>FI.x);if(FR&&(FK.side==="l")){return 1}if(!FR&&(FK.side==="r")){return 0}if(FO.a===1){var FQ=FF.y-FI.y,FG=FF.x-FI.x,FL=0,FP=0;if((!FR&&(FO.b<0))||(FR&&(FO.b>=0))){FP=FL=(FQ>=FO.b*FG)}else{FP=((FF.x+FF.y*FO.b)>FO.c);if(FO.b<0){FP=!FP}if(!FP){FL=1}}if(!FL){var FS=FI.x-FO.region.l.x;FP=(FO.b*(FG*FG-FQ*FQ))<(FS*FQ*(1+2*FG/FS+FO.b*FO.b));if(FO.b<0){FP=!FP}}}else{var FH=FO.c-FO.a*FF.x,FN=FF.y-FH,FM=FF.x-FI.x,FJ=FH-FI.y;FP=(FN*FN)>(FM*FM+FJ*FJ)}return FK.side==="l"?FP:!FP},endPoint:function(FG,FF,e){FG.ep[FF]=e;if(!FG.ep[Bs[FF]]){return}Ex(FG)},distance:function(FH,FG){var FF=FH.x-FG.x,e=FH.y-FG.y;return Math.sqrt(FF*FF+e*e)}};var Ev={list:[],insert:function(FJ,FF,FK){FJ.vertex=FF;FJ.ystar=FF.y+FK;for(var FG=0,FI=Ev.list,e=FI.length;FG<e;FG++){var FH=FI[FG];if(FJ.ystar>FH.ystar||(FJ.ystar==FH.ystar&&FF.x>FH.vertex.x)){continue}else{break}}FI.splice(FG,0,FJ)},del:function(FH){for(var FG=0,FF=Ev.list,e=FF.length;FG<e&&(FF[FG]!=FH);++FG){}FF.splice(FG,1)},empty:function(){return Ev.list.length===0},nextEvent:function(FH){for(var FG=0,FF=Ev.list,e=FF.length;FG<e;++FG){if(FF[FG]==FH){return FF[FG+1]}}return null},min:function(){var e=Ev.list[0];return{x:e.vertex.x,y:e.ystar}},extractMin:function(){return Ev.list.shift()}};Ew.init();FD.bottomSite=FD.list.shift();var FE=FD.list.shift(),E1;var E6,E3,Ey,FA,E0;var E4,E5,FB,E7,E2;var E9,E8;while(true){if(!Ev.empty()){E1=Ev.min()}if(FE&&(Ev.empty()||FE.y<E1.y||(FE.y==E1.y&&FE.x<E1.x))){E6=Ew.leftBound(FE);E3=Ew.right(E6);E4=Ew.rightRegion(E6);E9=FC.bisect(E4,FE);E0=Ew.createHalfEdge(E9,"l");Ew.insert(E6,E0);E7=FC.intersect(E6,E0);if(E7){Ev.del(E6);Ev.insert(E6,E7,FC.distance(E7,FE))}E6=E0;E0=Ew.createHalfEdge(E9,"r");Ew.insert(E6,E0);E7=FC.intersect(E0,E3);if(E7){Ev.insert(E0,E7,FC.distance(E7,FE))}FE=FD.list.shift()}else{if(!Ev.empty()){E6=Ev.extractMin();Ey=Ew.left(E6);E3=Ew.right(E6);FA=Ew.right(E3);E4=Ew.leftRegion(E6);E5=Ew.rightRegion(E3);E2=E6.vertex;FC.endPoint(E6.edge,E6.side,E2);FC.endPoint(E3.edge,E3.side,E2);Ew.del(E6);Ev.del(E3);Ew.del(E3);E8="l";if(E4.y>E5.y){FB=E4;E4=E5;E5=FB;E8="r"}E9=FC.bisect(E4,E5);E0=Ew.createHalfEdge(E9,E8);Ew.insert(Ey,E0);FC.endPoint(E9,Bs[E8],E2);E7=FC.intersect(Ey,E0);if(E7){Ev.del(Ey);Ev.insert(Ey,E7,FC.distance(E7,E4))}E7=FC.intersect(E0,FA);if(E7){Ev.insert(E0,E7,FC.distance(E7,E4))}}else{break}}}for(E6=Ew.right(Ew.leftEnd);E6!=Ew.rightEnd;E6=Ew.right(E6)){Ex(E6.edge)}}d3.geom.delaunay=function(Ev){var e=Ev.map(function(){return[]}),Ew=[];D6(Ev,function(Ex){e[Ex.region.l.index].push(Ev[Ex.region.r.index])});e.forEach(function(E2,E1){var Ez=Ev[E1],Ey=Ez[0],E3=Ez[1];E2.forEach(function(E4){E4.angle=Math.atan2(E4[0]-Ey,E4[1]-E3)});E2.sort(function(E5,E4){return E5.angle-E4.angle});for(var E0=0,Ex=E2.length-1;E0<Ex;E0++){Ew.push([Ez,E2[E0],E2[E0+1]])}});return Ew};d3.geom.quadtree=function(E3,Ew,E2,e,E1){var Ev,Ey=-1,Ex=E3.length;if(Ex&&isNaN(E3[0].x)){E3=E3.map(l)}if(arguments.length<5){if(arguments.length===3){E1=e=E2;E2=Ew}else{Ew=E2=Infinity;e=E1=-Infinity;while(++Ey<Ex){Ev=E3[Ey];if(Ev.x<Ew){Ew=Ev.x}if(Ev.y<E2){E2=Ev.y}if(Ev.x>e){e=Ev.x}if(Ev.y>E1){E1=Ev.y}}var E6=e-Ew,E5=E1-E2;if(E6>E5){E1=E2+E6}else{e=Ew+E5}}}function E4(FD,FC,E9,FB,E8,FA){if(isNaN(FC.x)||isNaN(FC.y)){return}if(FD.leaf){var E7=FD.point;if(E7){if((Math.abs(E7.x-FC.x)+Math.abs(E7.y-FC.y))<0.01){Ez(FD,FC,E9,FB,E8,FA)}else{FD.point=null;Ez(FD,E7,E9,FB,E8,FA);Ez(FD,FC,E9,FB,E8,FA)}}else{FD.point=FC}}else{Ez(FD,FC,E9,FB,E8,FA)}}function Ez(FB,E9,FA,FG,E8,FE){var FF=(FA+E8)*0.5,FD=(FG+FE)*0.5,FH=E9.x>=FF,E7=E9.y>=FD,FC=(E7<<1)+FH;FB.leaf=false;FB=FB.nodes[FC]||(FB.nodes[FC]=DP());if(FH){FA=FF}else{E8=FF}if(E7){FG=FD}else{FE=FD}E4(FB,E9,FA,FG,E8,FE)}var E0=DP();E0.add=function(E7){E4(E0,E7,Ew,E2,e,E1)};E0.visit=function(E7){BS(E7,E0,Ew,E2,e,E1)};E3.forEach(E0.add);return E0};function DP(){return{leaf:true,nodes:[],point:null}}function BS(Ey,Ex,Ev,E2,e,E0){if(!Ey(Ex,Ev,E2,e,E0)){var E1=(Ev+e)*0.5,Ez=(E2+E0)*0.5,Ew=Ex.nodes;if(Ew[0]){BS(Ey,Ew[0],Ev,E2,E1,Ez)}if(Ew[1]){BS(Ey,Ew[1],E1,E2,e,Ez)}if(Ew[2]){BS(Ey,Ew[2],Ev,Ez,E1,E0)}if(Ew[3]){BS(Ey,Ew[3],E1,Ez,e,E0)}}}function l(e){return{x:e[0],y:e[1]}}d3.time={};var DO=Date;function EG(){this._=new Date(arguments.length>1?Date.UTC.apply(this,arguments):arguments[0])}EG.prototype={getDate:function(){return this._.getUTCDate()},getDay:function(){return this._.getUTCDay()},getFullYear:function(){return this._.getUTCFullYear()},getHours:function(){return this._.getUTCHours()},getMilliseconds:function(){return this._.getUTCMilliseconds()},getMinutes:function(){return this._.getUTCMinutes()},getMonth:function(){return this._.getUTCMonth()},getSeconds:function(){return this._.getUTCSeconds()},getTime:function(){return this._.getTime()},getTimezoneOffset:function(){return 0},valueOf:function(){return this._.valueOf()},setDate:function(){DZ.setUTCDate.apply(this._,arguments)},setDay:function(){DZ.setUTCDay.apply(this._,arguments)},setFullYear:function(){DZ.setUTCFullYear.apply(this._,arguments)},setHours:function(){DZ.setUTCHours.apply(this._,arguments)},setMilliseconds:function(){DZ.setUTCMilliseconds.apply(this._,arguments)},setMinutes:function(){DZ.setUTCMinutes.apply(this._,arguments)},setMonth:function(){DZ.setUTCMonth.apply(this._,arguments)},setSeconds:function(){DZ.setUTCSeconds.apply(this._,arguments)},setTime:function(){DZ.setTime.apply(this._,arguments)}};var DZ=Date.prototype;d3.time.format=function(e){var Ew=e.length;function Ev(Ez){var Ey=[],E0=-1,Ex=0,E2,E1;while(++E0<Ew){if(e.charCodeAt(E0)==37){Ey.push(e.substring(Ex,E0),(E1=Dt[E2=e.charAt(++E0)])?E1(Ez):E2);Ex=E0+1}}Ey.push(e.substring(Ex,E0));return Ey.join("")}Ev.parse=function(Ey){var E0={y:1900,m:0,d:1,H:0,M:0,S:0,L:0},Ez=CG(E0,e,Ey,0);if(Ez!=Ey.length){return null}if("p" in E0){E0.H=E0.H%12+E0.p*12}var Ex=new DO();Ex.setFullYear(E0.y,E0.m,E0.d);Ex.setHours(E0.H,E0.M,E0.S,E0.L);return Ex};Ev.toString=function(){return e};return Ev};function CG(Ex,E2,E0,Ey){var E1,e,Ez=0,Ev=E2.length,Ew=E0.length;while(Ez<Ev){if(Ey>=Ew){return -1}E1=E2.charCodeAt(Ez++);if(E1==37){e=Ej[E2.charAt(Ez++)];if(!e||((Ey=e(Ex,E0,Ey))<0)){return -1}}else{if(E1!=E0.charCodeAt(Ey++)){return -1}}}return Ey}var As=d3.format("02d"),Ar=d3.format("03d"),Aq=d3.format("04d"),Ao=d3.format("2d");var Dt={a:function(e){return d3_time_weekdays[e.getDay()].substring(0,3)},A:function(e){return d3_time_weekdays[e.getDay()]},b:function(e){return BD[e.getMonth()].substring(0,3)},B:function(e){return BD[e.getMonth()]},c:d3.time.format("%a %b %e %H:%M:%S %Y"),d:function(e){return As(e.getDate())},e:function(e){return Ao(e.getDate())},H:function(e){return As(e.getHours())},I:function(e){return As(e.getHours()%12||12)},j:function(e){return Ar(1+d3.time.dayOfYear(e))},L:function(e){return Ar(e.getMilliseconds())},m:function(e){return As(e.getMonth()+1)},M:function(e){return As(e.getMinutes())},p:function(e){return e.getHours()>=12?"PM":"AM"},S:function(e){return As(e.getSeconds())},U:function(e){return As(d3.time.sundayOfYear(e))},w:function(e){return e.getDay()},W:function(e){return As(d3.time.mondayOfYear(e))},x:d3.time.format("%m/%d/%y"),X:d3.time.format("%H:%M:%S"),y:function(e){return As(e.getFullYear()%100)},Y:function(e){return Aq(e.getFullYear()%10000)},Z:DW,"%":function(e){return"%"}};var Ej={a:EF,A:BO,b:AV,B:Cl,c:CS,d:A3,e:A3,H:AN,I:AN,L:EB,m:D2,M:BY,p:Ea,S:B8,x:Et,X:Dz,y:g,Y:Am};function EF(Ev,e,Ew){return C4.test(e.substring(Ew,Ew+=3))?Ew:-1}function BO(Ev,e,Ew){Ay.lastIndex=0;var Ex=Ay.exec(e.substring(Ew,Ew+10));return Ex?Ew+=Ex[0].length:-1}var C4=/^(?:sun|mon|tue|wed|thu|fri|sat)/i,Ay=/^(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)/i;d3_time_weekdays=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];function AV(Ev,e,Ew){var Ex=Cp.get(e.substring(Ew,Ew+=3).toLowerCase());return Ex==null?-1:(Ev.m=Ex,Ew)}var Cp=d3.map({jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11});function Cl(Ev,e,Ew){EI.lastIndex=0;var Ex=EI.exec(e.substring(Ew,Ew+12));return Ex?(Ev.m=DG.get(Ex[0].toLowerCase()),Ew+=Ex[0].length):-1}var EI=/^(?:January|February|March|April|May|June|July|August|September|October|November|December)/ig;var DG=d3.map({january:0,february:1,march:2,april:3,may:4,june:5,july:6,august:7,september:8,october:9,november:10,december:11});var BD=["January","February","March","April","May","June","July","August","September","October","November","December"];function CS(Ev,e,Ew){return CG(Ev,Dt.c.toString(),e,Ew)}function Et(Ev,e,Ew){return CG(Ev,Dt.x.toString(),e,Ew)}function Dz(Ev,e,Ew){return CG(Ev,Dt.X.toString(),e,Ew)}function Am(Ev,e,Ew){Da.lastIndex=0;var Ex=Da.exec(e.substring(Ew,Ew+4));return Ex?(Ev.y=+Ex[0],Ew+=Ex[0].length):-1}function g(Ev,e,Ew){Da.lastIndex=0;var Ex=Da.exec(e.substring(Ew,Ew+2));return Ex?(Ev.y=Aj()+ +Ex[0],Ew+=Ex[0].length):-1}function Aj(){return ~~(new Date().getFullYear()/1000)*1000}function D2(Ev,e,Ew){Da.lastIndex=0;var Ex=Da.exec(e.substring(Ew,Ew+2));return Ex?(Ev.m=Ex[0]-1,Ew+=Ex[0].length):-1}function A3(Ev,e,Ew){Da.lastIndex=0;var Ex=Da.exec(e.substring(Ew,Ew+2));return Ex?(Ev.d=+Ex[0],Ew+=Ex[0].length):-1}function AN(Ev,e,Ew){Da.lastIndex=0;var Ex=Da.exec(e.substring(Ew,Ew+2));return Ex?(Ev.H=+Ex[0],Ew+=Ex[0].length):-1}function BY(Ev,e,Ew){Da.lastIndex=0;var Ex=Da.exec(e.substring(Ew,Ew+2));return Ex?(Ev.M=+Ex[0],Ew+=Ex[0].length):-1}function B8(Ev,e,Ew){Da.lastIndex=0;var Ex=Da.exec(e.substring(Ew,Ew+2));return Ex?(Ev.S=+Ex[0],Ew+=Ex[0].length):-1}function EB(Ev,e,Ew){Da.lastIndex=0;var Ex=Da.exec(e.substring(Ew,Ew+3));return Ex?(Ev.L=+Ex[0],Ew+=Ex[0].length):-1}var Da=/\s*\d+/;function Ea(Ev,e,Ew){var Ex=C.get(e.substring(Ew,Ew+=2).toLowerCase());return Ex==null?-1:(Ev.p=Ex,Ew)}var C=d3.map({am:0,pm:1});function DW(Ey){var Ex=Ey.getTimezoneOffset(),Ew=Ex>0?"-":"+",Ev=~~(Math.abs(Ex)/60),e=Math.abs(Ex)%60;return Ew+As(Ev)+As(e)}d3.time.format.utc=function(Ev){var e=d3.time.format(Ev);function Ew(Ex){try{DO=EG;var Ey=new DO();Ey._=Ex;return e(Ey)}finally{DO=Date}}Ew.parse=function(Ey){try{DO=EG;var Ex=e.parse(Ey);return Ex&&Ex._}finally{DO=Date}};Ew.toString=e.toString;return Ew};var B4=d3.time.format.utc("%Y-%m-%dT%H:%M:%S.%LZ");d3.time.format.iso=Date.prototype.toISOString?Bt:B4;function Bt(e){return e.toISOString()}Bt.parse=function(e){return new Date(e)};Bt.toString=B4.toString;function Ba(Ez,e,Ev){function E2(E3){var E5=Ez(E3),E4=Ex(E5,1);return E3-E5<E4-E3?E5:E4}function E1(E3){e(E3=Ez(new DO(E3-1)),1);return E3}function Ex(E4,E3){e(E4=new DO(+E4),E3);return E4}function Ey(E5,E4,E3){var E6=E1(E5),E7=[];if(E3>1){while(E6<E4){if(!(Ev(E6)%E3)){E7.push(new Date(+E6))}e(E6,1)}}else{while(E6<E4){E7.push(new Date(+E6)),e(E6,1)}}return E7}function Ew(E6,E5,E4){try{DO=EG;var E3=new EG();E3._=E6;return Ey(E3,E5,E4)}finally{DO=Date}}Ez.floor=Ez;Ez.round=E2;Ez.ceil=E1;Ez.offset=Ex;Ez.range=Ey;var E0=Ez.utc=B6(Ez);E0.floor=E0;E0.round=B6(E2);E0.ceil=B6(E1);E0.offset=B6(Ex);E0.range=Ew;return Ez}function B6(e){return function(Ew,Ev){try{DO=EG;var Ex=new EG();Ex._=Ew;return e(Ex,Ev)._}finally{DO=Date}}}d3.time.second=Ba(function(e){return new DO(Math.floor(e/1000)*1000)},function(e,Ev){e.setTime(e.getTime()+Math.floor(Ev)*1000)},function(e){return e.getSeconds()});d3.time.seconds=d3.time.second.range;d3.time.seconds.utc=d3.time.second.utc.range;d3.time.minute=Ba(function(e){return new DO(Math.floor(e/60000)*60000)},function(e,Ev){e.setTime(e.getTime()+Math.floor(Ev)*60000)},function(e){return e.getMinutes()});d3.time.minutes=d3.time.minute.range;d3.time.minutes.utc=d3.time.minute.utc.range;d3.time.hour=Ba(function(e){var Ev=e.getTimezoneOffset()/60;return new DO((Math.floor(e/3600000-Ev)+Ev)*3600000)},function(e,Ev){e.setTime(e.getTime()+Math.floor(Ev)*3600000)},function(e){return e.getHours()});d3.time.hours=d3.time.hour.range;d3.time.hours.utc=d3.time.hour.utc.range;d3.time.day=Ba(function(e){return new DO(e.getFullYear(),e.getMonth(),e.getDate())},function(e,Ev){e.setDate(e.getDate()+Ev)},function(e){return e.getDate()-1});d3.time.days=d3.time.day.range;d3.time.days.utc=d3.time.day.utc.range;d3.time.dayOfYear=function(e){var Ev=d3.time.year(e);return Math.floor((e-Ev)/86400000-(e.getTimezoneOffset()-Ev.getTimezoneOffset())/1440)};d3_time_weekdays.forEach(function(Ev,Ew){Ev=Ev.toLowerCase();Ew=7-Ew;var e=d3.time[Ev]=Ba(function(Ex){(Ex=d3.time.day(Ex)).setDate(Ex.getDate()-(Ex.getDay()+Ew)%7);return Ex},function(Ex,Ey){Ex.setDate(Ex.getDate()+Math.floor(Ey)*7)},function(Ey){var Ex=d3.time.year(Ey).getDay();return Math.floor((d3.time.dayOfYear(Ey)+(Ex+Ew)%7)/7)-(Ex!==Ew)});d3.time[Ev+"s"]=e.range;d3.time[Ev+"s"].utc=e.utc.range;d3.time[Ev+"OfYear"]=function(Ey){var Ex=d3.time.year(Ey).getDay();return Math.floor((d3.time.dayOfYear(Ey)+(Ex+Ew)%7)/7)}});d3.time.week=d3.time.sunday;d3.time.weeks=d3.time.sunday.range;d3.time.weeks.utc=d3.time.sunday.utc.range;d3.time.weekOfYear=d3.time.sundayOfYear;d3.time.month=Ba(function(e){return new DO(e.getFullYear(),e.getMonth(),1)},function(e,Ev){e.setMonth(e.getMonth()+Ev)},function(e){return e.getMonth()});d3.time.months=d3.time.month.range;d3.time.months.utc=d3.time.month.utc.range;d3.time.year=Ba(function(e){return new DO(e.getFullYear(),0,1)},function(e,Ev){e.setFullYear(e.getFullYear()+Ev)},function(e){return e.getFullYear()});d3.time.years=d3.time.year.range;d3.time.years.utc=d3.time.year.utc.range;function Ai(e,Ev,Ew){function Ex(Ey){return e(Ey)}Ex.invert=function(Ey){return DY(e.invert(Ey))};Ex.domain=function(Ey){if(!arguments.length){return e.domain().map(DY)}e.domain(Ey);return Ex};Ex.nice=function(Ey){var Ez=DT(Ex.domain());return Ex.domain([Ey.floor(Ez[0]),Ey.ceil(Ez[1])])};Ex.ticks=function(Ey,Ez){var E2=DT(Ex.domain());if(typeof Ey!=="function"){var E1=E2[1]-E2[0],E3=E1/Ey,E0=d3.bisect(Cx,E3);if(E0==Cx.length){return Ev.year(E2,Ey)}if(!E0){return e.ticks(Ey).map(DY)}if(Math.log(E3/Cx[E0-1])<Math.log(Cx[E0]/E3)){--E0}Ey=Ev[E0];Ez=Ey[1];Ey=Ey[0].range}return Ey(E2[0],new Date(+E2[1]+1),Ez)};Ex.tickFormat=function(){return Ew};Ex.copy=function(){return Ai(e.copy(),Ev,Ew)};return d3.rebind(Ex,e,"range","rangeRound","interpolate","clamp")}function DT(Ev){var Ew=Ev[0],e=Ev[Ev.length-1];return Ew<e?[Ew,e]:[e,Ew]}function DY(e){return new Date(e)}function BX(e){return function(Ev){var Ew=e.length-1,Ex=e[Ew];while(!Ex[1](Ev)){Ex=e[--Ew]}return Ex[0](Ev)}}function CB(Ev){var e=new Date(Ev,0,1);e.setFullYear(Ev);return e}function EH(Ew){var Ex=Ew.getFullYear(),Ev=CB(Ex),e=CB(Ex+1);return Ex+(Ew-Ev)/(e-Ev)}var Cx=[1000,5000,15000,30000,60000,300000,900000,1800000,3600000,10800000,21600000,43200000,86400000,172800000,604800000,2592000000,7776000000,31536000000];var BN=[[d3.time.second,1],[d3.time.second,5],[d3.time.second,15],[d3.time.second,30],[d3.time.minute,1],[d3.time.minute,5],[d3.time.minute,15],[d3.time.minute,30],[d3.time.hour,1],[d3.time.hour,3],[d3.time.hour,6],[d3.time.hour,12],[d3.time.day,1],[d3.time.day,2],[d3.time.week,1],[d3.time.month,1],[d3.time.month,3],[d3.time.year,1]];var DH=[[d3.time.format("%Y"),function(e){return true}],[d3.time.format("%B"),function(e){return e.getMonth()}],[d3.time.format("%b %d"),function(e){return e.getDate()!=1}],[d3.time.format("%a %d"),function(e){return e.getDay()&&e.getDate()!=1}],[d3.time.format("%I %p"),function(e){return e.getHours()}],[d3.time.format("%I:%M"),function(e){return e.getMinutes()}],[d3.time.format(":%S"),function(e){return e.getSeconds()}],[d3.time.format(".%L"),function(e){return e.getMilliseconds()}]];var BL=d3.scale.linear(),m=BX(DH);BN.year=function(Ev,e){return BL.domain(Ev.map(EH)).ticks(e).map(CB)};d3.time.scale=function(){return Ai(d3.scale.linear(),BN,m)};var El=BN.map(function(e){return[e[0].utc,e[1]]});var A9=[[d3.time.format.utc("%Y"),function(e){return true}],[d3.time.format.utc("%B"),function(e){return e.getUTCMonth()}],[d3.time.format.utc("%b %d"),function(e){return e.getUTCDate()!=1}],[d3.time.format.utc("%a %d"),function(e){return e.getUTCDay()&&e.getUTCDate()!=1}],[d3.time.format.utc("%I %p"),function(e){return e.getUTCHours()}],[d3.time.format.utc("%I:%M"),function(e){return e.getUTCMinutes()}],[d3.time.format.utc(":%S"),function(e){return e.getUTCSeconds()}],[d3.time.format.utc(".%L"),function(e){return e.getUTCMilliseconds()}]];var Co=BX(A9);function Be(Ev){var e=new Date(Date.UTC(Ev,0,1));e.setUTCFullYear(Ev);return e}function Di(Ew){var Ex=Ew.getUTCFullYear(),Ev=Be(Ex),e=Be(Ex+1);return Ex+(Ew-Ev)/(e-Ev)}El.year=function(Ev,e){return BL.domain(Ev.map(Di)).ticks(e).map(Be)};d3.time.scale.utc=function(){return Ai(d3.scale.linear(),El,Co)}})();var Box2D={};(function(C,B){function A(){}if(!(Object.prototype.defineProperty instanceof Function)&&Object.prototype.__defineGetter__ instanceof Function&&Object.prototype.__defineSetter__ instanceof Function){Object.defineProperty=function(F,E,D){D.get instanceof Function&&F.__defineGetter__(E,D.get);D.set instanceof Function&&F.__defineSetter__(E,D.set)}}C.inherit=function(E,D){A.prototype=D.prototype;E.prototype=new A;E.prototype.constructor=E};C.generateCallback=function(E,D){return function(){D.apply(E,arguments)}};C.NVector=function(F){if(F===B){F=0}for(var E=Array(F||0),D=0;D<F;++D){E[D]=0}return E};C.is=function(E,D){if(E===null){return false}if(D instanceof Function&&E instanceof D){return true}if(E.constructor.__implements!=B&&E.constructor.__implements[D]){return true}return false};C.parseUInt=function(D){return Math.abs(parseInt(D))}})(Box2D);var Vector=Array,Vector_a2j_Number=Box2D.NVector;if(typeof Box2D==="undefined"){Box2D={}}if(typeof Box2D.Collision==="undefined"){Box2D.Collision={}}if(typeof Box2D.Collision.Shapes==="undefined"){Box2D.Collision.Shapes={}}if(typeof Box2D.Common==="undefined"){Box2D.Common={}}if(typeof Box2D.Common.Math==="undefined"){Box2D.Common.Math={}}if(typeof Box2D.Dynamics==="undefined"){Box2D.Dynamics={}}if(typeof Box2D.Dynamics.Contacts==="undefined"){Box2D.Dynamics.Contacts={}}if(typeof Box2D.Dynamics.Controllers==="undefined"){Box2D.Dynamics.Controllers={}}if(typeof Box2D.Dynamics.Joints==="undefined"){Box2D.Dynamics.Joints={}}(function(){function BN(){BN.b2AABB.apply(this,arguments)}function BM(){BM.b2Bound.apply(this,arguments)}function BG(){BG.b2BoundValues.apply(this,arguments);this.constructor===BG&&this.b2BoundValues.apply(this,arguments)}function AS(){AS.b2Collision.apply(this,arguments)}function AV(){AV.b2ContactID.apply(this,arguments);this.constructor===AV&&this.b2ContactID.apply(this,arguments)}function BU(){BU.b2ContactPoint.apply(this,arguments)}function A5(){A5.b2Distance.apply(this,arguments)}function Ad(){Ad.b2DistanceInput.apply(this,arguments)}function BT(){BT.b2DistanceOutput.apply(this,arguments)}function A9(){A9.b2DistanceProxy.apply(this,arguments)}function A4(){A4.b2DynamicTree.apply(this,arguments);this.constructor===A4&&this.b2DynamicTree.apply(this,arguments)}function BE(){BE.b2DynamicTreeBroadPhase.apply(this,arguments)}function BF(){BF.b2DynamicTreeNode.apply(this,arguments)}function BK(){BK.b2DynamicTreePair.apply(this,arguments)}function A3(){A3.b2Manifold.apply(this,arguments);this.constructor===A3&&this.b2Manifold.apply(this,arguments)}function A1(){A1.b2ManifoldPoint.apply(this,arguments);this.constructor===A1&&this.b2ManifoldPoint.apply(this,arguments)}function Aj(){Aj.b2Point.apply(this,arguments)}function AR(){AR.b2RayCastInput.apply(this,arguments);this.constructor===AR&&this.b2RayCastInput.apply(this,arguments)}function AX(){AX.b2RayCastOutput.apply(this,arguments)}function BQ(){BQ.b2Segment.apply(this,arguments)}function BL(){BL.b2SeparationFunction.apply(this,arguments)}function BC(){BC.b2Simplex.apply(this,arguments);this.constructor===BC&&this.b2Simplex.apply(this,arguments)}function BP(){BP.b2SimplexCache.apply(this,arguments)}function A8(){A8.b2SimplexVertex.apply(this,arguments)}function BD(){BD.b2TimeOfImpact.apply(this,arguments)}function A7(){A7.b2TOIInput.apply(this,arguments)}function BZ(){BZ.b2WorldManifold.apply(this,arguments);this.constructor===BZ&&this.b2WorldManifold.apply(this,arguments)}function Az(){Az.ClipVertex.apply(this,arguments)}function As(){As.Features.apply(this,arguments)}function An(){An.b2CircleShape.apply(this,arguments);this.constructor===An&&this.b2CircleShape.apply(this,arguments)}function Ai(){Ai.b2EdgeChainDef.apply(this,arguments);this.constructor===Ai&&this.b2EdgeChainDef.apply(this,arguments)}function Ak(){Ak.b2EdgeShape.apply(this,arguments);this.constructor===Ak&&this.b2EdgeShape.apply(this,arguments)}function Ae(){Ae.b2MassData.apply(this,arguments)}function Ac(){Ac.b2PolygonShape.apply(this,arguments);this.constructor===Ac&&this.b2PolygonShape.apply(this,arguments)}function Af(){Af.b2Shape.apply(this,arguments);this.constructor===Af&&this.b2Shape.apply(this,arguments)}function Aw(){Aw.b2Color.apply(this,arguments);this.constructor===Aw&&this.b2Color.apply(this,arguments)}function At(){At.b2Settings.apply(this,arguments)}function Ao(){Ao.b2Mat22.apply(this,arguments);this.constructor===Ao&&this.b2Mat22.apply(this,arguments)}function Av(){Av.b2Mat33.apply(this,arguments);this.constructor===Av&&this.b2Mat33.apply(this,arguments)}function Aq(){Aq.b2Math.apply(this,arguments)}function Ap(){Ap.b2Sweep.apply(this,arguments)}function Ah(){Ah.b2Transform.apply(this,arguments);this.constructor===Ah&&this.b2Transform.apply(this,arguments)}function Ab(){Ab.b2Vec2.apply(this,arguments);this.constructor===Ab&&this.b2Vec2.apply(this,arguments)}function AZ(){AZ.b2Vec3.apply(this,arguments);this.constructor===AZ&&this.b2Vec3.apply(this,arguments)}function AW(){AW.b2Body.apply(this,arguments);this.constructor===AW&&this.b2Body.apply(this,arguments)}function AY(){AY.b2BodyDef.apply(this,arguments);this.constructor===AY&&this.b2BodyDef.apply(this,arguments)}function AU(){AU.b2ContactFilter.apply(this,arguments)}function BS(){BS.b2ContactImpulse.apply(this,arguments)}function BH(){BH.b2ContactListener.apply(this,arguments)}function A6(){A6.b2ContactManager.apply(this,arguments);this.constructor===A6&&this.b2ContactManager.apply(this,arguments)}function BA(){BA.b2DebugDraw.apply(this,arguments);this.constructor===BA&&this.b2DebugDraw.apply(this,arguments)}function A2(){A2.b2DestructionListener.apply(this,arguments)}function Bf(){Bf.b2FilterData.apply(this,arguments)}function BB(){BB.b2Fixture.apply(this,arguments);this.constructor===BB&&this.b2Fixture.apply(this,arguments)}function Ag(){Ag.b2FixtureDef.apply(this,arguments);this.constructor===Ag&&this.b2FixtureDef.apply(this,arguments)}function AK(){AK.b2Island.apply(this,arguments);this.constructor===AK&&this.b2Island.apply(this,arguments)}function AE(){AE.b2TimeStep.apply(this,arguments)}function AC(){AC.b2World.apply(this,arguments);this.constructor===AC&&this.b2World.apply(this,arguments)}function Bn(){Bn.b2CircleContact.apply(this,arguments)}function Bk(){Bk.b2Contact.apply(this,arguments);this.constructor===Bk&&this.b2Contact.apply(this,arguments)}function Bb(){Bb.b2ContactConstraint.apply(this,arguments);this.constructor===Bb&&this.b2ContactConstraint.apply(this,arguments)}function Be(){Be.b2ContactConstraintPoint.apply(this,arguments)}function BR(){BR.b2ContactEdge.apply(this,arguments)}function BI(){BI.b2ContactFactory.apply(this,arguments);this.constructor===BI&&this.b2ContactFactory.apply(this,arguments)}function Au(){Au.b2ContactRegister.apply(this,arguments)}function AO(){AO.b2ContactResult.apply(this,arguments)}function Al(){Al.b2ContactSolver.apply(this,arguments);this.constructor===Al&&this.b2ContactSolver.apply(this,arguments)}function AG(){AG.b2EdgeAndCircleContact.apply(this,arguments)}function AL(){AL.b2NullContact.apply(this,arguments);this.constructor===AL&&this.b2NullContact.apply(this,arguments)}function Bp(){Bp.b2PolyAndCircleContact.apply(this,arguments)}function Bh(){Bh.b2PolyAndEdgeContact.apply(this,arguments)}function BW(){BW.b2PolygonContact.apply(this,arguments)}function AD(){AD.b2PositionSolverManifold.apply(this,arguments);this.constructor===AD&&this.b2PositionSolverManifold.apply(this,arguments)}function Ay(){Ay.b2BuoyancyController.apply(this,arguments)}function AQ(){AQ.b2ConstantAccelController.apply(this,arguments)}function AI(){AI.b2ConstantForceController.apply(this,arguments)}function AB(){AB.b2Controller.apply(this,arguments)}function Bj(){Bj.b2ControllerEdge.apply(this,arguments)}function BY(){BY.b2GravityController.apply(this,arguments)}function A0(){A0.b2TensorDampingController.apply(this,arguments)}function Bm(){Bm.b2DistanceJoint.apply(this,arguments);this.constructor===Bm&&this.b2DistanceJoint.apply(this,arguments)}function Bd(){Bd.b2DistanceJointDef.apply(this,arguments);this.constructor===Bd&&this.b2DistanceJointDef.apply(this,arguments)}function BO(){BO.b2FrictionJoint.apply(this,arguments);this.constructor===BO&&this.b2FrictionJoint.apply(this,arguments)}function Ar(){Ar.b2FrictionJointDef.apply(this,arguments);this.constructor===Ar&&this.b2FrictionJointDef.apply(this,arguments)}function AN(){AN.b2GearJoint.apply(this,arguments);this.constructor===AN&&this.b2GearJoint.apply(this,arguments)}function AF(){AF.b2GearJointDef.apply(this,arguments);this.constructor===AF&&this.b2GearJointDef.apply(this,arguments)}function AT(){AT.b2Jacobian.apply(this,arguments)}function Bo(){Bo.b2Joint.apply(this,arguments);this.constructor===Bo&&this.b2Joint.apply(this,arguments)}function Bg(){Bg.b2JointDef.apply(this,arguments);this.constructor===Bg&&this.b2JointDef.apply(this,arguments)}function AJ(){AJ.b2JointEdge.apply(this,arguments)}function BV(){BV.b2LineJoint.apply(this,arguments);this.constructor===BV&&this.b2LineJoint.apply(this,arguments)}function Ax(){Ax.b2LineJointDef.apply(this,arguments);this.constructor===Ax&&this.b2LineJointDef.apply(this,arguments)}function AP(){AP.b2MouseJoint.apply(this,arguments);this.constructor===AP&&this.b2MouseJoint.apply(this,arguments)}function AH(){AH.b2MouseJointDef.apply(this,arguments);this.constructor===AH&&this.b2MouseJointDef.apply(this,arguments)}function AA(){AA.b2PrismaticJoint.apply(this,arguments);this.constructor===AA&&this.b2PrismaticJoint.apply(this,arguments)}function Bi(){Bi.b2PrismaticJointDef.apply(this,arguments);this.constructor===Bi&&this.b2PrismaticJointDef.apply(this,arguments)}function BX(){BX.b2PulleyJoint.apply(this,arguments);this.constructor===BX&&this.b2PulleyJoint.apply(this,arguments)}function Bl(){Bl.b2PulleyJointDef.apply(this,arguments);this.constructor===Bl&&this.b2PulleyJointDef.apply(this,arguments)}function Bc(){Bc.b2RevoluteJoint.apply(this,arguments);this.constructor===Bc&&this.b2RevoluteJoint.apply(this,arguments)}function BJ(){BJ.b2RevoluteJointDef.apply(this,arguments);this.constructor===BJ&&this.b2RevoluteJointDef.apply(this,arguments)}function Am(){Am.b2WeldJoint.apply(this,arguments);this.constructor===Am&&this.b2WeldJoint.apply(this,arguments)}function AM(){AM.b2WeldJointDef.apply(this,arguments);this.constructor===AM&&this.b2WeldJointDef.apply(this,arguments)}Box2D.Collision.IBroadPhase="Box2D.Collision.IBroadPhase";Box2D.Collision.b2AABB=BN;Box2D.Collision.b2Bound=BM;Box2D.Collision.b2BoundValues=BG;Box2D.Collision.b2Collision=AS;Box2D.Collision.b2ContactID=AV;Box2D.Collision.b2ContactPoint=BU;Box2D.Collision.b2Distance=A5;Box2D.Collision.b2DistanceInput=Ad;Box2D.Collision.b2DistanceOutput=BT;Box2D.Collision.b2DistanceProxy=A9;Box2D.Collision.b2DynamicTree=A4;Box2D.Collision.b2DynamicTreeBroadPhase=BE;Box2D.Collision.b2DynamicTreeNode=BF;Box2D.Collision.b2DynamicTreePair=BK;Box2D.Collision.b2Manifold=A3;Box2D.Collision.b2ManifoldPoint=A1;Box2D.Collision.b2Point=Aj;Box2D.Collision.b2RayCastInput=AR;Box2D.Collision.b2RayCastOutput=AX;Box2D.Collision.b2Segment=BQ;Box2D.Collision.b2SeparationFunction=BL;Box2D.Collision.b2Simplex=BC;Box2D.Collision.b2SimplexCache=BP;Box2D.Collision.b2SimplexVertex=A8;Box2D.Collision.b2TimeOfImpact=BD;Box2D.Collision.b2TOIInput=A7;Box2D.Collision.b2WorldManifold=BZ;Box2D.Collision.ClipVertex=Az;Box2D.Collision.Features=As;Box2D.Collision.Shapes.b2CircleShape=An;Box2D.Collision.Shapes.b2EdgeChainDef=Ai;Box2D.Collision.Shapes.b2EdgeShape=Ak;Box2D.Collision.Shapes.b2MassData=Ae;Box2D.Collision.Shapes.b2PolygonShape=Ac;Box2D.Collision.Shapes.b2Shape=Af;Box2D.Common.b2internal="Box2D.Common.b2internal";Box2D.Common.b2Color=Aw;Box2D.Common.b2Settings=At;Box2D.Common.Math.b2Mat22=Ao;Box2D.Common.Math.b2Mat33=Av;Box2D.Common.Math.b2Math=Aq;Box2D.Common.Math.b2Sweep=Ap;Box2D.Common.Math.b2Transform=Ah;Box2D.Common.Math.b2Vec2=Ab;Box2D.Common.Math.b2Vec3=AZ;Box2D.Dynamics.b2Body=AW;Box2D.Dynamics.b2BodyDef=AY;Box2D.Dynamics.b2ContactFilter=AU;Box2D.Dynamics.b2ContactImpulse=BS;Box2D.Dynamics.b2ContactListener=BH;Box2D.Dynamics.b2ContactManager=A6;Box2D.Dynamics.b2DebugDraw=BA;Box2D.Dynamics.b2DestructionListener=A2;Box2D.Dynamics.b2FilterData=Bf;Box2D.Dynamics.b2Fixture=BB;Box2D.Dynamics.b2FixtureDef=Ag;Box2D.Dynamics.b2Island=AK;Box2D.Dynamics.b2TimeStep=AE;Box2D.Dynamics.b2World=AC;Box2D.Dynamics.Contacts.b2CircleContact=Bn;Box2D.Dynamics.Contacts.b2Contact=Bk;Box2D.Dynamics.Contacts.b2ContactConstraint=Bb;Box2D.Dynamics.Contacts.b2ContactConstraintPoint=Be;Box2D.Dynamics.Contacts.b2ContactEdge=BR;Box2D.Dynamics.Contacts.b2ContactFactory=BI;Box2D.Dynamics.Contacts.b2ContactRegister=Au;Box2D.Dynamics.Contacts.b2ContactResult=AO;Box2D.Dynamics.Contacts.b2ContactSolver=Al;Box2D.Dynamics.Contacts.b2EdgeAndCircleContact=AG;Box2D.Dynamics.Contacts.b2NullContact=AL;Box2D.Dynamics.Contacts.b2PolyAndCircleContact=Bp;Box2D.Dynamics.Contacts.b2PolyAndEdgeContact=Bh;Box2D.Dynamics.Contacts.b2PolygonContact=BW;Box2D.Dynamics.Contacts.b2PositionSolverManifold=AD;Box2D.Dynamics.Controllers.b2BuoyancyController=Ay;Box2D.Dynamics.Controllers.b2ConstantAccelController=AQ;Box2D.Dynamics.Controllers.b2ConstantForceController=AI;Box2D.Dynamics.Controllers.b2Controller=AB;Box2D.Dynamics.Controllers.b2ControllerEdge=Bj;Box2D.Dynamics.Controllers.b2GravityController=BY;Box2D.Dynamics.Controllers.b2TensorDampingController=A0;Box2D.Dynamics.Joints.b2DistanceJoint=Bm;Box2D.Dynamics.Joints.b2DistanceJointDef=Bd;Box2D.Dynamics.Joints.b2FrictionJoint=BO;Box2D.Dynamics.Joints.b2FrictionJointDef=Ar;Box2D.Dynamics.Joints.b2GearJoint=AN;Box2D.Dynamics.Joints.b2GearJointDef=AF;Box2D.Dynamics.Joints.b2Jacobian=AT;Box2D.Dynamics.Joints.b2Joint=Bo;Box2D.Dynamics.Joints.b2JointDef=Bg;Box2D.Dynamics.Joints.b2JointEdge=AJ;Box2D.Dynamics.Joints.b2LineJoint=BV;Box2D.Dynamics.Joints.b2LineJointDef=Ax;Box2D.Dynamics.Joints.b2MouseJoint=AP;Box2D.Dynamics.Joints.b2MouseJointDef=AH;Box2D.Dynamics.Joints.b2PrismaticJoint=AA;Box2D.Dynamics.Joints.b2PrismaticJointDef=Bi;Box2D.Dynamics.Joints.b2PulleyJoint=BX;Box2D.Dynamics.Joints.b2PulleyJointDef=Bl;Box2D.Dynamics.Joints.b2RevoluteJoint=Bc;Box2D.Dynamics.Joints.b2RevoluteJointDef=BJ;Box2D.Dynamics.Joints.b2WeldJoint=Am;Box2D.Dynamics.Joints.b2WeldJointDef=AM})();Box2D.postDefs=[];(function(){var AF=Box2D.Collision.Shapes.b2CircleShape,AE=Box2D.Collision.Shapes.b2PolygonShape,AB=Box2D.Collision.Shapes.b2Shape,AM=Box2D.Common.b2Settings,AN=Box2D.Common.Math.b2Math,AJ=Box2D.Common.Math.b2Sweep,X=Box2D.Common.Math.b2Transform,AQ=Box2D.Common.Math.b2Vec2,AI=Box2D.Collision.b2AABB,f=Box2D.Collision.b2Bound,T=Box2D.Collision.b2BoundValues,x=Box2D.Collision.b2Collision,AA=Box2D.Collision.b2ContactID,AC=Box2D.Collision.b2ContactPoint,P=Box2D.Collision.b2Distance,J=Box2D.Collision.b2DistanceInput,AU=Box2D.Collision.b2DistanceOutput,AL=Box2D.Collision.b2DistanceProxy,AO=Box2D.Collision.b2DynamicTree,AH=Box2D.Collision.b2DynamicTreeBroadPhase,AD=Box2D.Collision.b2DynamicTreeNode,m=Box2D.Collision.b2DynamicTreePair,AG=Box2D.Collision.b2Manifold,e=Box2D.Collision.b2ManifoldPoint,t=Box2D.Collision.b2Point,b=Box2D.Collision.b2RayCastInput,AK=Box2D.Collision.b2RayCastOutput,C=Box2D.Collision.b2Segment,AY=Box2D.Collision.b2SeparationFunction,AW=Box2D.Collision.b2Simplex,AT=Box2D.Collision.b2SimplexCache,AV=Box2D.Collision.b2SimplexVertex,AR=Box2D.Collision.b2TimeOfImpact,AP=Box2D.Collision.b2TOIInput,AS=Box2D.Collision.b2WorldManifold,Aa=Box2D.Collision.ClipVertex,AZ=Box2D.Collision.Features,AX=Box2D.Collision.IBroadPhase;AI.b2AABB=function(){this.lowerBound=new AQ;this.upperBound=new AQ};AI.prototype.IsValid=function(){var A=this.upperBound.y-this.lowerBound.y;return A=(A=this.upperBound.x-this.lowerBound.x>=0&&A>=0)&&this.lowerBound.IsValid()&&this.upperBound.IsValid()};AI.prototype.GetCenter=function(){return new AQ((this.lowerBound.x+this.upperBound.x)/2,(this.lowerBound.y+this.upperBound.y)/2)};AI.prototype.GetExtents=function(){return new AQ((this.upperBound.x-this.lowerBound.x)/2,(this.upperBound.y-this.lowerBound.y)/2)};AI.prototype.Contains=function(A){var B=true;return B=(B=(B=(B=B&&this.lowerBound.x<=A.lowerBound.x)&&this.lowerBound.y<=A.lowerBound.y)&&A.upperBound.x<=this.upperBound.x)&&A.upperBound.y<=this.upperBound.y};AI.prototype.RayCast=function(I,H){var G=-Number.MAX_VALUE,D=Number.MAX_VALUE,A=H.p1.x,O=H.p1.y,M=H.p2.x-H.p1.x,N=H.p2.y-H.p1.y,L=Math.abs(N),B=I.normal,K=0,E=0,F=K=0;F=0;if(Math.abs(M)<Number.MIN_VALUE){if(A<this.lowerBound.x||this.upperBound.x<A){return false}}else{K=1/M;E=(this.lowerBound.x-A)*K;K=(this.upperBound.x-A)*K;F=-1;if(E>K){F=E;E=K;K=F;F=1}if(E>G){B.x=F;B.y=0;G=E}D=Math.min(D,K);if(G>D){return false}}if(L<Number.MIN_VALUE){if(O<this.lowerBound.y||this.upperBound.y<O){return false}}else{K=1/N;E=(this.lowerBound.y-O)*K;K=(this.upperBound.y-O)*K;F=-1;if(E>K){F=E;E=K;K=F;F=1}if(E>G){B.y=F;B.x=0;G=E}D=Math.min(D,K);if(G>D){return false}}I.fraction=G;return true};AI.prototype.TestOverlap=function(A){var D=A.lowerBound.y-this.upperBound.y,B=this.lowerBound.y-A.upperBound.y;if(A.lowerBound.x-this.upperBound.x>0||D>0){return false}if(this.lowerBound.x-A.upperBound.x>0||B>0){return false}return true};AI.Combine=function(A,D){var B=new AI;B.Combine(A,D);return B};AI.prototype.Combine=function(A,B){this.lowerBound.x=Math.min(A.lowerBound.x,B.lowerBound.x);this.lowerBound.y=Math.min(A.lowerBound.y,B.lowerBound.y);this.upperBound.x=Math.max(A.upperBound.x,B.upperBound.x);this.upperBound.y=Math.max(A.upperBound.y,B.upperBound.y)};f.b2Bound=function(){};f.prototype.IsLower=function(){return(this.value&1)==0};f.prototype.IsUpper=function(){return(this.value&1)==1};f.prototype.Swap=function(B){var E=this.value,D=this.proxy,A=this.stabbingCount;this.value=B.value;this.proxy=B.proxy;this.stabbingCount=B.stabbingCount;B.value=E;B.proxy=D;B.stabbingCount=A};T.b2BoundValues=function(){};T.prototype.b2BoundValues=function(){this.lowerValues=new Vector_a2j_Number;this.lowerValues[0]=0;this.lowerValues[1]=0;this.upperValues=new Vector_a2j_Number;this.upperValues[0]=0;this.upperValues[1]=0};x.b2Collision=function(){};x.ClipSegmentToLine=function(F,E,D,B){if(B===undefined){B=0}var A,K=0;A=E[0];var H=A.v;A=E[1];var I=A.v,G=D.x*H.x+D.y*H.y-B;A=D.x*I.x+D.y*I.y-B;G<=0&&F[K++].Set(E[0]);A<=0&&F[K++].Set(E[1]);if(G*A<0){D=G/(G-A);A=F[K];A=A.v;A.x=H.x+D*(I.x-H.x);A.y=H.y+D*(I.y-H.y);A=F[K];A.id=(G>0?E[0]:E[1]).id;++K}return K};x.EdgeSeparation=function(K,I,H,E,A){if(H===undefined){H=0}parseInt(K.m_vertexCount);var Q=K.m_vertices;K=K.m_normals;var N=parseInt(E.m_vertexCount),O=E.m_vertices,M,B;M=I.R;B=K[H];K=M.col1.x*B.x+M.col2.x*B.y;E=M.col1.y*B.x+M.col2.y*B.y;M=A.R;var L=M.col1.x*K+M.col1.y*E;M=M.col2.x*K+M.col2.y*E;for(var F=0,G=Number.MAX_VALUE,D=0;D<N;++D){B=O[D];B=B.x*L+B.y*M;if(B<G){G=B;F=D}}B=Q[H];M=I.R;H=I.position.x+(M.col1.x*B.x+M.col2.x*B.y);I=I.position.y+(M.col1.y*B.x+M.col2.y*B.y);B=O[F];M=A.R;Q=A.position.x+(M.col1.x*B.x+M.col2.x*B.y);A=A.position.y+(M.col1.y*B.x+M.col2.y*B.y);Q-=H;A-=I;return Q*K+A*E};x.FindMaxSeparation=function(L,K,I,E,A){var R=parseInt(K.m_vertexCount),O=K.m_normals,Q,N;N=A.R;Q=E.m_centroid;var B=A.position.x+(N.col1.x*Q.x+N.col2.x*Q.y),M=A.position.y+(N.col1.y*Q.x+N.col2.y*Q.y);N=I.R;Q=K.m_centroid;B-=I.position.x+(N.col1.x*Q.x+N.col2.x*Q.y);M-=I.position.y+(N.col1.y*Q.x+N.col2.y*Q.y);N=B*I.R.col1.x+M*I.R.col1.y;M=B*I.R.col2.x+M*I.R.col2.y;B=0;for(var F=-Number.MAX_VALUE,H=0;H<R;++H){Q=O[H];Q=Q.x*N+Q.y*M;if(Q>F){F=Q;B=H}}O=x.EdgeSeparation(K,I,B,E,A);Q=parseInt(B-1>=0?B-1:R-1);N=x.EdgeSeparation(K,I,Q,E,A);M=parseInt(B+1<R?B+1:0);F=x.EdgeSeparation(K,I,M,E,A);var D=H=0,G=0;if(N>O&&N>F){G=-1;H=Q;D=N}else{if(F>O){G=1;H=M;D=F}else{L[0]=B;return O}}for(;;){B=G==-1?H-1>=0?H-1:R-1:H+1<R?H+1:0;O=x.EdgeSeparation(K,I,B,E,A);if(O>D){H=B;D=O}else{break}}L[0]=H;return D};x.FindIncidentEdge=function(H,G,F,D,A,N){if(D===undefined){D=0}parseInt(G.m_vertexCount);var L=G.m_normals,M=parseInt(A.m_vertexCount);G=A.m_vertices;A=A.m_normals;var K;K=F.R;F=L[D];L=K.col1.x*F.x+K.col2.x*F.y;var B=K.col1.y*F.x+K.col2.y*F.y;K=N.R;F=K.col1.x*L+K.col1.y*B;B=K.col2.x*L+K.col2.y*B;L=F;K=0;for(var I=Number.MAX_VALUE,E=0;E<M;++E){F=A[E];F=L*F.x+B*F.y;if(F<I){I=F;K=E}}A=parseInt(K);L=parseInt(A+1<M?A+1:0);M=H[0];F=G[A];K=N.R;M.v.x=N.position.x+(K.col1.x*F.x+K.col2.x*F.y);M.v.y=N.position.y+(K.col1.y*F.x+K.col2.y*F.y);M.id.features.referenceEdge=D;M.id.features.incidentEdge=A;M.id.features.incidentVertex=0;M=H[1];F=G[L];K=N.R;M.v.x=N.position.x+(K.col1.x*F.x+K.col2.x*F.y);M.v.y=N.position.y+(K.col1.y*F.x+K.col2.y*F.y);M.id.features.referenceEdge=D;M.id.features.incidentEdge=L;M.id.features.incidentVertex=1};x.MakeClipPointVector=function(){var A=new Vector(2);A[0]=new Aa;A[1]=new Aa;return A};x.CollidePolygons=function(M,K,I,E,A){var S;M.m_pointCount=0;var Q=K.m_radius+E.m_radius;S=0;x.s_edgeAO[0]=S;var R=x.FindMaxSeparation(x.s_edgeAO,K,I,E,A);S=x.s_edgeAO[0];if(!(R>Q)){var O=0;x.s_edgeBO[0]=O;var B=x.FindMaxSeparation(x.s_edgeBO,E,A,K,I);O=x.s_edgeBO[0];if(!(B>Q)){var N=0,F=0;if(B>0.98*R+0.001){R=E;E=K;K=A;I=I;N=O;M.m_type=AG.e_faceB;F=1}else{R=K;E=E;K=I;I=A;N=S;M.m_type=AG.e_faceA;F=0}S=x.s_incidentEdge;x.FindIncidentEdge(S,R,K,N,E,I);O=parseInt(R.m_vertexCount);A=R.m_vertices;R=A[N];var H;H=N+1<O?A[parseInt(N+1)]:A[0];N=x.s_localTangent;N.Set(H.x-R.x,H.y-R.y);N.Normalize();A=x.s_localNormal;A.x=N.y;A.y=-N.x;E=x.s_planePoint;E.Set(0.5*(R.x+H.x),0.5*(R.y+H.y));B=x.s_tangent;O=K.R;B.x=O.col1.x*N.x+O.col2.x*N.y;B.y=O.col1.y*N.x+O.col2.y*N.y;var D=x.s_tangent2;D.x=-B.x;D.y=-B.y;N=x.s_normal;N.x=B.y;N.y=-B.x;var G=x.s_v11,L=x.s_v12;G.x=K.position.x+(O.col1.x*R.x+O.col2.x*R.y);G.y=K.position.y+(O.col1.y*R.x+O.col2.y*R.y);L.x=K.position.x+(O.col1.x*H.x+O.col2.x*H.y);L.y=K.position.y+(O.col1.y*H.x+O.col2.y*H.y);K=N.x*G.x+N.y*G.y;O=B.x*L.x+B.y*L.y+Q;H=x.s_clipPoints1;R=x.s_clipPoints2;L=0;L=x.ClipSegmentToLine(H,S,D,-B.x*G.x-B.y*G.y+Q);if(!(L<2)){L=x.ClipSegmentToLine(R,H,B,O);if(!(L<2)){M.m_localPlaneNormal.SetV(A);M.m_localPoint.SetV(E);for(E=A=0;E<AM.b2_maxManifoldPoints;++E){S=R[E];if(N.x*S.v.x+N.y*S.v.y-K<=Q){B=M.m_points[A];O=I.R;D=S.v.x-I.position.x;G=S.v.y-I.position.y;B.m_localPoint.x=D*O.col1.x+G*O.col1.y;B.m_localPoint.y=D*O.col2.x+G*O.col2.y;B.m_id.Set(S.id);B.m_id.features.flip=F;++A}}M.m_pointCount=A}}}}};x.CollideCircles=function(B,I,H,A,G){B.m_pointCount=0;var F,D;F=H.R;D=I.m_p;var E=H.position.x+(F.col1.x*D.x+F.col2.x*D.y);H=H.position.y+(F.col1.y*D.x+F.col2.y*D.y);F=G.R;D=A.m_p;E=G.position.x+(F.col1.x*D.x+F.col2.x*D.y)-E;G=G.position.y+(F.col1.y*D.x+F.col2.y*D.y)-H;F=I.m_radius+A.m_radius;if(!(E*E+G*G>F*F)){B.m_type=AG.e_circles;B.m_localPoint.SetV(I.m_p);B.m_localPlaneNormal.SetZero();B.m_pointCount=1;B.m_points[0].m_localPoint.SetV(A.m_p);B.m_points[0].m_id.key=0}};x.CollidePolygonAndCircle=function(K,I,H,E,A){var Q=K.m_pointCount=0,N=0,O,M;M=A.R;O=E.m_p;var B=A.position.y+(M.col1.y*O.x+M.col2.y*O.y);Q=A.position.x+(M.col1.x*O.x+M.col2.x*O.y)-H.position.x;N=B-H.position.y;M=H.R;H=Q*M.col1.x+N*M.col1.y;M=Q*M.col2.x+N*M.col2.y;var L=0;B=-Number.MAX_VALUE;A=I.m_radius+E.m_radius;var F=parseInt(I.m_vertexCount),G=I.m_vertices;I=I.m_normals;for(var D=0;D<F;++D){O=G[D];Q=H-O.x;N=M-O.y;O=I[D];Q=O.x*Q+O.y*N;if(Q>A){return}if(Q>B){B=Q;L=D}}Q=parseInt(L);N=parseInt(Q+1<F?Q+1:0);O=G[Q];G=G[N];if(B<Number.MIN_VALUE){K.m_pointCount=1;K.m_type=AG.e_faceA;K.m_localPlaneNormal.SetV(I[L]);K.m_localPoint.x=0.5*(O.x+G.x);K.m_localPoint.y=0.5*(O.y+G.y)}else{B=(H-G.x)*(O.x-G.x)+(M-G.y)*(O.y-G.y);if((H-O.x)*(G.x-O.x)+(M-O.y)*(G.y-O.y)<=0){if((H-O.x)*(H-O.x)+(M-O.y)*(M-O.y)>A*A){return}K.m_pointCount=1;K.m_type=AG.e_faceA;K.m_localPlaneNormal.x=H-O.x;K.m_localPlaneNormal.y=M-O.y;K.m_localPlaneNormal.Normalize();K.m_localPoint.SetV(O)}else{if(B<=0){if((H-G.x)*(H-G.x)+(M-G.y)*(M-G.y)>A*A){return}K.m_pointCount=1;K.m_type=AG.e_faceA;K.m_localPlaneNormal.x=H-G.x;K.m_localPlaneNormal.y=M-G.y;K.m_localPlaneNormal.Normalize();K.m_localPoint.SetV(G)}else{L=0.5*(O.x+G.x);O=0.5*(O.y+G.y);B=(H-L)*I[Q].x+(M-O)*I[Q].y;if(B>A){return}K.m_pointCount=1;K.m_type=AG.e_faceA;K.m_localPlaneNormal.x=I[Q].x;K.m_localPlaneNormal.y=I[Q].y;K.m_localPlaneNormal.Normalize();K.m_localPoint.Set(L,O)}}}K.m_points[0].m_localPoint.SetV(E.m_p);K.m_points[0].m_id.key=0};x.TestOverlap=function(B,H){var G=H.lowerBound,A=B.upperBound,F=G.x-A.x,E=G.y-A.y;G=B.lowerBound;A=H.upperBound;var D=G.y-A.y;if(F>0||E>0){return false}if(G.x-A.x>0||D>0){return false}return true};Box2D.postDefs.push(function(){Box2D.Collision.b2Collision.s_incidentEdge=x.MakeClipPointVector();Box2D.Collision.b2Collision.s_clipPoints1=x.MakeClipPointVector();Box2D.Collision.b2Collision.s_clipPoints2=x.MakeClipPointVector();Box2D.Collision.b2Collision.s_edgeAO=new Vector_a2j_Number(1);Box2D.Collision.b2Collision.s_edgeBO=new Vector_a2j_Number(1);Box2D.Collision.b2Collision.s_localTangent=new AQ;Box2D.Collision.b2Collision.s_localNormal=new AQ;Box2D.Collision.b2Collision.s_planePoint=new AQ;Box2D.Collision.b2Collision.s_normal=new AQ;Box2D.Collision.b2Collision.s_tangent=new AQ;Box2D.Collision.b2Collision.s_tangent2=new AQ;Box2D.Collision.b2Collision.s_v11=new AQ;Box2D.Collision.b2Collision.s_v12=new AQ;Box2D.Collision.b2Collision.b2CollidePolyTempVec=new AQ;Box2D.Collision.b2Collision.b2_nullFeature=255});AA.b2ContactID=function(){this.features=new AZ};AA.prototype.b2ContactID=function(){this.features._m_id=this};AA.prototype.Set=function(A){this.key=A._key};AA.prototype.Copy=function(){var A=new AA;A.key=this.key;return A};Object.defineProperty(AA.prototype,"key",{enumerable:false,configurable:true,get:function(){return this._key}});Object.defineProperty(AA.prototype,"key",{enumerable:false,configurable:true,set:function(A){if(A===undefined){A=0}this._key=A;this.features._referenceEdge=this._key&255;this.features._incidentEdge=(this._key&65280)>>8&255;this.features._incidentVertex=(this._key&16711680)>>16&255;this.features._flip=(this._key&4278190080)>>24&255}});AC.b2ContactPoint=function(){this.position=new AQ;this.velocity=new AQ;this.normal=new AQ;this.id=new AA};P.b2Distance=function(){};P.Distance=function(M,K,I){++P.b2_gjkCalls;var E=I.proxyA,A=I.proxyB,S=I.transformA,Q=I.transformB,R=P.s_simplex;R.ReadCache(K,E,S,A,Q);var O=R.m_vertices,B=P.s_saveA,N=P.s_saveB,F=0;R.GetClosestPoint().LengthSquared();for(var H=0,D,G=0;G<20;){F=R.m_count;for(H=0;H<F;H++){B[H]=O[H].indexA;N[H]=O[H].indexB}switch(R.m_count){case 1:break;case 2:R.Solve2();break;case 3:R.Solve3();break;default:AM.b2Assert(false)}if(R.m_count==3){break}D=R.GetClosestPoint();D.LengthSquared();H=R.GetSearchDirection();if(H.LengthSquared()<Number.MIN_VALUE*Number.MIN_VALUE){break}D=O[R.m_count];D.indexA=E.GetSupport(AN.MulTMV(S.R,H.GetNegative()));D.wA=AN.MulX(S,E.GetVertex(D.indexA));D.indexB=A.GetSupport(AN.MulTMV(Q.R,H));D.wB=AN.MulX(Q,A.GetVertex(D.indexB));D.w=AN.SubtractVV(D.wB,D.wA);++G;++P.b2_gjkIters;var L=false;for(H=0;H<F;H++){if(D.indexA==B[H]&&D.indexB==N[H]){L=true;break}}if(L){break}++R.m_count}P.b2_gjkMaxIters=AN.Max(P.b2_gjkMaxIters,G);R.GetWitnessPoints(M.pointA,M.pointB);M.distance=AN.SubtractVV(M.pointA,M.pointB).Length();M.iterations=G;R.WriteCache(K);if(I.useRadii){K=E.m_radius;A=A.m_radius;if(M.distance>K+A&&M.distance>Number.MIN_VALUE){M.distance-=K+A;I=AN.SubtractVV(M.pointB,M.pointA);I.Normalize();M.pointA.x+=K*I.x;M.pointA.y+=K*I.y;M.pointB.x-=A*I.x;M.pointB.y-=A*I.y}else{D=new AQ;D.x=0.5*(M.pointA.x+M.pointB.x);D.y=0.5*(M.pointA.y+M.pointB.y);M.pointA.x=M.pointB.x=D.x;M.pointA.y=M.pointB.y=D.y;M.distance=0}}};Box2D.postDefs.push(function(){Box2D.Collision.b2Distance.s_simplex=new AW;Box2D.Collision.b2Distance.s_saveA=new Vector_a2j_Number(3);Box2D.Collision.b2Distance.s_saveB=new Vector_a2j_Number(3)});J.b2DistanceInput=function(){};AU.b2DistanceOutput=function(){this.pointA=new AQ;this.pointB=new AQ};AL.b2DistanceProxy=function(){};AL.prototype.Set=function(A){switch(A.GetType()){case AB.e_circleShape:A=A instanceof AF?A:null;this.m_vertices=new Vector(1,true);this.m_vertices[0]=A.m_p;this.m_count=1;this.m_radius=A.m_radius;break;case AB.e_polygonShape:A=A instanceof AE?A:null;this.m_vertices=A.m_vertices;this.m_count=A.m_vertexCount;this.m_radius=A.m_radius;break;default:AM.b2Assert(false)}};AL.prototype.GetSupport=function(B){for(var F=0,E=this.m_vertices[0].x*B.x+this.m_vertices[0].y*B.y,A=1;A<this.m_count;++A){var D=this.m_vertices[A].x*B.x+this.m_vertices[A].y*B.y;if(D>E){F=A;E=D}}return F};AL.prototype.GetSupportVertex=function(B){for(var F=0,E=this.m_vertices[0].x*B.x+this.m_vertices[0].y*B.y,A=1;A<this.m_count;++A){var D=this.m_vertices[A].x*B.x+this.m_vertices[A].y*B.y;if(D>E){F=A;E=D}}return this.m_vertices[F]};AL.prototype.GetVertexCount=function(){return this.m_count};AL.prototype.GetVertex=function(A){if(A===undefined){A=0}AM.b2Assert(0<=A&&A<this.m_count);return this.m_vertices[A]};AO.b2DynamicTree=function(){};AO.prototype.b2DynamicTree=function(){this.m_freeList=this.m_root=null;this.m_insertionCount=this.m_path=0};AO.prototype.CreateProxy=function(B,F){var E=this.AllocateNode(),A=AM.b2_aabbExtension,D=AM.b2_aabbExtension;E.aabb.lowerBound.x=B.lowerBound.x-A;E.aabb.lowerBound.y=B.lowerBound.y-D;E.aabb.upperBound.x=B.upperBound.x+A;E.aabb.upperBound.y=B.upperBound.y+D;E.userData=F;this.InsertLeaf(E);return E};AO.prototype.DestroyProxy=function(A){this.RemoveLeaf(A);this.FreeNode(A)};AO.prototype.MoveProxy=function(B,E,D){AM.b2Assert(B.IsLeaf());if(B.aabb.Contains(E)){return false}this.RemoveLeaf(B);var A=AM.b2_aabbExtension+AM.b2_aabbMultiplier*(D.x>0?D.x:-D.x);D=AM.b2_aabbExtension+AM.b2_aabbMultiplier*(D.y>0?D.y:-D.y);B.aabb.lowerBound.x=E.lowerBound.x-A;B.aabb.lowerBound.y=E.lowerBound.y-D;B.aabb.upperBound.x=E.upperBound.x+A;B.aabb.upperBound.y=E.upperBound.y+D;this.InsertLeaf(B);return true};AO.prototype.Rebalance=function(B){if(B===undefined){B=0}if(this.m_root!=null){for(var E=0;E<B;E++){for(var D=this.m_root,A=0;D.IsLeaf()==false;){D=this.m_path>>A&1?D.child2:D.child1;A=A+1&31}++this.m_path;this.RemoveLeaf(D);this.InsertLeaf(D)}}};AO.prototype.GetFatAABB=function(A){return A.aabb};AO.prototype.GetUserData=function(A){return A.userData};AO.prototype.Query=function(B,F){if(this.m_root!=null){var E=new Vector,A=0;for(E[A++]=this.m_root;A>0;){var D=E[--A];if(D.aabb.TestOverlap(F)){if(D.IsLeaf()){if(!B(D)){break}}else{E[A++]=D.child1;E[A++]=D.child2}}}}};AO.prototype.RayCast=function(H,G){if(this.m_root!=null){var F=G.p1,D=G.p2,A=AN.SubtractVV(F,D);A.Normalize();A=AN.CrossFV(1,A);var N=AN.AbsV(A),L=G.maxFraction,M=new AI,K=0,B=0;K=F.x+L*(D.x-F.x);B=F.y+L*(D.y-F.y);M.lowerBound.x=Math.min(F.x,K);M.lowerBound.y=Math.min(F.y,B);M.upperBound.x=Math.max(F.x,K);M.upperBound.y=Math.max(F.y,B);var I=new Vector,E=0;for(I[E++]=this.m_root;E>0;){L=I[--E];if(L.aabb.TestOverlap(M)!=false){K=L.aabb.GetCenter();B=L.aabb.GetExtents();if(!(Math.abs(A.x*(F.x-K.x)+A.y*(F.y-K.y))-N.x*B.x-N.y*B.y>0)){if(L.IsLeaf()){K=new b;K.p1=G.p1;K.p2=G.p2;K.maxFraction=G.maxFraction;L=H(K,L);if(L==0){break}if(L>0){K=F.x+L*(D.x-F.x);B=F.y+L*(D.y-F.y);M.lowerBound.x=Math.min(F.x,K);M.lowerBound.y=Math.min(F.y,B);M.upperBound.x=Math.max(F.x,K);M.upperBound.y=Math.max(F.y,B)}}else{I[E++]=L.child1;I[E++]=L.child2}}}}}};AO.prototype.AllocateNode=function(){if(this.m_freeList){var A=this.m_freeList;this.m_freeList=A.parent;A.parent=null;A.child1=null;A.child2=null;return A}return new AD};AO.prototype.FreeNode=function(A){A.parent=this.m_freeList;this.m_freeList=A};AO.prototype.InsertLeaf=function(B){++this.m_insertionCount;if(this.m_root==null){this.m_root=B;this.m_root.parent=null}else{var E=B.aabb.GetCenter(),D=this.m_root;if(D.IsLeaf()==false){do{var A=D.child1;D=D.child2;D=Math.abs((A.aabb.lowerBound.x+A.aabb.upperBound.x)/2-E.x)+Math.abs((A.aabb.lowerBound.y+A.aabb.upperBound.y)/2-E.y)<Math.abs((D.aabb.lowerBound.x+D.aabb.upperBound.x)/2-E.x)+Math.abs((D.aabb.lowerBound.y+D.aabb.upperBound.y)/2-E.y)?A:D}while(D.IsLeaf()==false)}E=D.parent;A=this.AllocateNode();A.parent=E;A.userData=null;A.aabb.Combine(B.aabb,D.aabb);if(E){if(D.parent.child1==D){E.child1=A}else{E.child2=A}A.child1=D;A.child2=B;D.parent=A;B.parent=A;do{if(E.aabb.Contains(A.aabb)){break}E.aabb.Combine(E.child1.aabb,E.child2.aabb);A=E;E=E.parent}while(E)}else{A.child1=D;A.child2=B;D.parent=A;this.m_root=B.parent=A}}};AO.prototype.RemoveLeaf=function(A){if(A==this.m_root){this.m_root=null}else{var D=A.parent,B=D.parent;A=D.child1==A?D.child2:D.child1;if(B){if(B.child1==D){B.child1=A}else{B.child2=A}A.parent=B;for(this.FreeNode(D);B;){D=B.aabb;B.aabb=AI.Combine(B.child1.aabb,B.child2.aabb);if(D.Contains(B.aabb)){break}B=B.parent}}else{this.m_root=A;A.parent=null;this.FreeNode(D)}}};AH.b2DynamicTreeBroadPhase=function(){this.m_tree=new AO;this.m_moveBuffer=new Vector;this.m_pairBuffer=new Vector;this.m_pairCount=0};AH.prototype.CreateProxy=function(A,D){var B=this.m_tree.CreateProxy(A,D);++this.m_proxyCount;this.BufferMove(B);return B};AH.prototype.DestroyProxy=function(A){this.UnBufferMove(A);--this.m_proxyCount;this.m_tree.DestroyProxy(A)};AH.prototype.MoveProxy=function(A,D,B){this.m_tree.MoveProxy(A,D,B)&&this.BufferMove(A)};AH.prototype.TestOverlap=function(B,E){var D=this.m_tree.GetFatAABB(B),A=this.m_tree.GetFatAABB(E);return D.TestOverlap(A)};AH.prototype.GetUserData=function(A){return this.m_tree.GetUserData(A)};AH.prototype.GetFatAABB=function(A){return this.m_tree.GetFatAABB(A)};AH.prototype.GetProxyCount=function(){return this.m_proxyCount};AH.prototype.UpdatePairs=function(B){var H=this;var G=H.m_pairCount=0,A;for(G=0;G<H.m_moveBuffer.length;++G){A=H.m_moveBuffer[G];var F=H.m_tree.GetFatAABB(A);H.m_tree.Query(function(K){if(K==A){return true}if(H.m_pairCount==H.m_pairBuffer.length){H.m_pairBuffer[H.m_pairCount]=new m}var I=H.m_pairBuffer[H.m_pairCount];I.proxyA=K<A?K:A;I.proxyB=K>=A?K:A;++H.m_pairCount;return true},F)}for(G=H.m_moveBuffer.length=0;G<H.m_pairCount;){F=H.m_pairBuffer[G];var E=H.m_tree.GetUserData(F.proxyA),D=H.m_tree.GetUserData(F.proxyB);B(E,D);for(++G;G<H.m_pairCount;){E=H.m_pairBuffer[G];if(E.proxyA!=F.proxyA||E.proxyB!=F.proxyB){break}++G}}};AH.prototype.Query=function(A,B){this.m_tree.Query(A,B)};AH.prototype.RayCast=function(A,B){this.m_tree.RayCast(A,B)};AH.prototype.Validate=function(){};AH.prototype.Rebalance=function(A){if(A===undefined){A=0}this.m_tree.Rebalance(A)};AH.prototype.BufferMove=function(A){this.m_moveBuffer[this.m_moveBuffer.length]=A};AH.prototype.UnBufferMove=function(A){this.m_moveBuffer.splice(parseInt(this.m_moveBuffer.indexOf(A)),1)};AH.prototype.ComparePairs=function(){return 0};AH.__implements={};AH.__implements[AX]=true;AD.b2DynamicTreeNode=function(){this.aabb=new AI};AD.prototype.IsLeaf=function(){return this.child1==null};m.b2DynamicTreePair=function(){};AG.b2Manifold=function(){this.m_pointCount=0};AG.prototype.b2Manifold=function(){this.m_points=new Vector(AM.b2_maxManifoldPoints);for(var A=0;A<AM.b2_maxManifoldPoints;A++){this.m_points[A]=new e}this.m_localPlaneNormal=new AQ;this.m_localPoint=new AQ};AG.prototype.Reset=function(){for(var A=0;A<AM.b2_maxManifoldPoints;A++){(this.m_points[A] instanceof e?this.m_points[A]:null).Reset()}this.m_localPlaneNormal.SetZero();this.m_localPoint.SetZero();this.m_pointCount=this.m_type=0};AG.prototype.Set=function(A){this.m_pointCount=A.m_pointCount;for(var B=0;B<AM.b2_maxManifoldPoints;B++){(this.m_points[B] instanceof e?this.m_points[B]:null).Set(A.m_points[B])}this.m_localPlaneNormal.SetV(A.m_localPlaneNormal);this.m_localPoint.SetV(A.m_localPoint);this.m_type=A.m_type};AG.prototype.Copy=function(){var A=new AG;A.Set(this);return A};Box2D.postDefs.push(function(){Box2D.Collision.b2Manifold.e_circles=1;Box2D.Collision.b2Manifold.e_faceA=2;Box2D.Collision.b2Manifold.e_faceB=4});e.b2ManifoldPoint=function(){this.m_localPoint=new AQ;this.m_id=new AA};e.prototype.b2ManifoldPoint=function(){this.Reset()};e.prototype.Reset=function(){this.m_localPoint.SetZero();this.m_tangentImpulse=this.m_normalImpulse=0;this.m_id.key=0};e.prototype.Set=function(A){this.m_localPoint.SetV(A.m_localPoint);this.m_normalImpulse=A.m_normalImpulse;this.m_tangentImpulse=A.m_tangentImpulse;this.m_id.Set(A.m_id)};t.b2Point=function(){this.p=new AQ};t.prototype.Support=function(){return this.p};t.prototype.GetFirstVertex=function(){return this.p};b.b2RayCastInput=function(){this.p1=new AQ;this.p2=new AQ};b.prototype.b2RayCastInput=function(A,D,B){if(A===undefined){A=null}if(D===undefined){D=null}if(B===undefined){B=1}A&&this.p1.SetV(A);D&&this.p2.SetV(D);this.maxFraction=B};AK.b2RayCastOutput=function(){this.normal=new AQ};C.b2Segment=function(){this.p1=new AQ;this.p2=new AQ};C.prototype.TestSegment=function(H,G,F,D){if(D===undefined){D=0}var A=F.p1,N=F.p2.x-A.x,L=F.p2.y-A.y;F=this.p2.y-this.p1.y;var M=-(this.p2.x-this.p1.x),K=100*Number.MIN_VALUE,B=-(N*F+L*M);if(B>K){var I=A.x-this.p1.x,E=A.y-this.p1.y;A=I*F+E*M;if(0<=A&&A<=D*B){D=-N*E+L*I;if(-K*B<=D&&D<=B*(1+K)){A/=B;D=Math.sqrt(F*F+M*M);F/=D;M/=D;H[0]=A;G.Set(F,M);return true}}}return false};C.prototype.Extend=function(A){this.ExtendForward(A);this.ExtendBackward(A)};C.prototype.ExtendForward=function(A){var D=this.p2.x-this.p1.x,B=this.p2.y-this.p1.y;A=Math.min(D>0?(A.upperBound.x-this.p1.x)/D:D<0?(A.lowerBound.x-this.p1.x)/D:Number.POSITIVE_INFINITY,B>0?(A.upperBound.y-this.p1.y)/B:B<0?(A.lowerBound.y-this.p1.y)/B:Number.POSITIVE_INFINITY);this.p2.x=this.p1.x+D*A;this.p2.y=this.p1.y+B*A};C.prototype.ExtendBackward=function(A){var D=-this.p2.x+this.p1.x,B=-this.p2.y+this.p1.y;A=Math.min(D>0?(A.upperBound.x-this.p2.x)/D:D<0?(A.lowerBound.x-this.p2.x)/D:Number.POSITIVE_INFINITY,B>0?(A.upperBound.y-this.p2.y)/B:B<0?(A.lowerBound.y-this.p2.y)/B:Number.POSITIVE_INFINITY);this.p1.x=this.p2.x+D*A;this.p1.y=this.p2.y+B*A};AY.b2SeparationFunction=function(){this.m_localPoint=new AQ;this.m_axis=new AQ};AY.prototype.Initialize=function(H,G,F,D,A){this.m_proxyA=G;this.m_proxyB=D;var N=parseInt(H.count);AM.b2Assert(0<N&&N<3);var L,M,K,B,I=B=K=D=G=0,E=0;I=0;if(N==1){this.m_type=AY.e_points;L=this.m_proxyA.GetVertex(H.indexA[0]);M=this.m_proxyB.GetVertex(H.indexB[0]);N=L;H=F.R;G=F.position.x+(H.col1.x*N.x+H.col2.x*N.y);D=F.position.y+(H.col1.y*N.x+H.col2.y*N.y);N=M;H=A.R;K=A.position.x+(H.col1.x*N.x+H.col2.x*N.y);B=A.position.y+(H.col1.y*N.x+H.col2.y*N.y);this.m_axis.x=K-G;this.m_axis.y=B-D;this.m_axis.Normalize()}else{if(H.indexB[0]==H.indexB[1]){this.m_type=AY.e_faceA;G=this.m_proxyA.GetVertex(H.indexA[0]);D=this.m_proxyA.GetVertex(H.indexA[1]);M=this.m_proxyB.GetVertex(H.indexB[0]);this.m_localPoint.x=0.5*(G.x+D.x);this.m_localPoint.y=0.5*(G.y+D.y);this.m_axis=AN.CrossVF(AN.SubtractVV(D,G),1);this.m_axis.Normalize();N=this.m_axis;H=F.R;I=H.col1.x*N.x+H.col2.x*N.y;E=H.col1.y*N.x+H.col2.y*N.y;N=this.m_localPoint;H=F.R;G=F.position.x+(H.col1.x*N.x+H.col2.x*N.y);D=F.position.y+(H.col1.y*N.x+H.col2.y*N.y);N=M;H=A.R;K=A.position.x+(H.col1.x*N.x+H.col2.x*N.y);B=A.position.y+(H.col1.y*N.x+H.col2.y*N.y);I=(K-G)*I+(B-D)*E}else{if(H.indexA[0]==H.indexA[0]){this.m_type=AY.e_faceB;K=this.m_proxyB.GetVertex(H.indexB[0]);B=this.m_proxyB.GetVertex(H.indexB[1]);L=this.m_proxyA.GetVertex(H.indexA[0]);this.m_localPoint.x=0.5*(K.x+B.x);this.m_localPoint.y=0.5*(K.y+B.y);this.m_axis=AN.CrossVF(AN.SubtractVV(B,K),1);this.m_axis.Normalize();N=this.m_axis;H=A.R;I=H.col1.x*N.x+H.col2.x*N.y;E=H.col1.y*N.x+H.col2.y*N.y;N=this.m_localPoint;H=A.R;K=A.position.x+(H.col1.x*N.x+H.col2.x*N.y);B=A.position.y+(H.col1.y*N.x+H.col2.y*N.y);N=L;H=F.R;G=F.position.x+(H.col1.x*N.x+H.col2.x*N.y);D=F.position.y+(H.col1.y*N.x+H.col2.y*N.y);I=(G-K)*I+(D-B)*E}else{G=this.m_proxyA.GetVertex(H.indexA[0]);D=this.m_proxyA.GetVertex(H.indexA[1]);K=this.m_proxyB.GetVertex(H.indexB[0]);B=this.m_proxyB.GetVertex(H.indexB[1]);AN.MulX(F,L);L=AN.MulMV(F.R,AN.SubtractVV(D,G));AN.MulX(A,M);I=AN.MulMV(A.R,AN.SubtractVV(B,K));A=L.x*L.x+L.y*L.y;M=I.x*I.x+I.y*I.y;H=AN.SubtractVV(I,L);F=L.x*H.x+L.y*H.y;H=I.x*H.x+I.y*H.y;L=L.x*I.x+L.y*I.y;E=A*M-L*L;I=0;if(E!=0){I=AN.Clamp((L*H-F*M)/E,0,1)}if((L*I+H)/M<0){I=AN.Clamp((L-F)/A,0,1)}L=new AQ;L.x=G.x+I*(D.x-G.x);L.y=G.y+I*(D.y-G.y);M=new AQ;M.x=K.x+I*(B.x-K.x);M.y=K.y+I*(B.y-K.y);if(I==0||I==1){this.m_type=AY.e_faceB;this.m_axis=AN.CrossVF(AN.SubtractVV(B,K),1);this.m_axis.Normalize();this.m_localPoint=M}else{this.m_type=AY.e_faceA;this.m_axis=AN.CrossVF(AN.SubtractVV(D,G),1);this.m_localPoint=L}}}I<0&&this.m_axis.NegativeSelf()}};AY.prototype.Evaluate=function(B,F){var E,A,D=0;switch(this.m_type){case AY.e_points:E=AN.MulTMV(B.R,this.m_axis);A=AN.MulTMV(F.R,this.m_axis.GetNegative());E=this.m_proxyA.GetSupportVertex(E);A=this.m_proxyB.GetSupportVertex(A);E=AN.MulX(B,E);A=AN.MulX(F,A);return D=(A.x-E.x)*this.m_axis.x+(A.y-E.y)*this.m_axis.y;case AY.e_faceA:D=AN.MulMV(B.R,this.m_axis);E=AN.MulX(B,this.m_localPoint);A=AN.MulTMV(F.R,D.GetNegative());A=this.m_proxyB.GetSupportVertex(A);A=AN.MulX(F,A);return D=(A.x-E.x)*D.x+(A.y-E.y)*D.y;case AY.e_faceB:D=AN.MulMV(F.R,this.m_axis);A=AN.MulX(F,this.m_localPoint);E=AN.MulTMV(B.R,D.GetNegative());E=this.m_proxyA.GetSupportVertex(E);E=AN.MulX(B,E);return D=(E.x-A.x)*D.x+(E.y-A.y)*D.y;default:AM.b2Assert(false);return 0}};Box2D.postDefs.push(function(){Box2D.Collision.b2SeparationFunction.e_points=1;Box2D.Collision.b2SeparationFunction.e_faceA=2;Box2D.Collision.b2SeparationFunction.e_faceB=4});AW.b2Simplex=function(){this.m_v1=new AV;this.m_v2=new AV;this.m_v3=new AV;this.m_vertices=new Vector(3)};AW.prototype.b2Simplex=function(){this.m_vertices[0]=this.m_v1;this.m_vertices[1]=this.m_v2;this.m_vertices[2]=this.m_v3};AW.prototype.ReadCache=function(G,F,E,D,A){AM.b2Assert(0<=G.count&&G.count<=3);var L,I;this.m_count=G.count;for(var K=this.m_vertices,H=0;H<this.m_count;H++){var B=K[H];B.indexA=G.indexA[H];B.indexB=G.indexB[H];L=F.GetVertex(B.indexA);I=D.GetVertex(B.indexB);B.wA=AN.MulX(E,L);B.wB=AN.MulX(A,I);B.w=AN.SubtractVV(B.wB,B.wA);B.a=0}if(this.m_count>1){G=G.metric;L=this.GetMetric();if(L<0.5*G||2*G<L||L<Number.MIN_VALUE){this.m_count=0}}if(this.m_count==0){B=K[0];B.indexA=0;B.indexB=0;L=F.GetVertex(0);I=D.GetVertex(0);B.wA=AN.MulX(E,L);B.wB=AN.MulX(A,I);B.w=AN.SubtractVV(B.wB,B.wA);this.m_count=1}};AW.prototype.WriteCache=function(A){A.metric=this.GetMetric();A.count=Box2D.parseUInt(this.m_count);for(var D=this.m_vertices,B=0;B<this.m_count;B++){A.indexA[B]=Box2D.parseUInt(D[B].indexA);A.indexB[B]=Box2D.parseUInt(D[B].indexB)}};AW.prototype.GetSearchDirection=function(){switch(this.m_count){case 1:return this.m_v1.w.GetNegative();case 2:var A=AN.SubtractVV(this.m_v2.w,this.m_v1.w);return AN.CrossVV(A,this.m_v1.w.GetNegative())>0?AN.CrossFV(1,A):AN.CrossVF(A,1);default:AM.b2Assert(false);return new AQ}};AW.prototype.GetClosestPoint=function(){switch(this.m_count){case 0:AM.b2Assert(false);return new AQ;case 1:return this.m_v1.w;case 2:return new AQ(this.m_v1.a*this.m_v1.w.x+this.m_v2.a*this.m_v2.w.x,this.m_v1.a*this.m_v1.w.y+this.m_v2.a*this.m_v2.w.y);default:AM.b2Assert(false);return new AQ}};AW.prototype.GetWitnessPoints=function(A,B){switch(this.m_count){case 0:AM.b2Assert(false);break;case 1:A.SetV(this.m_v1.wA);B.SetV(this.m_v1.wB);break;case 2:A.x=this.m_v1.a*this.m_v1.wA.x+this.m_v2.a*this.m_v2.wA.x;A.y=this.m_v1.a*this.m_v1.wA.y+this.m_v2.a*this.m_v2.wA.y;B.x=this.m_v1.a*this.m_v1.wB.x+this.m_v2.a*this.m_v2.wB.x;B.y=this.m_v1.a*this.m_v1.wB.y+this.m_v2.a*this.m_v2.wB.y;break;case 3:B.x=A.x=this.m_v1.a*this.m_v1.wA.x+this.m_v2.a*this.m_v2.wA.x+this.m_v3.a*this.m_v3.wA.x;B.y=A.y=this.m_v1.a*this.m_v1.wA.y+this.m_v2.a*this.m_v2.wA.y+this.m_v3.a*this.m_v3.wA.y;break;default:AM.b2Assert(false)}};AW.prototype.GetMetric=function(){switch(this.m_count){case 0:AM.b2Assert(false);return 0;case 1:return 0;case 2:return AN.SubtractVV(this.m_v1.w,this.m_v2.w).Length();case 3:return AN.CrossVV(AN.SubtractVV(this.m_v2.w,this.m_v1.w),AN.SubtractVV(this.m_v3.w,this.m_v1.w));default:AM.b2Assert(false);return 0}};AW.prototype.Solve2=function(){var A=this.m_v1.w,D=this.m_v2.w,B=AN.SubtractVV(D,A);A=-(A.x*B.x+A.y*B.y);if(A<=0){this.m_count=this.m_v1.a=1}else{D=D.x*B.x+D.y*B.y;if(D<=0){this.m_count=this.m_v2.a=1;this.m_v1.Set(this.m_v2)}else{B=1/(D+A);this.m_v1.a=D*B;this.m_v2.a=A*B;this.m_count=2}}};AW.prototype.Solve3=function(){var G=this.m_v1.w,F=this.m_v2.w,E=this.m_v3.w,D=AN.SubtractVV(F,G),A=AN.Dot(G,D),M=AN.Dot(F,D);A=-A;var K=AN.SubtractVV(E,G),L=AN.Dot(G,K),I=AN.Dot(E,K);L=-L;var B=AN.SubtractVV(E,F),H=AN.Dot(F,B);B=AN.Dot(E,B);H=-H;K=AN.CrossVV(D,K);D=K*AN.CrossVV(F,E);E=K*AN.CrossVV(E,G);G=K*AN.CrossVV(G,F);if(A<=0&&L<=0){this.m_count=this.m_v1.a=1}else{if(M>0&&A>0&&G<=0){I=1/(M+A);this.m_v1.a=M*I;this.m_v2.a=A*I;this.m_count=2}else{if(I>0&&L>0&&E<=0){M=1/(I+L);this.m_v1.a=I*M;this.m_v3.a=L*M;this.m_count=2;this.m_v2.Set(this.m_v3)}else{if(M<=0&&H<=0){this.m_count=this.m_v2.a=1;this.m_v1.Set(this.m_v2)}else{if(I<=0&&B<=0){this.m_count=this.m_v3.a=1;this.m_v1.Set(this.m_v3)}else{if(B>0&&H>0&&D<=0){M=1/(B+H);this.m_v2.a=B*M;this.m_v3.a=H*M;this.m_count=2;this.m_v1.Set(this.m_v3)}else{M=1/(D+E+G);this.m_v1.a=D*M;this.m_v2.a=E*M;this.m_v3.a=G*M;this.m_count=3}}}}}}};AT.b2SimplexCache=function(){this.indexA=new Vector_a2j_Number(3);this.indexB=new Vector_a2j_Number(3)};AV.b2SimplexVertex=function(){};AV.prototype.Set=function(A){this.wA.SetV(A.wA);this.wB.SetV(A.wB);this.w.SetV(A.w);this.a=A.a;this.indexA=A.indexA;this.indexB=A.indexB};AR.b2TimeOfImpact=function(){};AR.TimeOfImpact=function(N){++AR.b2_toiCalls;var L=N.proxyA,K=N.proxyB,E=N.sweepA,A=N.sweepB;AM.b2Assert(E.t0==A.t0);AM.b2Assert(1-E.t0>Number.MIN_VALUE);var U=L.m_radius+K.m_radius;N=N.tolerance;var R=0,S=0,Q=0;AR.s_cache.count=0;for(AR.s_distanceInput.useRadii=false;;){E.GetTransform(AR.s_xfA,R);A.GetTransform(AR.s_xfB,R);AR.s_distanceInput.proxyA=L;AR.s_distanceInput.proxyB=K;AR.s_distanceInput.transformA=AR.s_xfA;AR.s_distanceInput.transformB=AR.s_xfB;P.Distance(AR.s_distanceOutput,AR.s_cache,AR.s_distanceInput);if(AR.s_distanceOutput.distance<=0){R=1;break}AR.s_fcn.Initialize(AR.s_cache,L,AR.s_xfA,K,AR.s_xfB);var B=AR.s_fcn.Evaluate(AR.s_xfA,AR.s_xfB);if(B<=0){R=1;break}if(S==0){Q=B>U?AN.Max(U-N,0.75*U):AN.Max(B-N,0.02*U)}if(B-Q<0.5*N){if(S==0){R=1;break}break}var O=R,G=R,I=1;B=B;E.GetTransform(AR.s_xfA,I);A.GetTransform(AR.s_xfB,I);var D=AR.s_fcn.Evaluate(AR.s_xfA,AR.s_xfB);if(D>=Q){R=1;break}for(var H=0;;){var M=0;M=H&1?G+(Q-B)*(I-G)/(D-B):0.5*(G+I);E.GetTransform(AR.s_xfA,M);A.GetTransform(AR.s_xfB,M);var F=AR.s_fcn.Evaluate(AR.s_xfA,AR.s_xfB);if(AN.Abs(F-Q)<0.025*N){O=M;break}if(F>Q){G=M;B=F}else{I=M;D=F}++H;++AR.b2_toiRootIters;if(H==50){break}}AR.b2_toiMaxRootIters=AN.Max(AR.b2_toiMaxRootIters,H);if(O<(1+100*Number.MIN_VALUE)*R){break}R=O;S++;++AR.b2_toiIters;if(S==1000){break}}AR.b2_toiMaxIters=AN.Max(AR.b2_toiMaxIters,S);return R};Box2D.postDefs.push(function(){Box2D.Collision.b2TimeOfImpact.b2_toiCalls=0;Box2D.Collision.b2TimeOfImpact.b2_toiIters=0;Box2D.Collision.b2TimeOfImpact.b2_toiMaxIters=0;Box2D.Collision.b2TimeOfImpact.b2_toiRootIters=0;Box2D.Collision.b2TimeOfImpact.b2_toiMaxRootIters=0;Box2D.Collision.b2TimeOfImpact.s_cache=new AT;Box2D.Collision.b2TimeOfImpact.s_distanceInput=new J;Box2D.Collision.b2TimeOfImpact.s_xfA=new X;Box2D.Collision.b2TimeOfImpact.s_xfB=new X;Box2D.Collision.b2TimeOfImpact.s_fcn=new AY;Box2D.Collision.b2TimeOfImpact.s_distanceOutput=new AU});AP.b2TOIInput=function(){this.proxyA=new AL;this.proxyB=new AL;this.sweepA=new AJ;this.sweepB=new AJ};AS.b2WorldManifold=function(){this.m_normal=new AQ};AS.prototype.b2WorldManifold=function(){this.m_points=new Vector(AM.b2_maxManifoldPoints);for(var A=0;A<AM.b2_maxManifoldPoints;A++){this.m_points[A]=new AQ}};AS.prototype.Initialize=function(I,H,G,D,A){if(G===undefined){G=0}if(A===undefined){A=0}if(I.m_pointCount!=0){var O=0,M,N,L=0,B=0,K=0,E=0,F=0;M=0;switch(I.m_type){case AG.e_circles:N=H.R;M=I.m_localPoint;O=H.position.x+N.col1.x*M.x+N.col2.x*M.y;H=H.position.y+N.col1.y*M.x+N.col2.y*M.y;N=D.R;M=I.m_points[0].m_localPoint;I=D.position.x+N.col1.x*M.x+N.col2.x*M.y;D=D.position.y+N.col1.y*M.x+N.col2.y*M.y;M=I-O;N=D-H;L=M*M+N*N;if(L>Number.MIN_VALUE*Number.MIN_VALUE){L=Math.sqrt(L);this.m_normal.x=M/L;this.m_normal.y=N/L}else{this.m_normal.x=1;this.m_normal.y=0}M=H+G*this.m_normal.y;D=D-A*this.m_normal.y;this.m_points[0].x=0.5*(O+G*this.m_normal.x+(I-A*this.m_normal.x));this.m_points[0].y=0.5*(M+D);break;case AG.e_faceA:N=H.R;M=I.m_localPlaneNormal;L=N.col1.x*M.x+N.col2.x*M.y;B=N.col1.y*M.x+N.col2.y*M.y;N=H.R;M=I.m_localPoint;K=H.position.x+N.col1.x*M.x+N.col2.x*M.y;E=H.position.y+N.col1.y*M.x+N.col2.y*M.y;this.m_normal.x=L;this.m_normal.y=B;for(O=0;O<I.m_pointCount;O++){N=D.R;M=I.m_points[O].m_localPoint;F=D.position.x+N.col1.x*M.x+N.col2.x*M.y;M=D.position.y+N.col1.y*M.x+N.col2.y*M.y;this.m_points[O].x=F+0.5*(G-(F-K)*L-(M-E)*B-A)*L;this.m_points[O].y=M+0.5*(G-(F-K)*L-(M-E)*B-A)*B}break;case AG.e_faceB:N=D.R;M=I.m_localPlaneNormal;L=N.col1.x*M.x+N.col2.x*M.y;B=N.col1.y*M.x+N.col2.y*M.y;N=D.R;M=I.m_localPoint;K=D.position.x+N.col1.x*M.x+N.col2.x*M.y;E=D.position.y+N.col1.y*M.x+N.col2.y*M.y;this.m_normal.x=-L;this.m_normal.y=-B;for(O=0;O<I.m_pointCount;O++){N=H.R;M=I.m_points[O].m_localPoint;F=H.position.x+N.col1.x*M.x+N.col2.x*M.y;M=H.position.y+N.col1.y*M.x+N.col2.y*M.y;this.m_points[O].x=F+0.5*(A-(F-K)*L-(M-E)*B-G)*L;this.m_points[O].y=M+0.5*(A-(F-K)*L-(M-E)*B-G)*B}}}};Aa.ClipVertex=function(){this.v=new AQ;this.id=new AA};Aa.prototype.Set=function(A){this.v.SetV(A.v);this.id.Set(A.id)};AZ.Features=function(){};Object.defineProperty(AZ.prototype,"referenceEdge",{enumerable:false,configurable:true,get:function(){return this._referenceEdge}});Object.defineProperty(AZ.prototype,"referenceEdge",{enumerable:false,configurable:true,set:function(A){if(A===undefined){A=0}this._referenceEdge=A;this._m_id._key=this._m_id._key&4294967040|this._referenceEdge&255}});Object.defineProperty(AZ.prototype,"incidentEdge",{enumerable:false,configurable:true,get:function(){return this._incidentEdge}});Object.defineProperty(AZ.prototype,"incidentEdge",{enumerable:false,configurable:true,set:function(A){if(A===undefined){A=0}this._incidentEdge=A;this._m_id._key=this._m_id._key&4294902015|this._incidentEdge<<8&65280}});Object.defineProperty(AZ.prototype,"incidentVertex",{enumerable:false,configurable:true,get:function(){return this._incidentVertex}});Object.defineProperty(AZ.prototype,"incidentVertex",{enumerable:false,configurable:true,set:function(A){if(A===undefined){A=0}this._incidentVertex=A;this._m_id._key=this._m_id._key&4278255615|this._incidentVertex<<16&16711680}});Object.defineProperty(AZ.prototype,"flip",{enumerable:false,configurable:true,get:function(){return this._flip}});Object.defineProperty(AZ.prototype,"flip",{enumerable:false,configurable:true,set:function(A){if(A===undefined){A=0}this._flip=A;this._m_id._key=this._m_id._key&16777215|this._flip<<24&4278190080}})})();(function(){var f=Box2D.Common.b2Settings,e=Box2D.Collision.Shapes.b2CircleShape,X=Box2D.Collision.Shapes.b2EdgeChainDef,T=Box2D.Collision.Shapes.b2EdgeShape,b=Box2D.Collision.Shapes.b2MassData,H=Box2D.Collision.Shapes.b2PolygonShape,O=Box2D.Collision.Shapes.b2Shape,E=Box2D.Common.Math.b2Mat22,D=Box2D.Common.Math.b2Math,P=Box2D.Common.Math.b2Transform,N=Box2D.Common.Math.b2Vec2,R=Box2D.Collision.b2Distance,S=Box2D.Collision.b2DistanceInput,Z=Box2D.Collision.b2DistanceOutput,J=Box2D.Collision.b2DistanceProxy,C=Box2D.Collision.b2SimplexCache;Box2D.inherit(e,Box2D.Collision.Shapes.b2Shape);e.prototype.__super=Box2D.Collision.Shapes.b2Shape.prototype;e.b2CircleShape=function(){Box2D.Collision.Shapes.b2Shape.b2Shape.apply(this,arguments);this.m_p=new N};e.prototype.Copy=function(){var A=new e;A.Set(this);return A};e.prototype.Set=function(A){this.__super.Set.call(this,A);if(Box2D.is(A,e)){this.m_p.SetV((A instanceof e?A:null).m_p)}};e.prototype.TestPoint=function(A,G){var B=A.R,F=A.position.x+(B.col1.x*this.m_p.x+B.col2.x*this.m_p.y);B=A.position.y+(B.col1.y*this.m_p.x+B.col2.y*this.m_p.y);F=G.x-F;B=G.y-B;return F*F+B*B<=this.m_radius*this.m_radius};e.prototype.RayCast=function(B,K,M){var A=M.R,L=K.p1.x-(M.position.x+(A.col1.x*this.m_p.x+A.col2.x*this.m_p.y));M=K.p1.y-(M.position.y+(A.col1.y*this.m_p.x+A.col2.y*this.m_p.y));A=K.p2.x-K.p1.x;var G=K.p2.y-K.p1.y,Q=L*A+M*G,F=A*A+G*G,I=Q*Q-F*(L*L+M*M-this.m_radius*this.m_radius);if(I<0||F<Number.MIN_VALUE){return false}Q=-(Q+Math.sqrt(I));if(0<=Q&&Q<=K.maxFraction*F){Q/=F;B.fraction=Q;B.normal.x=L+Q*A;B.normal.y=M+Q*G;B.normal.Normalize();return true}return false};e.prototype.ComputeAABB=function(A,G){var B=G.R,F=G.position.x+(B.col1.x*this.m_p.x+B.col2.x*this.m_p.y);B=G.position.y+(B.col1.y*this.m_p.x+B.col2.y*this.m_p.y);A.lowerBound.Set(F-this.m_radius,B-this.m_radius);A.upperBound.Set(F+this.m_radius,B+this.m_radius)};e.prototype.ComputeMass=function(A,B){if(B===undefined){B=0}A.mass=B*f.b2_pi*this.m_radius*this.m_radius;A.center.SetV(this.m_p);A.I=A.mass*(0.5*this.m_radius*this.m_radius+(this.m_p.x*this.m_p.x+this.m_p.y*this.m_p.y))};e.prototype.ComputeSubmergedArea=function(A,K,B,I){if(K===undefined){K=0}B=D.MulX(B,this.m_p);var F=-(D.Dot(A,B)-K);if(F<-this.m_radius+Number.MIN_VALUE){return 0}if(F>this.m_radius){I.SetV(B);return Math.PI*this.m_radius*this.m_radius}K=this.m_radius*this.m_radius;var G=F*F;F=K*(Math.asin(F/this.m_radius)+Math.PI/2)+F*Math.sqrt(K-G);K=-2/3*Math.pow(K-G,1.5)/F;I.x=B.x+A.x*K;I.y=B.y+A.y*K;return F};e.prototype.GetLocalPosition=function(){return this.m_p};e.prototype.SetLocalPosition=function(A){this.m_p.SetV(A)};e.prototype.GetRadius=function(){return this.m_radius};e.prototype.SetRadius=function(A){if(A===undefined){A=0}this.m_radius=A};e.prototype.b2CircleShape=function(A){if(A===undefined){A=0}this.__super.b2Shape.call(this);this.m_type=O.e_circleShape;this.m_radius=A};X.b2EdgeChainDef=function(){};X.prototype.b2EdgeChainDef=function(){this.vertexCount=0;this.isALoop=true;this.vertices=[]};Box2D.inherit(T,Box2D.Collision.Shapes.b2Shape);T.prototype.__super=Box2D.Collision.Shapes.b2Shape.prototype;T.b2EdgeShape=function(){Box2D.Collision.Shapes.b2Shape.b2Shape.apply(this,arguments);this.s_supportVec=new N;this.m_v1=new N;this.m_v2=new N;this.m_coreV1=new N;this.m_coreV2=new N;this.m_normal=new N;this.m_direction=new N;this.m_cornerDir1=new N;this.m_cornerDir2=new N};T.prototype.TestPoint=function(){return false};T.prototype.RayCast=function(F,M,U){var B,Q=M.p2.x-M.p1.x,K=M.p2.y-M.p1.y;B=U.R;var V=U.position.x+(B.col1.x*this.m_v1.x+B.col2.x*this.m_v1.y),I=U.position.y+(B.col1.y*this.m_v1.x+B.col2.y*this.m_v1.y),L=U.position.y+(B.col1.y*this.m_v2.x+B.col2.y*this.m_v2.y)-I;U=-(U.position.x+(B.col1.x*this.m_v2.x+B.col2.x*this.m_v2.y)-V);B=100*Number.MIN_VALUE;var G=-(Q*L+K*U);if(G>B){V=M.p1.x-V;var A=M.p1.y-I;I=V*L+A*U;if(0<=I&&I<=M.maxFraction*G){M=-Q*A+K*V;if(-B*G<=M&&M<=G*(1+B)){I/=G;F.fraction=I;M=Math.sqrt(L*L+U*U);F.normal.x=L/M;F.normal.y=U/M;return true}}}return false};T.prototype.ComputeAABB=function(A,K){var B=K.R,I=K.position.x+(B.col1.x*this.m_v1.x+B.col2.x*this.m_v1.y),F=K.position.y+(B.col1.y*this.m_v1.x+B.col2.y*this.m_v1.y),G=K.position.x+(B.col1.x*this.m_v2.x+B.col2.x*this.m_v2.y);B=K.position.y+(B.col1.y*this.m_v2.x+B.col2.y*this.m_v2.y);if(I<G){A.lowerBound.x=I;A.upperBound.x=G}else{A.lowerBound.x=G;A.upperBound.x=I}if(F<B){A.lowerBound.y=F;A.upperBound.y=B}else{A.lowerBound.y=B;A.upperBound.y=F}};T.prototype.ComputeMass=function(A){A.mass=0;A.center.SetV(this.m_v1);A.I=0};T.prototype.ComputeSubmergedArea=function(A,L,B,K){if(L===undefined){L=0}var F=new N(A.x*L,A.y*L),I=D.MulX(B,this.m_v1);B=D.MulX(B,this.m_v2);var G=D.Dot(A,I)-L;A=D.Dot(A,B)-L;if(G>0){if(A>0){return 0}else{I.x=-A/(G-A)*I.x+G/(G-A)*B.x;I.y=-A/(G-A)*I.y+G/(G-A)*B.y}}else{if(A>0){B.x=-A/(G-A)*I.x+G/(G-A)*B.x;B.y=-A/(G-A)*I.y+G/(G-A)*B.y}}K.x=(F.x+I.x+B.x)/3;K.y=(F.y+I.y+B.y)/3;return 0.5*((I.x-F.x)*(B.y-F.y)-(I.y-F.y)*(B.x-F.x))};T.prototype.GetLength=function(){return this.m_length};T.prototype.GetVertex1=function(){return this.m_v1};T.prototype.GetVertex2=function(){return this.m_v2};T.prototype.GetCoreVertex1=function(){return this.m_coreV1};T.prototype.GetCoreVertex2=function(){return this.m_coreV2};T.prototype.GetNormalVector=function(){return this.m_normal};T.prototype.GetDirectionVector=function(){return this.m_direction};T.prototype.GetCorner1Vector=function(){return this.m_cornerDir1};T.prototype.GetCorner2Vector=function(){return this.m_cornerDir2};T.prototype.Corner1IsConvex=function(){return this.m_cornerConvex1};T.prototype.Corner2IsConvex=function(){return this.m_cornerConvex2};T.prototype.GetFirstVertex=function(A){var B=A.R;return new N(A.position.x+(B.col1.x*this.m_coreV1.x+B.col2.x*this.m_coreV1.y),A.position.y+(B.col1.y*this.m_coreV1.x+B.col2.y*this.m_coreV1.y))};T.prototype.GetNextEdge=function(){return this.m_nextEdge};T.prototype.GetPrevEdge=function(){return this.m_prevEdge};T.prototype.Support=function(A,L,B){if(L===undefined){L=0}if(B===undefined){B=0}var K=A.R,F=A.position.x+(K.col1.x*this.m_coreV1.x+K.col2.x*this.m_coreV1.y),I=A.position.y+(K.col1.y*this.m_coreV1.x+K.col2.y*this.m_coreV1.y),G=A.position.x+(K.col1.x*this.m_coreV2.x+K.col2.x*this.m_coreV2.y);A=A.position.y+(K.col1.y*this.m_coreV2.x+K.col2.y*this.m_coreV2.y);if(F*L+I*B>G*L+A*B){this.s_supportVec.x=F;this.s_supportVec.y=I}else{this.s_supportVec.x=G;this.s_supportVec.y=A}return this.s_supportVec};T.prototype.b2EdgeShape=function(A,B){this.__super.b2Shape.call(this);this.m_type=O.e_edgeShape;this.m_nextEdge=this.m_prevEdge=null;this.m_v1=A;this.m_v2=B;this.m_direction.Set(this.m_v2.x-this.m_v1.x,this.m_v2.y-this.m_v1.y);this.m_length=this.m_direction.Normalize();this.m_normal.Set(this.m_direction.y,-this.m_direction.x);this.m_coreV1.Set(-f.b2_toiSlop*(this.m_normal.x-this.m_direction.x)+this.m_v1.x,-f.b2_toiSlop*(this.m_normal.y-this.m_direction.y)+this.m_v1.y);this.m_coreV2.Set(-f.b2_toiSlop*(this.m_normal.x+this.m_direction.x)+this.m_v2.x,-f.b2_toiSlop*(this.m_normal.y+this.m_direction.y)+this.m_v2.y);this.m_cornerDir1=this.m_normal;this.m_cornerDir2.Set(-this.m_normal.x,-this.m_normal.y)};T.prototype.SetPrevEdge=function(A,G,B,F){this.m_prevEdge=A;this.m_coreV1=G;this.m_cornerDir1=B;this.m_cornerConvex1=F};T.prototype.SetNextEdge=function(A,G,B,F){this.m_nextEdge=A;this.m_coreV2=G;this.m_cornerDir2=B;this.m_cornerConvex2=F};b.b2MassData=function(){this.mass=0;this.center=new N(0,0);this.I=0};Box2D.inherit(H,Box2D.Collision.Shapes.b2Shape);H.prototype.__super=Box2D.Collision.Shapes.b2Shape.prototype;H.b2PolygonShape=function(){Box2D.Collision.Shapes.b2Shape.b2Shape.apply(this,arguments)};H.prototype.Copy=function(){var A=new H;A.Set(this);return A};H.prototype.Set=function(A){this.__super.Set.call(this,A);if(Box2D.is(A,H)){A=A instanceof H?A:null;this.m_centroid.SetV(A.m_centroid);this.m_vertexCount=A.m_vertexCount;this.Reserve(this.m_vertexCount);for(var B=0;B<this.m_vertexCount;B++){this.m_vertices[B].SetV(A.m_vertices[B]);this.m_normals[B].SetV(A.m_normals[B])}}};H.prototype.SetAsArray=function(A,I){if(I===undefined){I=0}var B=new Vector,G=0,F;for(G=0;G<A.length;++G){F=A[G];B.push(F)}this.SetAsVector(B,I)};H.AsArray=function(A,F){if(F===undefined){F=0}var B=new H;B.SetAsArray(A,F);return B};H.prototype.SetAsVector=function(A,I){if(I===undefined){I=0}if(I==0){I=A.length}f.b2Assert(2<=I);this.m_vertexCount=I;this.Reserve(I);var B=0;for(B=0;B<this.m_vertexCount;B++){this.m_vertices[B].SetV(A[B])}for(B=0;B<this.m_vertexCount;++B){var G=parseInt(B),F=parseInt(B+1<this.m_vertexCount?B+1:0);G=D.SubtractVV(this.m_vertices[F],this.m_vertices[G]);f.b2Assert(G.LengthSquared()>Number.MIN_VALUE);this.m_normals[B].SetV(D.CrossVF(G,1));this.m_normals[B].Normalize()}this.m_centroid=H.ComputeCentroid(this.m_vertices,this.m_vertexCount)};H.AsVector=function(A,F){if(F===undefined){F=0}var B=new H;B.SetAsVector(A,F);return B};H.prototype.SetAsBox=function(A,B){if(A===undefined){A=0}if(B===undefined){B=0}this.m_vertexCount=4;this.Reserve(4);this.m_vertices[0].Set(-A,-B);this.m_vertices[1].Set(A,-B);this.m_vertices[2].Set(A,B);this.m_vertices[3].Set(-A,B);this.m_normals[0].Set(0,-1);this.m_normals[1].Set(1,0);this.m_normals[2].Set(0,1);this.m_normals[3].Set(-1,0);this.m_centroid.SetZero()};H.AsBox=function(A,F){if(A===undefined){A=0}if(F===undefined){F=0}var B=new H;B.SetAsBox(A,F);return B};H.prototype.SetAsOrientedBox=function(A,G,B,F){if(A===undefined){A=0}if(G===undefined){G=0}if(B===undefined){B=null}if(F===undefined){F=0}this.m_vertexCount=4;this.Reserve(4);this.m_vertices[0].Set(-A,-G);this.m_vertices[1].Set(A,-G);this.m_vertices[2].Set(A,G);this.m_vertices[3].Set(-A,G);this.m_normals[0].Set(0,-1);this.m_normals[1].Set(1,0);this.m_normals[2].Set(0,1);this.m_normals[3].Set(-1,0);this.m_centroid=B;A=new P;A.position=B;A.R.Set(F);for(B=0;B<this.m_vertexCount;++B){this.m_vertices[B]=D.MulX(A,this.m_vertices[B]);this.m_normals[B]=D.MulMV(A.R,this.m_normals[B])}};H.AsOrientedBox=function(A,I,B,G){if(A===undefined){A=0}if(I===undefined){I=0}if(B===undefined){B=null}if(G===undefined){G=0}var F=new H;F.SetAsOrientedBox(A,I,B,G);return F};H.prototype.SetAsEdge=function(A,B){this.m_vertexCount=2;this.Reserve(2);this.m_vertices[0].SetV(A);this.m_vertices[1].SetV(B);this.m_centroid.x=0.5*(A.x+B.x);this.m_centroid.y=0.5*(A.y+B.y);this.m_normals[0]=D.CrossVF(D.SubtractVV(B,A),1);this.m_normals[0].Normalize();this.m_normals[1].x=-this.m_normals[0].x;this.m_normals[1].y=-this.m_normals[0].y};H.AsEdge=function(A,F){var B=new H;B.SetAsEdge(A,F);return B};H.prototype.TestPoint=function(A,M){var B;B=A.R;for(var L=M.x-A.position.x,F=M.y-A.position.y,K=L*B.col1.x+F*B.col1.y,I=L*B.col2.x+F*B.col2.y,G=0;G<this.m_vertexCount;++G){B=this.m_vertices[G];L=K-B.x;F=I-B.y;B=this.m_normals[G];if(B.x*L+B.y*F>0){return false}}return true};H.prototype.RayCast=function(G,U,W){var B=0,V=U.maxFraction,L=0,Y=0,K,M;L=U.p1.x-W.position.x;Y=U.p1.y-W.position.y;K=W.R;var I=L*K.col1.x+Y*K.col1.y,A=L*K.col2.x+Y*K.col2.y;L=U.p2.x-W.position.x;Y=U.p2.y-W.position.y;K=W.R;U=L*K.col1.x+Y*K.col1.y-I;K=L*K.col2.x+Y*K.col2.y-A;for(var F=parseInt(-1),Q=0;Q<this.m_vertexCount;++Q){M=this.m_vertices[Q];L=M.x-I;Y=M.y-A;M=this.m_normals[Q];L=M.x*L+M.y*Y;Y=M.x*U+M.y*K;if(Y==0){if(L<0){return false}}else{if(Y<0&&L<B*Y){B=L/Y;F=Q}else{if(Y>0&&L<V*Y){V=L/Y}}}if(V<B-Number.MIN_VALUE){return false}}if(F>=0){G.fraction=B;K=W.R;M=this.m_normals[F];G.normal.x=K.col1.x*M.x+K.col2.x*M.y;G.normal.y=K.col1.y*M.x+K.col2.y*M.y;return true}return false};H.prototype.ComputeAABB=function(B,L){for(var Q=L.R,A=this.m_vertices[0],M=L.position.x+(Q.col1.x*A.x+Q.col2.x*A.y),I=L.position.y+(Q.col1.y*A.x+Q.col2.y*A.y),U=M,G=I,K=1;K<this.m_vertexCount;++K){A=this.m_vertices[K];var F=L.position.x+(Q.col1.x*A.x+Q.col2.x*A.y);A=L.position.y+(Q.col1.y*A.x+Q.col2.y*A.y);M=M<F?M:F;I=I<A?I:A;U=U>F?U:F;G=G>A?G:A}B.lowerBound.x=M-this.m_radius;B.lowerBound.y=I-this.m_radius;B.upperBound.x=U+this.m_radius;B.upperBound.y=G+this.m_radius};H.prototype.ComputeMass=function(I,Y){if(Y===undefined){Y=0}if(this.m_vertexCount==2){I.center.x=0.5*(this.m_vertices[0].x+this.m_vertices[1].x);I.center.y=0.5*(this.m_vertices[0].y+this.m_vertices[1].y);I.mass=0;I.I=0}else{for(var m=0,B=0,g=0,U=0,n=1/3,M=0;M<this.m_vertexCount;++M){var V=this.m_vertices[M],L=M+1<this.m_vertexCount?this.m_vertices[parseInt(M+1)]:this.m_vertices[0],A=V.x-0,F=V.y-0,W=L.x-0,Q=L.y-0,G=A*Q-F*W,K=0.5*G;g+=K;m+=K*n*(0+V.x+L.x);B+=K*n*(0+V.y+L.y);V=A;F=F;W=W;Q=Q;U+=G*(n*(0.25*(V*V+W*V+W*W)+(0*V+0*W))+0+(n*(0.25*(F*F+Q*F+Q*Q)+(0*F+0*Q))+0))}I.mass=Y*g;m*=1/g;B*=1/g;I.center.Set(m,B);I.I=Y*U}};H.prototype.ComputeSubmergedArea=function(F,M,U,B){if(M===undefined){M=0}var Q=D.MulTMV(U.R,F),K=M-D.Dot(F,U.position),V=new Vector_a2j_Number,I=0,L=parseInt(-1);M=parseInt(-1);var G=false;for(F=F=0;F<this.m_vertexCount;++F){V[F]=D.Dot(Q,this.m_vertices[F])-K;var A=V[F]<-Number.MIN_VALUE;if(F>0){if(A){if(!G){L=F-1;I++}}else{if(G){M=F-1;I++}}}G=A}switch(I){case 0:if(G){F=new b;this.ComputeMass(F,1);B.SetV(D.MulX(U,F.center));return F.mass}else{return 0}case 1:if(L==-1){L=this.m_vertexCount-1}else{M=this.m_vertexCount-1}}F=parseInt((L+1)%this.m_vertexCount);Q=parseInt((M+1)%this.m_vertexCount);K=(0-V[L])/(V[F]-V[L]);V=(0-V[M])/(V[Q]-V[M]);L=new N(this.m_vertices[L].x*(1-K)+this.m_vertices[F].x*K,this.m_vertices[L].y*(1-K)+this.m_vertices[F].y*K);M=new N(this.m_vertices[M].x*(1-V)+this.m_vertices[Q].x*V,this.m_vertices[M].y*(1-V)+this.m_vertices[Q].y*V);V=0;K=new N;I=this.m_vertices[F];for(F=F;F!=Q;){F=(F+1)%this.m_vertexCount;G=F==Q?M:this.m_vertices[F];A=0.5*((I.x-L.x)*(G.y-L.y)-(I.y-L.y)*(G.x-L.x));V+=A;K.x+=A*(L.x+I.x+G.x)/3;K.y+=A*(L.y+I.y+G.y)/3;I=G}K.Multiply(1/V);B.SetV(D.MulX(U,K));return V};H.prototype.GetVertexCount=function(){return this.m_vertexCount};H.prototype.GetVertices=function(){return this.m_vertices};H.prototype.GetNormals=function(){return this.m_normals};H.prototype.GetSupport=function(A){for(var I=0,B=this.m_vertices[0].x*A.x+this.m_vertices[0].y*A.y,G=1;G<this.m_vertexCount;++G){var F=this.m_vertices[G].x*A.x+this.m_vertices[G].y*A.y;if(F>B){I=G;B=F}}return I};H.prototype.GetSupportVertex=function(A){for(var I=0,B=this.m_vertices[0].x*A.x+this.m_vertices[0].y*A.y,G=1;G<this.m_vertexCount;++G){var F=this.m_vertices[G].x*A.x+this.m_vertices[G].y*A.y;if(F>B){I=G;B=F}}return this.m_vertices[I]};H.prototype.Validate=function(){return false};H.prototype.b2PolygonShape=function(){this.__super.b2Shape.call(this);this.m_type=O.e_polygonShape;this.m_centroid=new N;this.m_vertices=new Vector;this.m_normals=new Vector};H.prototype.Reserve=function(A){if(A===undefined){A=0}for(var B=parseInt(this.m_vertices.length);B<A;B++){this.m_vertices[B]=new N;this.m_normals[B]=new N}};H.ComputeCentroid=function(B,K){if(K===undefined){K=0}for(var M=new N,A=0,L=1/3,G=0;G<K;++G){var Q=B[G],F=G+1<K?B[parseInt(G+1)]:B[0],I=0.5*((Q.x-0)*(F.y-0)-(Q.y-0)*(F.x-0));A+=I;M.x+=I*L*(0+Q.x+F.x);M.y+=I*L*(0+Q.y+F.y)}M.x*=1/A;M.y*=1/A;return M};H.ComputeOBB=function(g,K,M){if(M===undefined){M=0}var U=0,L=new Vector(M+1);for(U=0;U<M;++U){L[U]=K[U]}L[M]=L[0];K=Number.MAX_VALUE;for(U=1;U<=M;++U){var G=L[parseInt(U-1)],Q=L[U].x-G.x,F=L[U].y-G.y,I=Math.sqrt(Q*Q+F*F);Q/=I;F/=I;for(var B=-F,t=Q,A=I=Number.MAX_VALUE,p=-Number.MAX_VALUE,n=-Number.MAX_VALUE,Y=0;Y<M;++Y){var m=L[Y].x-G.x,W=L[Y].y-G.y,V=Q*m+F*W;m=B*m+t*W;if(V<I){I=V}if(m<A){A=m}if(V>p){p=V}if(m>n){n=m}}Y=(p-I)*(n-A);if(Y<0.95*K){K=Y;g.R.col1.x=Q;g.R.col1.y=F;g.R.col2.x=B;g.R.col2.y=t;Q=0.5*(I+p);F=0.5*(A+n);B=g.R;g.center.x=G.x+(B.col1.x*Q+B.col2.x*F);g.center.y=G.y+(B.col1.y*Q+B.col2.y*F);g.extents.x=0.5*(p-I);g.extents.y=0.5*(n-A)}}};Box2D.postDefs.push(function(){Box2D.Collision.Shapes.b2PolygonShape.s_mat=new E});O.b2Shape=function(){};O.prototype.Copy=function(){return null};O.prototype.Set=function(A){this.m_radius=A.m_radius};O.prototype.GetType=function(){return this.m_type};O.prototype.TestPoint=function(){return false};O.prototype.RayCast=function(){return false};O.prototype.ComputeAABB=function(){};O.prototype.ComputeMass=function(){};O.prototype.ComputeSubmergedArea=function(){return 0};O.TestOverlap=function(A,I,B,G){var F=new S;F.proxyA=new J;F.proxyA.Set(A);F.proxyB=new J;F.proxyB.Set(B);F.transformA=I;F.transformB=G;F.useRadii=true;A=new C;A.count=0;I=new Z;R.Distance(I,A,F);return I.distance<10*Number.MIN_VALUE};O.prototype.b2Shape=function(){this.m_type=O.e_unknownShape;this.m_radius=f.b2_linearSlop};Box2D.postDefs.push(function(){Box2D.Collision.Shapes.b2Shape.e_unknownShape=parseInt(-1);Box2D.Collision.Shapes.b2Shape.e_circleShape=0;Box2D.Collision.Shapes.b2Shape.e_polygonShape=1;Box2D.Collision.Shapes.b2Shape.e_edgeShape=2;Box2D.Collision.Shapes.b2Shape.e_shapeTypeCount=3;Box2D.Collision.Shapes.b2Shape.e_hitCollide=1;Box2D.Collision.Shapes.b2Shape.e_missCollide=0;Box2D.Collision.Shapes.b2Shape.e_startsInsideCollide=parseInt(-1)})})();(function(){var C=Box2D.Common.b2Color,B=Box2D.Common.b2Settings,A=Box2D.Common.Math.b2Math;C.b2Color=function(){this._b=this._g=this._r=0};C.prototype.b2Color=function(F,E,D){if(F===undefined){F=0}if(E===undefined){E=0}if(D===undefined){D=0}this._r=Box2D.parseUInt(255*A.Clamp(F,0,1));this._g=Box2D.parseUInt(255*A.Clamp(E,0,1));this._b=Box2D.parseUInt(255*A.Clamp(D,0,1))};C.prototype.Set=function(F,E,D){if(F===undefined){F=0}if(E===undefined){E=0}if(D===undefined){D=0}this._r=Box2D.parseUInt(255*A.Clamp(F,0,1));this._g=Box2D.parseUInt(255*A.Clamp(E,0,1));this._b=Box2D.parseUInt(255*A.Clamp(D,0,1))};Object.defineProperty(C.prototype,"r",{enumerable:false,configurable:true,set:function(D){if(D===undefined){D=0}this._r=Box2D.parseUInt(255*A.Clamp(D,0,1))}});Object.defineProperty(C.prototype,"g",{enumerable:false,configurable:true,set:function(D){if(D===undefined){D=0}this._g=Box2D.parseUInt(255*A.Clamp(D,0,1))}});Object.defineProperty(C.prototype,"b",{enumerable:false,configurable:true,set:function(D){if(D===undefined){D=0}this._b=Box2D.parseUInt(255*A.Clamp(D,0,1))}});Object.defineProperty(C.prototype,"color",{enumerable:false,configurable:true,get:function(){return this._r<<16|this._g<<8|this._b}});B.b2Settings=function(){};B.b2MixFriction=function(E,D){if(E===undefined){E=0}if(D===undefined){D=0}return Math.sqrt(E*D)};B.b2MixRestitution=function(E,D){if(E===undefined){E=0}if(D===undefined){D=0}return E>D?E:D};B.b2Assert=function(D){if(!D){throw"Assertion Failed"}};Box2D.postDefs.push(function(){Box2D.Common.b2Settings.VERSION="2.1alpha";Box2D.Common.b2Settings.USHRT_MAX=65535;Box2D.Common.b2Settings.b2_pi=Math.PI;Box2D.Common.b2Settings.b2_maxManifoldPoints=2;Box2D.Common.b2Settings.b2_aabbExtension=0.1;Box2D.Common.b2Settings.b2_aabbMultiplier=2;Box2D.Common.b2Settings.b2_polygonRadius=2*B.b2_linearSlop;Box2D.Common.b2Settings.b2_linearSlop=0.005;Box2D.Common.b2Settings.b2_angularSlop=2/180*B.b2_pi;Box2D.Common.b2Settings.b2_toiSlop=8*B.b2_linearSlop;Box2D.Common.b2Settings.b2_maxTOIContactsPerIsland=32;Box2D.Common.b2Settings.b2_maxTOIJointsPerIsland=32;Box2D.Common.b2Settings.b2_velocityThreshold=1;Box2D.Common.b2Settings.b2_maxLinearCorrection=0.2;Box2D.Common.b2Settings.b2_maxAngularCorrection=8/180*B.b2_pi;Box2D.Common.b2Settings.b2_maxTranslation=2;Box2D.Common.b2Settings.b2_maxTranslationSquared=B.b2_maxTranslation*B.b2_maxTranslation;Box2D.Common.b2Settings.b2_maxRotation=0.5*B.b2_pi;Box2D.Common.b2Settings.b2_maxRotationSquared=B.b2_maxRotation*B.b2_maxRotation;Box2D.Common.b2Settings.b2_contactBaumgarte=0.2;Box2D.Common.b2Settings.b2_timeToSleep=0.5;Box2D.Common.b2Settings.b2_linearSleepTolerance=0.01;Box2D.Common.b2Settings.b2_angularSleepTolerance=2/180*B.b2_pi})})();(function(){var I=Box2D.Common.Math.b2Mat22,H=Box2D.Common.Math.b2Mat33,D=Box2D.Common.Math.b2Math,J=Box2D.Common.Math.b2Sweep,C=Box2D.Common.Math.b2Transform,B=Box2D.Common.Math.b2Vec2,E=Box2D.Common.Math.b2Vec3;I.b2Mat22=function(){this.col1=new B;this.col2=new B};I.prototype.b2Mat22=function(){this.SetIdentity()};I.FromAngle=function(A){if(A===undefined){A=0}var F=new I;F.Set(A);return F};I.FromVV=function(F,G){var A=new I;A.SetVV(F,G);return A};I.prototype.Set=function(A){if(A===undefined){A=0}var F=Math.cos(A);A=Math.sin(A);this.col1.x=F;this.col2.x=-A;this.col1.y=A;this.col2.y=F};I.prototype.SetVV=function(A,F){this.col1.SetV(A);this.col2.SetV(F)};I.prototype.Copy=function(){var A=new I;A.SetM(this);return A};I.prototype.SetM=function(A){this.col1.SetV(A.col1);this.col2.SetV(A.col2)};I.prototype.AddM=function(A){this.col1.x+=A.col1.x;this.col1.y+=A.col1.y;this.col2.x+=A.col2.x;this.col2.y+=A.col2.y};I.prototype.SetIdentity=function(){this.col1.x=1;this.col2.x=0;this.col1.y=0;this.col2.y=1};I.prototype.SetZero=function(){this.col1.x=0;this.col2.x=0;this.col1.y=0;this.col2.y=0};I.prototype.GetAngle=function(){return Math.atan2(this.col1.y,this.col1.x)};I.prototype.GetInverse=function(K){var O=this.col1.x,G=this.col2.x,F=this.col1.y,N=this.col2.y,A=O*N-G*F;if(A!=0){A=1/A}K.col1.x=A*N;K.col2.x=-A*G;K.col1.y=-A*F;K.col2.y=A*O;return K};I.prototype.Solve=function(O,R,N){if(R===undefined){R=0}if(N===undefined){N=0}var G=this.col1.x,P=this.col2.x,F=this.col1.y,K=this.col2.y,A=G*K-P*F;if(A!=0){A=1/A}O.x=A*(K*R-P*N);O.y=A*(G*N-F*R);return O};I.prototype.Abs=function(){this.col1.Abs();this.col2.Abs()};H.b2Mat33=function(){this.col1=new E;this.col2=new E;this.col3=new E};H.prototype.b2Mat33=function(F,G,A){if(F===undefined){F=null}if(G===undefined){G=null}if(A===undefined){A=null}if(!F&&!G&&!A){this.col1.SetZero();this.col2.SetZero();this.col3.SetZero()}else{this.col1.SetV(F);this.col2.SetV(G);this.col3.SetV(A)}};H.prototype.SetVVV=function(F,G,A){this.col1.SetV(F);this.col2.SetV(G);this.col3.SetV(A)};H.prototype.Copy=function(){return new H(this.col1,this.col2,this.col3)};H.prototype.SetM=function(A){this.col1.SetV(A.col1);this.col2.SetV(A.col2);this.col3.SetV(A.col3)};H.prototype.AddM=function(A){this.col1.x+=A.col1.x;this.col1.y+=A.col1.y;this.col1.z+=A.col1.z;this.col2.x+=A.col2.x;this.col2.y+=A.col2.y;this.col2.z+=A.col2.z;this.col3.x+=A.col3.x;this.col3.y+=A.col3.y;this.col3.z+=A.col3.z};H.prototype.SetIdentity=function(){this.col1.x=1;this.col2.x=0;this.col3.x=0;this.col1.y=0;this.col2.y=1;this.col3.y=0;this.col1.z=0;this.col2.z=0;this.col3.z=1};H.prototype.SetZero=function(){this.col1.x=0;this.col2.x=0;this.col3.x=0;this.col1.y=0;this.col2.y=0;this.col3.y=0;this.col1.z=0;this.col2.z=0;this.col3.z=0};H.prototype.Solve22=function(O,R,N){if(R===undefined){R=0}if(N===undefined){N=0}var G=this.col1.x,P=this.col2.x,F=this.col1.y,K=this.col2.y,A=G*K-P*F;if(A!=0){A=1/A}O.x=A*(K*R-P*N);O.y=A*(G*N-F*R);return O};H.prototype.Solve33=function(K,G,R,O){if(G===undefined){G=0}if(R===undefined){R=0}if(O===undefined){O=0}var S=this.col1.x,U=this.col1.y,X=this.col1.z,N=this.col2.x,F=this.col2.y,P=this.col2.z,T=this.col3.x,b=this.col3.y,A=this.col3.z,Z=S*(F*A-P*b)+U*(P*T-N*A)+X*(N*b-F*T);if(Z!=0){Z=1/Z}K.x=Z*(G*(F*A-P*b)+R*(P*T-N*A)+O*(N*b-F*T));K.y=Z*(S*(R*A-O*b)+U*(O*T-G*A)+X*(G*b-R*T));K.z=Z*(S*(F*O-P*R)+U*(P*G-N*O)+X*(N*R-F*G));return K};D.b2Math=function(){};D.IsValid=function(A){if(A===undefined){A=0}return isFinite(A)};D.Dot=function(A,F){return A.x*F.x+A.y*F.y};D.CrossVV=function(A,F){return A.x*F.y-A.y*F.x};D.CrossVF=function(A,F){if(F===undefined){F=0}return new B(F*A.y,-F*A.x)};D.CrossFV=function(A,F){if(A===undefined){A=0}return new B(-A*F.y,A*F.x)};D.MulMV=function(A,F){return new B(A.col1.x*F.x+A.col2.x*F.y,A.col1.y*F.x+A.col2.y*F.y)};D.MulTMV=function(A,F){return new B(D.Dot(F,A.col1),D.Dot(F,A.col2))};D.MulX=function(F,G){var A=D.MulMV(F.R,G);A.x+=F.position.x;A.y+=F.position.y;return A};D.MulXT=function(G,K){var F=D.SubtractVV(K,G.position),A=F.x*G.R.col1.x+F.y*G.R.col1.y;F.y=F.x*G.R.col2.x+F.y*G.R.col2.y;F.x=A;return F};D.AddVV=function(A,F){return new B(A.x+F.x,A.y+F.y)};D.SubtractVV=function(A,F){return new B(A.x-F.x,A.y-F.y)};D.Distance=function(G,K){var F=G.x-K.x,A=G.y-K.y;return Math.sqrt(F*F+A*A)};D.DistanceSquared=function(G,K){var F=G.x-K.x,A=G.y-K.y;return F*F+A*A};D.MulFV=function(A,F){if(A===undefined){A=0}return new B(A*F.x,A*F.y)};D.AddMM=function(A,F){return I.FromVV(D.AddVV(A.col1,F.col1),D.AddVV(A.col2,F.col2))};D.MulMM=function(A,F){return I.FromVV(D.MulMV(A,F.col1),D.MulMV(A,F.col2))};D.MulTMM=function(G,K){var F=new B(D.Dot(G.col1,K.col1),D.Dot(G.col2,K.col1)),A=new B(D.Dot(G.col1,K.col2),D.Dot(G.col2,K.col2));return I.FromVV(F,A)};D.Abs=function(A){if(A===undefined){A=0}return A>0?A:-A};D.AbsV=function(A){return new B(D.Abs(A.x),D.Abs(A.y))};D.AbsM=function(A){return I.FromVV(D.AbsV(A.col1),D.AbsV(A.col2))};D.Min=function(A,F){if(A===undefined){A=0}if(F===undefined){F=0}return A<F?A:F};D.MinV=function(A,F){return new B(D.Min(A.x,F.x),D.Min(A.y,F.y))};D.Max=function(A,F){if(A===undefined){A=0}if(F===undefined){F=0}return A>F?A:F};D.MaxV=function(A,F){return new B(D.Max(A.x,F.x),D.Max(A.y,F.y))};D.Clamp=function(F,G,A){if(F===undefined){F=0}if(G===undefined){G=0}if(A===undefined){A=0}return F<G?G:F>A?A:F};D.ClampV=function(F,G,A){return D.MaxV(G,D.MinV(F,A))};D.Swap=function(F,G){var A=F[0];F[0]=G[0];G[0]=A};D.Random=function(){return Math.random()*2-1};D.RandomRange=function(F,G){if(F===undefined){F=0}if(G===undefined){G=0}var A=Math.random();return A=(G-F)*A+F};D.NextPowerOfTwo=function(A){if(A===undefined){A=0}A|=A>>1&2147483647;A|=A>>2&1073741823;A|=A>>4&268435455;A|=A>>8&16777215;A|=A>>16&65535;return A+1};D.IsPowerOfTwo=function(A){if(A===undefined){A=0}return A>0&&(A&A-1)==0};Box2D.postDefs.push(function(){Box2D.Common.Math.b2Math.b2Vec2_zero=new B(0,0);Box2D.Common.Math.b2Math.b2Mat22_identity=I.FromVV(new B(1,0),new B(0,1));Box2D.Common.Math.b2Math.b2Transform_identity=new C(D.b2Vec2_zero,D.b2Mat22_identity)});J.b2Sweep=function(){this.localCenter=new B;this.c0=new B;this.c=new B};J.prototype.Set=function(A){this.localCenter.SetV(A.localCenter);this.c0.SetV(A.c0);this.c.SetV(A.c);this.a0=A.a0;this.a=A.a;this.t0=A.t0};J.prototype.Copy=function(){var A=new J;A.localCenter.SetV(this.localCenter);A.c0.SetV(this.c0);A.c.SetV(this.c);A.a0=this.a0;A.a=this.a;A.t0=this.t0;return A};J.prototype.GetTransform=function(F,G){if(G===undefined){G=0}F.position.x=(1-G)*this.c0.x+G*this.c.x;F.position.y=(1-G)*this.c0.y+G*this.c.y;F.R.Set((1-G)*this.a0+G*this.a);var A=F.R;F.position.x-=A.col1.x*this.localCenter.x+A.col2.x*this.localCenter.y;F.position.y-=A.col1.y*this.localCenter.x+A.col2.y*this.localCenter.y};J.prototype.Advance=function(A){if(A===undefined){A=0}if(this.t0<A&&1-this.t0>Number.MIN_VALUE){var F=(A-this.t0)/(1-this.t0);this.c0.x=(1-F)*this.c0.x+F*this.c.x;this.c0.y=(1-F)*this.c0.y+F*this.c.y;this.a0=(1-F)*this.a0+F*this.a;this.t0=A}};C.b2Transform=function(){this.position=new B;this.R=new I};C.prototype.b2Transform=function(A,F){if(A===undefined){A=null}if(F===undefined){F=null}if(A){this.position.SetV(A);this.R.SetM(F)}};C.prototype.Initialize=function(A,F){this.position.SetV(A);this.R.SetM(F)};C.prototype.SetIdentity=function(){this.position.SetZero();this.R.SetIdentity()};C.prototype.Set=function(A){this.position.SetV(A.position);this.R.SetM(A.R)};C.prototype.GetAngle=function(){return Math.atan2(this.R.col1.y,this.R.col1.x)};B.b2Vec2=function(){};B.prototype.b2Vec2=function(A,F){if(A===undefined){A=0}if(F===undefined){F=0}this.x=A;this.y=F};B.prototype.SetZero=function(){this.y=this.x=0};B.prototype.Set=function(A,F){if(A===undefined){A=0}if(F===undefined){F=0}this.x=A;this.y=F};B.prototype.SetV=function(A){this.x=A.x;this.y=A.y};B.prototype.GetNegative=function(){return new B(-this.x,-this.y)};B.prototype.NegativeSelf=function(){this.x=-this.x;this.y=-this.y};B.Make=function(A,F){if(A===undefined){A=0}if(F===undefined){F=0}return new B(A,F)};B.prototype.Copy=function(){return new B(this.x,this.y)};B.prototype.Add=function(A){this.x+=A.x;this.y+=A.y};B.prototype.Subtract=function(A){this.x-=A.x;this.y-=A.y};B.prototype.Multiply=function(A){if(A===undefined){A=0}this.x*=A;this.y*=A};B.prototype.MulM=function(A){var F=this.x;this.x=A.col1.x*F+A.col2.x*this.y;this.y=A.col1.y*F+A.col2.y*this.y};B.prototype.MulTM=function(A){var F=D.Dot(this,A.col1);this.y=D.Dot(this,A.col2);this.x=F};B.prototype.CrossVF=function(A){if(A===undefined){A=0}var F=this.x;this.x=A*this.y;this.y=-A*F};B.prototype.CrossFV=function(A){if(A===undefined){A=0}var F=this.x;this.x=-A*this.y;this.y=A*F};B.prototype.MinV=function(A){this.x=this.x<A.x?this.x:A.x;this.y=this.y<A.y?this.y:A.y};B.prototype.MaxV=function(A){this.x=this.x>A.x?this.x:A.x;this.y=this.y>A.y?this.y:A.y};B.prototype.Abs=function(){if(this.x<0){this.x=-this.x}if(this.y<0){this.y=-this.y}};B.prototype.Length=function(){return Math.sqrt(this.x*this.x+this.y*this.y)};B.prototype.LengthSquared=function(){return this.x*this.x+this.y*this.y};B.prototype.Normalize=function(){var A=Math.sqrt(this.x*this.x+this.y*this.y);if(A<Number.MIN_VALUE){return 0}var F=1/A;this.x*=F;this.y*=F;return A};B.prototype.IsValid=function(){return D.IsValid(this.x)&&D.IsValid(this.y)};E.b2Vec3=function(){};E.prototype.b2Vec3=function(F,G,A){if(F===undefined){F=0}if(G===undefined){G=0}if(A===undefined){A=0}this.x=F;this.y=G;this.z=A};E.prototype.SetZero=function(){this.x=this.y=this.z=0};E.prototype.Set=function(F,G,A){if(F===undefined){F=0}if(G===undefined){G=0}if(A===undefined){A=0}this.x=F;this.y=G;this.z=A};E.prototype.SetV=function(A){this.x=A.x;this.y=A.y;this.z=A.z};E.prototype.GetNegative=function(){return new E(-this.x,-this.y,-this.z)};E.prototype.NegativeSelf=function(){this.x=-this.x;this.y=-this.y;this.z=-this.z};E.prototype.Copy=function(){return new E(this.x,this.y,this.z)};E.prototype.Add=function(A){this.x+=A.x;this.y+=A.y;this.z+=A.z};E.prototype.Subtract=function(A){this.x-=A.x;this.y-=A.y;this.z-=A.z};E.prototype.Multiply=function(A){if(A===undefined){A=0}this.x*=A;this.y*=A;this.z*=A}})();(function(){var AI=Box2D.Common.Math.b2Math,AG=Box2D.Common.Math.b2Sweep,AB=Box2D.Common.Math.b2Transform,AC=Box2D.Common.Math.b2Vec2,AF=Box2D.Common.b2Color,AN=Box2D.Common.b2Settings,X=Box2D.Collision.b2AABB,AO=Box2D.Collision.b2ContactPoint,AM=Box2D.Collision.b2DynamicTreeBroadPhase,f=Box2D.Collision.b2RayCastInput,T=Box2D.Collision.b2RayCastOutput,t=Box2D.Collision.Shapes.b2CircleShape,x=Box2D.Collision.Shapes.b2EdgeShape,AD=Box2D.Collision.Shapes.b2MassData,P=Box2D.Collision.Shapes.b2PolygonShape,J=Box2D.Collision.Shapes.b2Shape,AS=Box2D.Dynamics.b2Body,AA=Box2D.Dynamics.b2BodyDef,AH=Box2D.Dynamics.b2ContactFilter,AK=Box2D.Dynamics.b2ContactImpulse,AE=Box2D.Dynamics.b2ContactListener,g=Box2D.Dynamics.b2ContactManager,AJ=Box2D.Dynamics.b2DebugDraw,e=Box2D.Dynamics.b2DestructionListener,m=Box2D.Dynamics.b2FilterData,b=Box2D.Dynamics.b2Fixture,AW=Box2D.Dynamics.b2FixtureDef,C=Box2D.Dynamics.b2Island,AV=Box2D.Dynamics.b2TimeStep,AU=Box2D.Dynamics.b2World,AR=Box2D.Dynamics.Contacts.b2Contact,AT=Box2D.Dynamics.Contacts.b2ContactFactory,AP=Box2D.Dynamics.Contacts.b2ContactSolver,AL=Box2D.Dynamics.Joints.b2Joint,AQ=Box2D.Dynamics.Joints.b2PulleyJoint;AS.b2Body=function(){this.m_xf=new AB;this.m_sweep=new AG;this.m_linearVelocity=new AC;this.m_force=new AC};AS.prototype.connectEdges=function(B,G,D){if(D===undefined){D=0}var A=Math.atan2(G.GetDirectionVector().y,G.GetDirectionVector().x);D=AI.MulFV(Math.tan((A-D)*0.5),G.GetDirectionVector());D=AI.SubtractVV(D,G.GetNormalVector());D=AI.MulFV(AN.b2_toiSlop,D);D=AI.AddVV(D,G.GetVertex1());var F=AI.AddVV(B.GetDirectionVector(),G.GetDirectionVector());F.Normalize();var E=AI.Dot(B.GetDirectionVector(),G.GetNormalVector())>0;B.SetNextEdge(G,D,F,E);G.SetPrevEdge(B,D,F,E);return A};AS.prototype.CreateFixture=function(A){if(this.m_world.IsLocked()==true){return null}var B=new b;B.Create(this,this.m_xf,A);this.m_flags&AS.e_activeFlag&&B.CreateProxy(this.m_world.m_contactManager.m_broadPhase,this.m_xf);B.m_next=this.m_fixtureList;this.m_fixtureList=B;++this.m_fixtureCount;B.m_body=this;B.m_density>0&&this.ResetMassData();this.m_world.m_flags|=AU.e_newFixture;return B};AS.prototype.CreateFixture2=function(A,D){if(D===undefined){D=0}var B=new AW;B.shape=A;B.density=D;return this.CreateFixture(B)};AS.prototype.DestroyFixture=function(B){if(this.m_world.IsLocked()!=true){for(var F=this.m_fixtureList,D=null;F!=null;){if(F==B){if(D){D.m_next=B.m_next}else{this.m_fixtureList=B.m_next}break}D=F;F=F.m_next}for(F=this.m_contactList;F;){D=F.contact;F=F.next;var A=D.GetFixtureA(),E=D.GetFixtureB();if(B==A||B==E){this.m_world.m_contactManager.Destroy(D)}}this.m_flags&AS.e_activeFlag&&B.DestroyProxy(this.m_world.m_contactManager.m_broadPhase);B.Destroy();B.m_body=null;B.m_next=null;--this.m_fixtureCount;this.ResetMassData()}};AS.prototype.SetPositionAndAngle=function(B,E){if(E===undefined){E=0}var D;if(this.m_world.IsLocked()!=true){this.m_xf.R.Set(E);this.m_xf.position.SetV(B);D=this.m_xf.R;var A=this.m_sweep.localCenter;this.m_sweep.c.x=D.col1.x*A.x+D.col2.x*A.y;this.m_sweep.c.y=D.col1.y*A.x+D.col2.y*A.y;this.m_sweep.c.x+=this.m_xf.position.x;this.m_sweep.c.y+=this.m_xf.position.y;this.m_sweep.c0.SetV(this.m_sweep.c);this.m_sweep.a0=this.m_sweep.a=E;A=this.m_world.m_contactManager.m_broadPhase;for(D=this.m_fixtureList;D;D=D.m_next){D.Synchronize(A,this.m_xf,this.m_xf)}this.m_world.m_contactManager.FindNewContacts()}};AS.prototype.SetTransform=function(A){this.SetPositionAndAngle(A.position,A.GetAngle())};AS.prototype.GetTransform=function(){return this.m_xf};AS.prototype.GetPosition=function(){return this.m_xf.position};AS.prototype.SetPosition=function(A){this.SetPositionAndAngle(A,this.GetAngle())};AS.prototype.GetAngle=function(){return this.m_sweep.a};AS.prototype.SetAngle=function(A){if(A===undefined){A=0}this.SetPositionAndAngle(this.GetPosition(),A)};AS.prototype.GetWorldCenter=function(){return this.m_sweep.c};AS.prototype.GetLocalCenter=function(){return this.m_sweep.localCenter};AS.prototype.SetLinearVelocity=function(A){this.m_type!=AS.b2_staticBody&&this.m_linearVelocity.SetV(A)};AS.prototype.GetLinearVelocity=function(){return this.m_linearVelocity};AS.prototype.SetAngularVelocity=function(A){if(A===undefined){A=0}if(this.m_type!=AS.b2_staticBody){this.m_angularVelocity=A}};AS.prototype.GetAngularVelocity=function(){return this.m_angularVelocity};AS.prototype.GetDefinition=function(){var A=new AA;A.type=this.GetType();A.allowSleep=(this.m_flags&AS.e_allowSleepFlag)==AS.e_allowSleepFlag;A.angle=this.GetAngle();A.angularDamping=this.m_angularDamping;A.angularVelocity=this.m_angularVelocity;A.fixedRotation=(this.m_flags&AS.e_fixedRotationFlag)==AS.e_fixedRotationFlag;A.bullet=(this.m_flags&AS.e_bulletFlag)==AS.e_bulletFlag;A.awake=(this.m_flags&AS.e_awakeFlag)==AS.e_awakeFlag;A.linearDamping=this.m_linearDamping;A.linearVelocity.SetV(this.GetLinearVelocity());A.position=this.GetPosition();A.userData=this.GetUserData();return A};AS.prototype.ApplyForce=function(A,B){if(this.m_type==AS.b2_dynamicBody){this.IsAwake()==false&&this.SetAwake(true);this.m_force.x+=A.x;this.m_force.y+=A.y;this.m_torque+=(B.x-this.m_sweep.c.x)*A.y-(B.y-this.m_sweep.c.y)*A.x}};AS.prototype.ApplyTorque=function(A){if(A===undefined){A=0}if(this.m_type==AS.b2_dynamicBody){this.IsAwake()==false&&this.SetAwake(true);this.m_torque+=A}};AS.prototype.ApplyImpulse=function(A,B){if(this.m_type==AS.b2_dynamicBody){this.IsAwake()==false&&this.SetAwake(true);this.m_linearVelocity.x+=this.m_invMass*A.x;this.m_linearVelocity.y+=this.m_invMass*A.y;this.m_angularVelocity+=this.m_invI*((B.x-this.m_sweep.c.x)*A.y-(B.y-this.m_sweep.c.y)*A.x)}};AS.prototype.Split=function(D){for(var I=this.GetLinearVelocity().Copy(),F=this.GetAngularVelocity(),B=this.GetWorldCenter(),H=this.m_world.CreateBody(this.GetDefinition()),G,A=this.m_fixtureList;A;){if(D(A)){var E=A.m_next;if(G){G.m_next=E}else{this.m_fixtureList=E}this.m_fixtureCount--;A.m_next=H.m_fixtureList;H.m_fixtureList=A;H.m_fixtureCount++;A.m_body=H;A=E}else{G=A;A=A.m_next}}this.ResetMassData();H.ResetMassData();G=this.GetWorldCenter();D=H.GetWorldCenter();G=AI.AddVV(I,AI.CrossFV(F,AI.SubtractVV(G,B)));I=AI.AddVV(I,AI.CrossFV(F,AI.SubtractVV(D,B)));this.SetLinearVelocity(G);H.SetLinearVelocity(I);this.SetAngularVelocity(F);H.SetAngularVelocity(F);this.SynchronizeFixtures();H.SynchronizeFixtures();return H};AS.prototype.Merge=function(B){var F;for(F=B.m_fixtureList;F;){var D=F.m_next;B.m_fixtureCount--;F.m_next=this.m_fixtureList;this.m_fixtureList=F;this.m_fixtureCount++;F.m_body=E;F=D}A.m_fixtureCount=0;var A=this,E=B;A.GetWorldCenter();E.GetWorldCenter();A.GetLinearVelocity().Copy();E.GetLinearVelocity().Copy();A.GetAngularVelocity();E.GetAngularVelocity();A.ResetMassData();this.SynchronizeFixtures()};AS.prototype.GetMass=function(){return this.m_mass};AS.prototype.GetInertia=function(){return this.m_I};AS.prototype.GetMassData=function(A){A.mass=this.m_mass;A.I=this.m_I;A.center.SetV(this.m_sweep.localCenter)};AS.prototype.SetMassData=function(A){AN.b2Assert(this.m_world.IsLocked()==false);if(this.m_world.IsLocked()!=true){if(this.m_type==AS.b2_dynamicBody){this.m_invI=this.m_I=this.m_invMass=0;this.m_mass=A.mass;if(this.m_mass<=0){this.m_mass=1}this.m_invMass=1/this.m_mass;if(A.I>0&&(this.m_flags&AS.e_fixedRotationFlag)==0){this.m_I=A.I-this.m_mass*(A.center.x*A.center.x+A.center.y*A.center.y);this.m_invI=1/this.m_I}var B=this.m_sweep.c.Copy();this.m_sweep.localCenter.SetV(A.center);this.m_sweep.c0.SetV(AI.MulX(this.m_xf,this.m_sweep.localCenter));this.m_sweep.c.SetV(this.m_sweep.c0);this.m_linearVelocity.x+=this.m_angularVelocity*-(this.m_sweep.c.y-B.y);this.m_linearVelocity.y+=this.m_angularVelocity*+(this.m_sweep.c.x-B.x)}}};AS.prototype.ResetMassData=function(){this.m_invI=this.m_I=this.m_invMass=this.m_mass=0;this.m_sweep.localCenter.SetZero();if(!(this.m_type==AS.b2_staticBody||this.m_type==AS.b2_kinematicBody)){for(var A=AC.Make(0,0),D=this.m_fixtureList;D;D=D.m_next){if(D.m_density!=0){var B=D.GetMassData();this.m_mass+=B.mass;A.x+=B.center.x*B.mass;A.y+=B.center.y*B.mass;this.m_I+=B.I}}if(this.m_mass>0){this.m_invMass=1/this.m_mass;A.x*=this.m_invMass;A.y*=this.m_invMass}else{this.m_invMass=this.m_mass=1}if(this.m_I>0&&(this.m_flags&AS.e_fixedRotationFlag)==0){this.m_I-=this.m_mass*(A.x*A.x+A.y*A.y);this.m_I*=this.m_inertiaScale;AN.b2Assert(this.m_I>0);this.m_invI=1/this.m_I}else{this.m_invI=this.m_I=0}D=this.m_sweep.c.Copy();this.m_sweep.localCenter.SetV(A);this.m_sweep.c0.SetV(AI.MulX(this.m_xf,this.m_sweep.localCenter));this.m_sweep.c.SetV(this.m_sweep.c0);this.m_linearVelocity.x+=this.m_angularVelocity*-(this.m_sweep.c.y-D.y);this.m_linearVelocity.y+=this.m_angularVelocity*+(this.m_sweep.c.x-D.x)}};AS.prototype.GetWorldPoint=function(A){var B=this.m_xf.R;A=new AC(B.col1.x*A.x+B.col2.x*A.y,B.col1.y*A.x+B.col2.y*A.y);A.x+=this.m_xf.position.x;A.y+=this.m_xf.position.y;return A};AS.prototype.GetWorldVector=function(A){return AI.MulMV(this.m_xf.R,A)};AS.prototype.GetLocalPoint=function(A){return AI.MulXT(this.m_xf,A)};AS.prototype.GetLocalVector=function(A){return AI.MulTMV(this.m_xf.R,A)};AS.prototype.GetLinearVelocityFromWorldPoint=function(A){return new AC(this.m_linearVelocity.x-this.m_angularVelocity*(A.y-this.m_sweep.c.y),this.m_linearVelocity.y+this.m_angularVelocity*(A.x-this.m_sweep.c.x))};AS.prototype.GetLinearVelocityFromLocalPoint=function(A){var B=this.m_xf.R;A=new AC(B.col1.x*A.x+B.col2.x*A.y,B.col1.y*A.x+B.col2.y*A.y);A.x+=this.m_xf.position.x;A.y+=this.m_xf.position.y;return new AC(this.m_linearVelocity.x-this.m_angularVelocity*(A.y-this.m_sweep.c.y),this.m_linearVelocity.y+this.m_angularVelocity*(A.x-this.m_sweep.c.x))};AS.prototype.GetLinearDamping=function(){return this.m_linearDamping};AS.prototype.SetLinearDamping=function(A){if(A===undefined){A=0}this.m_linearDamping=A};AS.prototype.GetAngularDamping=function(){return this.m_angularDamping};AS.prototype.SetAngularDamping=function(A){if(A===undefined){A=0}this.m_angularDamping=A};AS.prototype.SetType=function(A){if(A===undefined){A=0}if(this.m_type!=A){this.m_type=A;this.ResetMassData();if(this.m_type==AS.b2_staticBody){this.m_linearVelocity.SetZero();this.m_angularVelocity=0}this.SetAwake(true);this.m_force.SetZero();this.m_torque=0;for(A=this.m_contactList;A;A=A.next){A.contact.FlagForFiltering()}}};AS.prototype.GetType=function(){return this.m_type};AS.prototype.SetBullet=function(A){if(A){this.m_flags|=AS.e_bulletFlag}else{this.m_flags&=~AS.e_bulletFlag}};AS.prototype.IsBullet=function(){return(this.m_flags&AS.e_bulletFlag)==AS.e_bulletFlag};AS.prototype.SetSleepingAllowed=function(A){if(A){this.m_flags|=AS.e_allowSleepFlag}else{this.m_flags&=~AS.e_allowSleepFlag;this.SetAwake(true)}};AS.prototype.SetAwake=function(A){if(A){this.m_flags|=AS.e_awakeFlag;this.m_sleepTime=0}else{this.m_flags&=~AS.e_awakeFlag;this.m_sleepTime=0;this.m_linearVelocity.SetZero();this.m_angularVelocity=0;this.m_force.SetZero();this.m_torque=0}};AS.prototype.IsAwake=function(){return(this.m_flags&AS.e_awakeFlag)==AS.e_awakeFlag};AS.prototype.SetFixedRotation=function(A){if(A){this.m_flags|=AS.e_fixedRotationFlag}else{this.m_flags&=~AS.e_fixedRotationFlag}this.ResetMassData()};AS.prototype.IsFixedRotation=function(){return(this.m_flags&AS.e_fixedRotationFlag)==AS.e_fixedRotationFlag};AS.prototype.SetActive=function(A){if(A!=this.IsActive()){var B;if(A){this.m_flags|=AS.e_activeFlag;A=this.m_world.m_contactManager.m_broadPhase;for(B=this.m_fixtureList;B;B=B.m_next){B.CreateProxy(A,this.m_xf)}}else{this.m_flags&=~AS.e_activeFlag;A=this.m_world.m_contactManager.m_broadPhase;for(B=this.m_fixtureList;B;B=B.m_next){B.DestroyProxy(A)}for(A=this.m_contactList;A;){B=A;A=A.next;this.m_world.m_contactManager.Destroy(B.contact)}this.m_contactList=null}}};AS.prototype.IsActive=function(){return(this.m_flags&AS.e_activeFlag)==AS.e_activeFlag};AS.prototype.IsSleepingAllowed=function(){return(this.m_flags&AS.e_allowSleepFlag)==AS.e_allowSleepFlag};AS.prototype.GetFixtureList=function(){return this.m_fixtureList};AS.prototype.GetJointList=function(){return this.m_jointList};AS.prototype.GetControllerList=function(){return this.m_controllerList};AS.prototype.GetContactList=function(){return this.m_contactList};AS.prototype.GetNext=function(){return this.m_next};AS.prototype.GetUserData=function(){return this.m_userData};AS.prototype.SetUserData=function(A){this.m_userData=A};AS.prototype.GetWorld=function(){return this.m_world};AS.prototype.b2Body=function(B,E){this.m_flags=0;if(B.bullet){this.m_flags|=AS.e_bulletFlag}if(B.fixedRotation){this.m_flags|=AS.e_fixedRotationFlag}if(B.allowSleep){this.m_flags|=AS.e_allowSleepFlag}if(B.awake){this.m_flags|=AS.e_awakeFlag}if(B.active){this.m_flags|=AS.e_activeFlag}this.m_world=E;this.m_xf.position.SetV(B.position);this.m_xf.R.Set(B.angle);this.m_sweep.localCenter.SetZero();this.m_sweep.t0=1;this.m_sweep.a0=this.m_sweep.a=B.angle;var D=this.m_xf.R,A=this.m_sweep.localCenter;this.m_sweep.c.x=D.col1.x*A.x+D.col2.x*A.y;this.m_sweep.c.y=D.col1.y*A.x+D.col2.y*A.y;this.m_sweep.c.x+=this.m_xf.position.x;this.m_sweep.c.y+=this.m_xf.position.y;this.m_sweep.c0.SetV(this.m_sweep.c);this.m_contactList=this.m_controllerList=this.m_jointList=null;this.m_controllerCount=0;this.m_next=this.m_prev=null;this.m_linearVelocity.SetV(B.linearVelocity);this.m_angularVelocity=B.angularVelocity;this.m_linearDamping=B.linearDamping;this.m_angularDamping=B.angularDamping;this.m_force.Set(0,0);this.m_sleepTime=this.m_torque=0;this.m_type=B.type;if(this.m_type==AS.b2_dynamicBody){this.m_invMass=this.m_mass=1}else{this.m_invMass=this.m_mass=0}this.m_invI=this.m_I=0;this.m_inertiaScale=B.inertiaScale;this.m_userData=B.userData;this.m_fixtureList=null;this.m_fixtureCount=0};AS.prototype.SynchronizeFixtures=function(){var A=AS.s_xf1;A.R.Set(this.m_sweep.a0);var D=A.R,B=this.m_sweep.localCenter;A.position.x=this.m_sweep.c0.x-(D.col1.x*B.x+D.col2.x*B.y);A.position.y=this.m_sweep.c0.y-(D.col1.y*B.x+D.col2.y*B.y);B=this.m_world.m_contactManager.m_broadPhase;for(D=this.m_fixtureList;D;D=D.m_next){D.Synchronize(B,A,this.m_xf)}};AS.prototype.SynchronizeTransform=function(){this.m_xf.R.Set(this.m_sweep.a);var A=this.m_xf.R,B=this.m_sweep.localCenter;this.m_xf.position.x=this.m_sweep.c.x-(A.col1.x*B.x+A.col2.x*B.y);this.m_xf.position.y=this.m_sweep.c.y-(A.col1.y*B.x+A.col2.y*B.y)};AS.prototype.ShouldCollide=function(A){if(this.m_type!=AS.b2_dynamicBody&&A.m_type!=AS.b2_dynamicBody){return false}for(var B=this.m_jointList;B;B=B.next){if(B.other==A){if(B.joint.m_collideConnected==false){return false}}}return true};AS.prototype.Advance=function(A){if(A===undefined){A=0}this.m_sweep.Advance(A);this.m_sweep.c.SetV(this.m_sweep.c0);this.m_sweep.a=this.m_sweep.a0;this.SynchronizeTransform()};Box2D.postDefs.push(function(){Box2D.Dynamics.b2Body.s_xf1=new AB;Box2D.Dynamics.b2Body.e_islandFlag=1;Box2D.Dynamics.b2Body.e_awakeFlag=2;Box2D.Dynamics.b2Body.e_allowSleepFlag=4;Box2D.Dynamics.b2Body.e_bulletFlag=8;Box2D.Dynamics.b2Body.e_fixedRotationFlag=16;Box2D.Dynamics.b2Body.e_activeFlag=32;Box2D.Dynamics.b2Body.b2_staticBody=0;Box2D.Dynamics.b2Body.b2_kinematicBody=1;Box2D.Dynamics.b2Body.b2_dynamicBody=2});AA.b2BodyDef=function(){this.position=new AC;this.linearVelocity=new AC};AA.prototype.b2BodyDef=function(){this.userData=null;this.position.Set(0,0);this.angle=0;this.linearVelocity.Set(0,0);this.angularDamping=this.linearDamping=this.angularVelocity=0;this.awake=this.allowSleep=true;this.bullet=this.fixedRotation=false;this.type=AS.b2_staticBody;this.active=true;this.inertiaScale=1};AH.b2ContactFilter=function(){};AH.prototype.ShouldCollide=function(B,E){var D=B.GetFilterData(),A=E.GetFilterData();if(D.groupIndex==A.groupIndex&&D.groupIndex!=0){return D.groupIndex>0}return(D.maskBits&A.categoryBits)!=0&&(D.categoryBits&A.maskBits)!=0};AH.prototype.RayCollide=function(A,B){if(!A){return true}return this.ShouldCollide(A instanceof b?A:null,B)};Box2D.postDefs.push(function(){Box2D.Dynamics.b2ContactFilter.b2_defaultFilter=new AH});AK.b2ContactImpulse=function(){this.normalImpulses=new Vector_a2j_Number(AN.b2_maxManifoldPoints);this.tangentImpulses=new Vector_a2j_Number(AN.b2_maxManifoldPoints)};AE.b2ContactListener=function(){};AE.prototype.BeginContact=function(){};AE.prototype.EndContact=function(){};AE.prototype.PreSolve=function(){};AE.prototype.PostSolve=function(){};Box2D.postDefs.push(function(){Box2D.Dynamics.b2ContactListener.b2_defaultListener=new AE});g.b2ContactManager=function(){};g.prototype.b2ContactManager=function(){this.m_world=null;this.m_contactCount=0;this.m_contactFilter=AH.b2_defaultFilter;this.m_contactListener=AE.b2_defaultListener;this.m_contactFactory=new AT(this.m_allocator);this.m_broadPhase=new AM};g.prototype.AddPair=function(I,G){var D=I instanceof b?I:null,H=G instanceof b?G:null,F=D.GetBody(),E=H.GetBody();if(F!=E){for(var B=E.GetContactList();B;){if(B.other==F){var A=B.contact.GetFixtureA(),K=B.contact.GetFixtureB();if(A==D&&K==H){return}if(A==H&&K==D){return}}B=B.next}if(E.ShouldCollide(F)!=false){if(this.m_contactFilter.ShouldCollide(D,H)!=false){B=this.m_contactFactory.Create(D,H);D=B.GetFixtureA();H=B.GetFixtureB();F=D.m_body;E=H.m_body;B.m_prev=null;B.m_next=this.m_world.m_contactList;if(this.m_world.m_contactList!=null){this.m_world.m_contactList.m_prev=B}this.m_world.m_contactList=B;B.m_nodeA.contact=B;B.m_nodeA.other=E;B.m_nodeA.prev=null;B.m_nodeA.next=F.m_contactList;if(F.m_contactList!=null){F.m_contactList.prev=B.m_nodeA}F.m_contactList=B.m_nodeA;B.m_nodeB.contact=B;B.m_nodeB.other=F;B.m_nodeB.prev=null;B.m_nodeB.next=E.m_contactList;if(E.m_contactList!=null){E.m_contactList.prev=B.m_nodeB}E.m_contactList=B.m_nodeB;++this.m_world.m_contactCount}}}};g.prototype.FindNewContacts=function(){this.m_broadPhase.UpdatePairs(Box2D.generateCallback(this,this.AddPair))};g.prototype.Destroy=function(A){var D=A.GetFixtureA(),B=A.GetFixtureB();D=D.GetBody();B=B.GetBody();A.IsTouching()&&this.m_contactListener.EndContact(A);if(A.m_prev){A.m_prev.m_next=A.m_next}if(A.m_next){A.m_next.m_prev=A.m_prev}if(A==this.m_world.m_contactList){this.m_world.m_contactList=A.m_next}if(A.m_nodeA.prev){A.m_nodeA.prev.next=A.m_nodeA.next}if(A.m_nodeA.next){A.m_nodeA.next.prev=A.m_nodeA.prev}if(A.m_nodeA==D.m_contactList){D.m_contactList=A.m_nodeA.next}if(A.m_nodeB.prev){A.m_nodeB.prev.next=A.m_nodeB.next}if(A.m_nodeB.next){A.m_nodeB.next.prev=A.m_nodeB.prev}if(A.m_nodeB==B.m_contactList){B.m_contactList=A.m_nodeB.next}this.m_contactFactory.Destroy(A);--this.m_contactCount};g.prototype.Collide=function(){for(var B=this.m_world.m_contactList;B;){var F=B.GetFixtureA(),D=B.GetFixtureB(),A=F.GetBody(),E=D.GetBody();if(A.IsAwake()==false&&E.IsAwake()==false){B=B.GetNext()}else{if(B.m_flags&AR.e_filterFlag){if(E.ShouldCollide(A)==false){F=B;B=F.GetNext();this.Destroy(F);continue}if(this.m_contactFilter.ShouldCollide(F,D)==false){F=B;B=F.GetNext();this.Destroy(F);continue}B.m_flags&=~AR.e_filterFlag}if(this.m_broadPhase.TestOverlap(F.m_proxy,D.m_proxy)==false){F=B;B=F.GetNext();this.Destroy(F)}else{B.Update(this.m_contactListener);B=B.GetNext()}}}};Box2D.postDefs.push(function(){Box2D.Dynamics.b2ContactManager.s_evalCP=new AO});AJ.b2DebugDraw=function(){};AJ.prototype.b2DebugDraw=function(){};AJ.prototype.SetFlags=function(){};AJ.prototype.GetFlags=function(){};AJ.prototype.AppendFlags=function(){};AJ.prototype.ClearFlags=function(){};AJ.prototype.SetSprite=function(){};AJ.prototype.GetSprite=function(){};AJ.prototype.SetDrawScale=function(){};AJ.prototype.GetDrawScale=function(){};AJ.prototype.SetLineThickness=function(){};AJ.prototype.GetLineThickness=function(){};AJ.prototype.SetAlpha=function(){};AJ.prototype.GetAlpha=function(){};AJ.prototype.SetFillAlpha=function(){};AJ.prototype.GetFillAlpha=function(){};AJ.prototype.SetXFormScale=function(){};AJ.prototype.GetXFormScale=function(){};AJ.prototype.DrawPolygon=function(){};AJ.prototype.DrawSolidPolygon=function(){};AJ.prototype.DrawCircle=function(){};AJ.prototype.DrawSolidCircle=function(){};AJ.prototype.DrawSegment=function(){};AJ.prototype.DrawTransform=function(){};Box2D.postDefs.push(function(){Box2D.Dynamics.b2DebugDraw.e_shapeBit=1;Box2D.Dynamics.b2DebugDraw.e_jointBit=2;Box2D.Dynamics.b2DebugDraw.e_aabbBit=4;Box2D.Dynamics.b2DebugDraw.e_pairBit=8;Box2D.Dynamics.b2DebugDraw.e_centerOfMassBit=16;Box2D.Dynamics.b2DebugDraw.e_controllerBit=32});e.b2DestructionListener=function(){};e.prototype.SayGoodbyeJoint=function(){};e.prototype.SayGoodbyeFixture=function(){};m.b2FilterData=function(){this.categoryBits=1;this.maskBits=65535;this.groupIndex=0};m.prototype.Copy=function(){var A=new m;A.categoryBits=this.categoryBits;A.maskBits=this.maskBits;A.groupIndex=this.groupIndex;return A};b.b2Fixture=function(){this.m_filter=new m};b.prototype.GetType=function(){return this.m_shape.GetType()};b.prototype.GetShape=function(){return this.m_shape};b.prototype.SetSensor=function(B){if(this.m_isSensor!=B){this.m_isSensor=B;if(this.m_body!=null){for(B=this.m_body.GetContactList();B;){var E=B.contact,D=E.GetFixtureA(),A=E.GetFixtureB();if(D==this||A==this){E.SetSensor(D.IsSensor()||A.IsSensor())}B=B.next}}}};b.prototype.IsSensor=function(){return this.m_isSensor};b.prototype.SetFilterData=function(B){this.m_filter=B.Copy();if(!this.m_body){for(B=this.m_body.GetContactList();B;){var E=B.contact,D=E.GetFixtureA(),A=E.GetFixtureB();if(D==this||A==this){E.FlagForFiltering()}B=B.next}}};b.prototype.GetFilterData=function(){return this.m_filter.Copy()};b.prototype.GetBody=function(){return this.m_body};b.prototype.GetNext=function(){return this.m_next};b.prototype.GetUserData=function(){return this.m_userData};b.prototype.SetUserData=function(A){this.m_userData=A};b.prototype.TestPoint=function(A){return this.m_shape.TestPoint(this.m_body.GetTransform(),A)};b.prototype.RayCast=function(A,B){return this.m_shape.RayCast(A,B,this.m_body.GetTransform())};b.prototype.GetMassData=function(A){if(A===undefined){A=null}if(A==null){A=new AD}this.m_shape.ComputeMass(A,this.m_density);return A};b.prototype.SetDensity=function(A){if(A===undefined){A=0}this.m_density=A};b.prototype.GetDensity=function(){return this.m_density};b.prototype.GetFriction=function(){return this.m_friction};b.prototype.SetFriction=function(A){if(A===undefined){A=0}this.m_friction=A};b.prototype.GetRestitution=function(){return this.m_restitution};b.prototype.SetRestitution=function(A){if(A===undefined){A=0}this.m_restitution=A};b.prototype.GetAABB=function(){return this.m_aabb};b.prototype.b2Fixture=function(){this.m_aabb=new X;this.m_shape=this.m_next=this.m_body=this.m_userData=null;this.m_restitution=this.m_friction=this.m_density=0};b.prototype.Create=function(A,D,B){this.m_userData=B.userData;this.m_friction=B.friction;this.m_restitution=B.restitution;this.m_body=A;this.m_next=null;this.m_filter=B.filter.Copy();this.m_isSensor=B.isSensor;this.m_shape=B.shape.Copy();this.m_density=B.density};b.prototype.Destroy=function(){this.m_shape=null};b.prototype.CreateProxy=function(A,B){this.m_shape.ComputeAABB(this.m_aabb,B);this.m_proxy=A.CreateProxy(this.m_aabb,this)};b.prototype.DestroyProxy=function(A){if(this.m_proxy!=null){A.DestroyProxy(this.m_proxy);this.m_proxy=null}};b.prototype.Synchronize=function(B,F,D){if(this.m_proxy){var A=new X,E=new X;this.m_shape.ComputeAABB(A,F);this.m_shape.ComputeAABB(E,D);this.m_aabb.Combine(A,E);F=AI.SubtractVV(D.position,F.position);B.MoveProxy(this.m_proxy,this.m_aabb,F)}};AW.b2FixtureDef=function(){this.filter=new m};AW.prototype.b2FixtureDef=function(){this.userData=this.shape=null;this.friction=0.2;this.density=this.restitution=0;this.filter.categoryBits=1;this.filter.maskBits=65535;this.filter.groupIndex=0;this.isSensor=false};C.b2Island=function(){};C.prototype.b2Island=function(){this.m_bodies=new Vector;this.m_contacts=new Vector;this.m_joints=new Vector};C.prototype.Initialize=function(D,H,E,B,G,F){if(D===undefined){D=0}if(H===undefined){H=0}if(E===undefined){E=0}var A=0;this.m_bodyCapacity=D;this.m_contactCapacity=H;this.m_jointCapacity=E;this.m_jointCount=this.m_contactCount=this.m_bodyCount=0;this.m_allocator=B;this.m_listener=G;this.m_contactSolver=F;for(A=this.m_bodies.length;A<D;A++){this.m_bodies[A]=null}for(A=this.m_contacts.length;A<H;A++){this.m_contacts[A]=null}for(A=this.m_joints.length;A<E;A++){this.m_joints[A]=null}};C.prototype.Clear=function(){this.m_jointCount=this.m_contactCount=this.m_bodyCount=0};C.prototype.Solve=function(D,I,F){var B=0,H=0,G;for(B=0;B<this.m_bodyCount;++B){H=this.m_bodies[B];if(H.GetType()==AS.b2_dynamicBody){H.m_linearVelocity.x+=D.dt*(I.x+H.m_invMass*H.m_force.x);H.m_linearVelocity.y+=D.dt*(I.y+H.m_invMass*H.m_force.y);H.m_angularVelocity+=D.dt*H.m_invI*H.m_torque;H.m_linearVelocity.Multiply(AI.Clamp(1-D.dt*H.m_linearDamping,0,1));H.m_angularVelocity*=AI.Clamp(1-D.dt*H.m_angularDamping,0,1)}}this.m_contactSolver.Initialize(D,this.m_contacts,this.m_contactCount,this.m_allocator);I=this.m_contactSolver;I.InitVelocityConstraints(D);for(B=0;B<this.m_jointCount;++B){G=this.m_joints[B];G.InitVelocityConstraints(D)}for(B=0;B<D.velocityIterations;++B){for(H=0;H<this.m_jointCount;++H){G=this.m_joints[H];G.SolveVelocityConstraints(D)}I.SolveVelocityConstraints()}for(B=0;B<this.m_jointCount;++B){G=this.m_joints[B];G.FinalizeVelocityConstraints()}I.FinalizeVelocityConstraints();for(B=0;B<this.m_bodyCount;++B){H=this.m_bodies[B];if(H.GetType()!=AS.b2_staticBody){var A=D.dt*H.m_linearVelocity.x,E=D.dt*H.m_linearVelocity.y;if(A*A+E*E>AN.b2_maxTranslationSquared){H.m_linearVelocity.Normalize();H.m_linearVelocity.x*=AN.b2_maxTranslation*D.inv_dt;H.m_linearVelocity.y*=AN.b2_maxTranslation*D.inv_dt}A=D.dt*H.m_angularVelocity;if(A*A>AN.b2_maxRotationSquared){H.m_angularVelocity=H.m_angularVelocity<0?-AN.b2_maxRotation*D.inv_dt:AN.b2_maxRotation*D.inv_dt}H.m_sweep.c0.SetV(H.m_sweep.c);H.m_sweep.a0=H.m_sweep.a;H.m_sweep.c.x+=D.dt*H.m_linearVelocity.x;H.m_sweep.c.y+=D.dt*H.m_linearVelocity.y;H.m_sweep.a+=D.dt*H.m_angularVelocity;H.SynchronizeTransform()}}for(B=0;B<D.positionIterations;++B){A=I.SolvePositionConstraints(AN.b2_contactBaumgarte);E=true;for(H=0;H<this.m_jointCount;++H){G=this.m_joints[H];G=G.SolvePositionConstraints(AN.b2_contactBaumgarte);E=E&&G}if(A&&E){break}}this.Report(I.m_constraints);if(F){F=Number.MAX_VALUE;I=AN.b2_linearSleepTolerance*AN.b2_linearSleepTolerance;A=AN.b2_angularSleepTolerance*AN.b2_angularSleepTolerance;for(B=0;B<this.m_bodyCount;++B){H=this.m_bodies[B];if(H.GetType()!=AS.b2_staticBody){if((H.m_flags&AS.e_allowSleepFlag)==0){F=H.m_sleepTime=0}if((H.m_flags&AS.e_allowSleepFlag)==0||H.m_angularVelocity*H.m_angularVelocity>A||AI.Dot(H.m_linearVelocity,H.m_linearVelocity)>I){F=H.m_sleepTime=0}else{H.m_sleepTime+=D.dt;F=AI.Min(F,H.m_sleepTime)}}}if(F>=AN.b2_timeToSleep){for(B=0;B<this.m_bodyCount;++B){H=this.m_bodies[B];H.SetAwake(false)}}}};C.prototype.SolveTOI=function(D){var H=0,E=0;this.m_contactSolver.Initialize(D,this.m_contacts,this.m_contactCount,this.m_allocator);var B=this.m_contactSolver;for(H=0;H<this.m_jointCount;++H){this.m_joints[H].InitVelocityConstraints(D)}for(H=0;H<D.velocityIterations;++H){B.SolveVelocityConstraints();for(E=0;E<this.m_jointCount;++E){this.m_joints[E].SolveVelocityConstraints(D)}}for(H=0;H<this.m_bodyCount;++H){E=this.m_bodies[H];if(E.GetType()!=AS.b2_staticBody){var G=D.dt*E.m_linearVelocity.x,F=D.dt*E.m_linearVelocity.y;if(G*G+F*F>AN.b2_maxTranslationSquared){E.m_linearVelocity.Normalize();E.m_linearVelocity.x*=AN.b2_maxTranslation*D.inv_dt;E.m_linearVelocity.y*=AN.b2_maxTranslation*D.inv_dt}G=D.dt*E.m_angularVelocity;if(G*G>AN.b2_maxRotationSquared){E.m_angularVelocity=E.m_angularVelocity<0?-AN.b2_maxRotation*D.inv_dt:AN.b2_maxRotation*D.inv_dt}E.m_sweep.c0.SetV(E.m_sweep.c);E.m_sweep.a0=E.m_sweep.a;E.m_sweep.c.x+=D.dt*E.m_linearVelocity.x;E.m_sweep.c.y+=D.dt*E.m_linearVelocity.y;E.m_sweep.a+=D.dt*E.m_angularVelocity;E.SynchronizeTransform()}}for(H=0;H<D.positionIterations;++H){G=B.SolvePositionConstraints(0.75);F=true;for(E=0;E<this.m_jointCount;++E){var A=this.m_joints[E].SolvePositionConstraints(AN.b2_contactBaumgarte);F=F&&A}if(G&&F){break}}this.Report(B.m_constraints)};C.prototype.Report=function(B){if(this.m_listener!=null){for(var F=0;F<this.m_contactCount;++F){for(var D=this.m_contacts[F],A=B[F],E=0;E<A.pointCount;++E){C.s_impulse.normalImpulses[E]=A.points[E].normalImpulse;C.s_impulse.tangentImpulses[E]=A.points[E].tangentImpulse}this.m_listener.PostSolve(D,C.s_impulse)}}};C.prototype.AddBody=function(A){A.m_islandIndex=this.m_bodyCount;this.m_bodies[this.m_bodyCount++]=A};C.prototype.AddContact=function(A){this.m_contacts[this.m_contactCount++]=A};C.prototype.AddJoint=function(A){this.m_joints[this.m_jointCount++]=A};Box2D.postDefs.push(function(){Box2D.Dynamics.b2Island.s_impulse=new AK});AV.b2TimeStep=function(){};AV.prototype.Set=function(A){this.dt=A.dt;this.inv_dt=A.inv_dt;this.positionIterations=A.positionIterations;this.velocityIterations=A.velocityIterations;this.warmStarting=A.warmStarting};AU.b2World=function(){this.s_stack=new Vector;this.m_contactManager=new g;this.m_contactSolver=new AP;this.m_island=new C};AU.prototype.b2World=function(A,B){this.m_controllerList=this.m_jointList=this.m_contactList=this.m_bodyList=this.m_debugDraw=this.m_destructionListener=null;this.m_controllerCount=this.m_jointCount=this.m_contactCount=this.m_bodyCount=0;AU.m_warmStarting=true;AU.m_continuousPhysics=true;this.m_allowSleep=B;this.m_gravity=A;this.m_inv_dt0=0;this.m_contactManager.m_world=this;this.m_groundBody=this.CreateBody(new AA)};AU.prototype.SetDestructionListener=function(A){this.m_destructionListener=A};AU.prototype.SetContactFilter=function(A){this.m_contactManager.m_contactFilter=A};AU.prototype.SetContactListener=function(A){this.m_contactManager.m_contactListener=A};AU.prototype.SetDebugDraw=function(A){this.m_debugDraw=A};AU.prototype.SetBroadPhase=function(B){var E=this.m_contactManager.m_broadPhase;this.m_contactManager.m_broadPhase=B;for(var D=this.m_bodyList;D;D=D.m_next){for(var A=D.m_fixtureList;A;A=A.m_next){A.m_proxy=B.CreateProxy(E.GetFatAABB(A.m_proxy),A)}}};AU.prototype.Validate=function(){this.m_contactManager.m_broadPhase.Validate()};AU.prototype.GetProxyCount=function(){return this.m_contactManager.m_broadPhase.GetProxyCount()};AU.prototype.CreateBody=function(A){if(this.IsLocked()==true){return null}A=new AS(A,this);A.m_prev=null;if(A.m_next=this.m_bodyList){this.m_bodyList.m_prev=A}this.m_bodyList=A;++this.m_bodyCount;return A};AU.prototype.DestroyBody=function(A){if(this.IsLocked()!=true){for(var D=A.m_jointList;D;){var B=D;D=D.next;this.m_destructionListener&&this.m_destructionListener.SayGoodbyeJoint(B.joint);this.DestroyJoint(B.joint)}for(D=A.m_controllerList;D;){B=D;D=D.nextController;B.controller.RemoveBody(A)}for(D=A.m_contactList;D;){B=D;D=D.next;this.m_contactManager.Destroy(B.contact)}A.m_contactList=null;for(D=A.m_fixtureList;D;){B=D;D=D.m_next;this.m_destructionListener&&this.m_destructionListener.SayGoodbyeFixture(B);B.DestroyProxy(this.m_contactManager.m_broadPhase);B.Destroy()}A.m_fixtureList=null;A.m_fixtureCount=0;if(A.m_prev){A.m_prev.m_next=A.m_next}if(A.m_next){A.m_next.m_prev=A.m_prev}if(A==this.m_bodyList){this.m_bodyList=A.m_next}--this.m_bodyCount}};AU.prototype.CreateJoint=function(B){var E=AL.Create(B,null);E.m_prev=null;if(E.m_next=this.m_jointList){this.m_jointList.m_prev=E}this.m_jointList=E;++this.m_jointCount;E.m_edgeA.joint=E;E.m_edgeA.other=E.m_bodyB;E.m_edgeA.prev=null;if(E.m_edgeA.next=E.m_bodyA.m_jointList){E.m_bodyA.m_jointList.prev=E.m_edgeA}E.m_bodyA.m_jointList=E.m_edgeA;E.m_edgeB.joint=E;E.m_edgeB.other=E.m_bodyA;E.m_edgeB.prev=null;if(E.m_edgeB.next=E.m_bodyB.m_jointList){E.m_bodyB.m_jointList.prev=E.m_edgeB}E.m_bodyB.m_jointList=E.m_edgeB;var D=B.bodyA,A=B.bodyB;if(B.collideConnected==false){for(B=A.GetContactList();B;){B.other==D&&B.contact.FlagForFiltering();B=B.next}}return E};AU.prototype.DestroyJoint=function(B){var E=B.m_collideConnected;if(B.m_prev){B.m_prev.m_next=B.m_next}if(B.m_next){B.m_next.m_prev=B.m_prev}if(B==this.m_jointList){this.m_jointList=B.m_next}var D=B.m_bodyA,A=B.m_bodyB;D.SetAwake(true);A.SetAwake(true);if(B.m_edgeA.prev){B.m_edgeA.prev.next=B.m_edgeA.next}if(B.m_edgeA.next){B.m_edgeA.next.prev=B.m_edgeA.prev}if(B.m_edgeA==D.m_jointList){D.m_jointList=B.m_edgeA.next}B.m_edgeA.prev=null;B.m_edgeA.next=null;if(B.m_edgeB.prev){B.m_edgeB.prev.next=B.m_edgeB.next}if(B.m_edgeB.next){B.m_edgeB.next.prev=B.m_edgeB.prev}if(B.m_edgeB==A.m_jointList){A.m_jointList=B.m_edgeB.next}B.m_edgeB.prev=null;B.m_edgeB.next=null;AL.Destroy(B,null);--this.m_jointCount;if(E==false){for(B=A.GetContactList();B;){B.other==D&&B.contact.FlagForFiltering();B=B.next}}};AU.prototype.AddController=function(A){A.m_next=this.m_controllerList;A.m_prev=null;this.m_controllerList=A;A.m_world=this;this.m_controllerCount++;return A};AU.prototype.RemoveController=function(A){if(A.m_prev){A.m_prev.m_next=A.m_next}if(A.m_next){A.m_next.m_prev=A.m_prev}if(this.m_controllerList==A){this.m_controllerList=A.m_next}this.m_controllerCount--};AU.prototype.CreateController=function(A){if(A.m_world!=this){throw Error("Controller can only be a member of one world")}A.m_next=this.m_controllerList;A.m_prev=null;if(this.m_controllerList){this.m_controllerList.m_prev=A}this.m_controllerList=A;++this.m_controllerCount;A.m_world=this;return A};AU.prototype.DestroyController=function(A){A.Clear();if(A.m_next){A.m_next.m_prev=A.m_prev}if(A.m_prev){A.m_prev.m_next=A.m_next}if(A==this.m_controllerList){this.m_controllerList=A.m_next}--this.m_controllerCount};AU.prototype.SetWarmStarting=function(A){AU.m_warmStarting=A};AU.prototype.SetContinuousPhysics=function(A){AU.m_continuousPhysics=A};AU.prototype.GetBodyCount=function(){return this.m_bodyCount};AU.prototype.GetJointCount=function(){return this.m_jointCount};AU.prototype.GetContactCount=function(){return this.m_contactCount};AU.prototype.SetGravity=function(A){this.m_gravity=A};AU.prototype.GetGravity=function(){return this.m_gravity};AU.prototype.GetGroundBody=function(){return this.m_groundBody};AU.prototype.Step=function(B,E,D){if(B===undefined){B=0}if(E===undefined){E=0}if(D===undefined){D=0}if(this.m_flags&AU.e_newFixture){this.m_contactManager.FindNewContacts();this.m_flags&=~AU.e_newFixture}this.m_flags|=AU.e_locked;var A=AU.s_timestep2;A.dt=B;A.velocityIterations=E;A.positionIterations=D;A.inv_dt=B>0?1/B:0;A.dtRatio=this.m_inv_dt0*B;A.warmStarting=AU.m_warmStarting;this.m_contactManager.Collide();A.dt>0&&this.Solve(A);AU.m_continuousPhysics&&A.dt>0&&this.SolveTOI(A);if(A.dt>0){this.m_inv_dt0=A.inv_dt}this.m_flags&=~AU.e_locked};AU.prototype.ClearForces=function(){for(var A=this.m_bodyList;A;A=A.m_next){A.m_force.SetZero();A.m_torque=0}};AU.prototype.DrawDebugData=function(){if(this.m_debugDraw!=null){this.m_debugDraw.m_sprite.graphics.clear();var D=this.m_debugDraw.GetFlags(),H,E,B;new AC;new AC;new AC;var G;new X;new X;G=[new AC,new AC,new AC,new AC];var F=new AF(0,0,0);if(D&AJ.e_shapeBit){for(H=this.m_bodyList;H;H=H.m_next){G=H.m_xf;for(E=H.GetFixtureList();E;E=E.m_next){B=E.GetShape();if(H.IsActive()==false){F.Set(0.5,0.5,0.3)}else{if(H.GetType()==AS.b2_staticBody){F.Set(0.5,0.9,0.5)}else{if(H.GetType()==AS.b2_kinematicBody){F.Set(0.5,0.5,0.9)}else{H.IsAwake()==false?F.Set(0.6,0.6,0.6):F.Set(0.9,0.7,0.7)}}}this.DrawShape(B,G,F)}}}if(D&AJ.e_jointBit){for(H=this.m_jointList;H;H=H.m_next){this.DrawJoint(H)}}if(D&AJ.e_controllerBit){for(H=this.m_controllerList;H;H=H.m_next){H.Draw(this.m_debugDraw)}}if(D&AJ.e_pairBit){F.Set(0.3,0.9,0.9);for(H=this.m_contactManager.m_contactList;H;H=H.GetNext()){B=H.GetFixtureA();E=H.GetFixtureB();B=B.GetAABB().GetCenter();E=E.GetAABB().GetCenter();this.m_debugDraw.DrawSegment(B,E,F)}}if(D&AJ.e_aabbBit){B=this.m_contactManager.m_broadPhase;G=[new AC,new AC,new AC,new AC];for(H=this.m_bodyList;H;H=H.GetNext()){if(H.IsActive()!=false){for(E=H.GetFixtureList();E;E=E.GetNext()){var A=B.GetFatAABB(E.m_proxy);G[0].Set(A.lowerBound.x,A.lowerBound.y);G[1].Set(A.upperBound.x,A.lowerBound.y);G[2].Set(A.upperBound.x,A.upperBound.y);G[3].Set(A.lowerBound.x,A.upperBound.y);this.m_debugDraw.DrawPolygon(G,4,F)}}}}if(D&AJ.e_centerOfMassBit){for(H=this.m_bodyList;H;H=H.m_next){G=AU.s_xf;G.R=H.m_xf.R;G.position=H.GetWorldCenter();this.m_debugDraw.DrawTransform(G)}}}};AU.prototype.QueryAABB=function(A,D){var B=this.m_contactManager.m_broadPhase;B.Query(function(E){return A(B.GetUserData(E))},D)};AU.prototype.QueryShape=function(B,F,D){if(D===undefined){D=null}if(D==null){D=new AB;D.SetIdentity()}var A=this.m_contactManager.m_broadPhase,E=new X;F.ComputeAABB(E,D);A.Query(function(G){G=A.GetUserData(G) instanceof b?A.GetUserData(G):null;if(J.TestOverlap(F,D,G.GetShape(),G.GetBody().GetTransform())){return B(G)}return true},E)};AU.prototype.QueryPoint=function(B,E){var D=this.m_contactManager.m_broadPhase,A=new X;A.lowerBound.Set(E.x-AN.b2_linearSlop,E.y-AN.b2_linearSlop);A.upperBound.Set(E.x+AN.b2_linearSlop,E.y+AN.b2_linearSlop);D.Query(function(F){F=D.GetUserData(F) instanceof b?D.GetUserData(F):null;if(F.TestPoint(E)){return B(F)}return true},A)};AU.prototype.RayCast=function(B,G,D){var A=this.m_contactManager.m_broadPhase,F=new T,E=new f(G,D);A.RayCast(function(H,M){var L=A.GetUserData(M);L=L instanceof b?L:null;if(L.RayCast(F,H)){var I=F.fraction,K=new AC((1-I)*G.x+I*D.x,(1-I)*G.y+I*D.y);return B(L,K,F.normal,I)}return H.maxFraction},E)};AU.prototype.RayCastOne=function(A,D){var B;this.RayCast(function(F,H,G,E){if(E===undefined){E=0}B=F;return E},A,D);return B};AU.prototype.RayCastAll=function(A,D){var B=new Vector;this.RayCast(function(E){B[B.length]=E;return 1},A,D);return B};AU.prototype.GetBodyList=function(){return this.m_bodyList};AU.prototype.GetJointList=function(){return this.m_jointList};AU.prototype.GetContactList=function(){return this.m_contactList};AU.prototype.IsLocked=function(){return(this.m_flags&AU.e_locked)>0};AU.prototype.Solve=function(D){for(var I,F=this.m_controllerList;F;F=F.m_next){F.Step(D)}F=this.m_island;F.Initialize(this.m_bodyCount,this.m_contactCount,this.m_jointCount,null,this.m_contactManager.m_contactListener,this.m_contactSolver);for(I=this.m_bodyList;I;I=I.m_next){I.m_flags&=~AS.e_islandFlag}for(var B=this.m_contactList;B;B=B.m_next){B.m_flags&=~AR.e_islandFlag}for(B=this.m_jointList;B;B=B.m_next){B.m_islandFlag=false}parseInt(this.m_bodyCount);B=this.s_stack;for(var H=this.m_bodyList;H;H=H.m_next){if(!(H.m_flags&AS.e_islandFlag)){if(!(H.IsAwake()==false||H.IsActive()==false)){if(H.GetType()!=AS.b2_staticBody){F.Clear();var G=0;B[G++]=H;for(H.m_flags|=AS.e_islandFlag;G>0;){I=B[--G];F.AddBody(I);I.IsAwake()==false&&I.SetAwake(true);if(I.GetType()!=AS.b2_staticBody){for(var A,E=I.m_contactList;E;E=E.next){if(!(E.contact.m_flags&AR.e_islandFlag)){if(!(E.contact.IsSensor()==true||E.contact.IsEnabled()==false||E.contact.IsTouching()==false)){F.AddContact(E.contact);E.contact.m_flags|=AR.e_islandFlag;A=E.other;if(!(A.m_flags&AS.e_islandFlag)){B[G++]=A;A.m_flags|=AS.e_islandFlag}}}}for(I=I.m_jointList;I;I=I.next){if(I.joint.m_islandFlag!=true){A=I.other;if(A.IsActive()!=false){F.AddJoint(I.joint);I.joint.m_islandFlag=true;if(!(A.m_flags&AS.e_islandFlag)){B[G++]=A;A.m_flags|=AS.e_islandFlag}}}}}}F.Solve(D,this.m_gravity,this.m_allowSleep);for(G=0;G<F.m_bodyCount;++G){I=F.m_bodies[G];if(I.GetType()==AS.b2_staticBody){I.m_flags&=~AS.e_islandFlag}}}}}}for(G=0;G<B.length;++G){if(!B[G]){break}B[G]=null}for(I=this.m_bodyList;I;I=I.m_next){I.IsAwake()==false||I.IsActive()==false||I.GetType()!=AS.b2_staticBody&&I.SynchronizeFixtures()}this.m_contactManager.FindNewContacts()};AU.prototype.SolveTOI=function(I){var G,D,H,F=this.m_island;F.Initialize(this.m_bodyCount,AN.b2_maxTOIContactsPerIsland,AN.b2_maxTOIJointsPerIsland,null,this.m_contactManager.m_contactListener,this.m_contactSolver);var E=AU.s_queue;for(G=this.m_bodyList;G;G=G.m_next){G.m_flags&=~AS.e_islandFlag;G.m_sweep.t0=0}for(H=this.m_contactList;H;H=H.m_next){H.m_flags&=~(AR.e_toiFlag|AR.e_islandFlag)}for(H=this.m_jointList;H;H=H.m_next){H.m_islandFlag=false}for(;;){var B=null,A=1;for(H=this.m_contactList;H;H=H.m_next){if(!(H.IsSensor()==true||H.IsEnabled()==false||H.IsContinuous()==false)){G=1;if(H.m_flags&AR.e_toiFlag){G=H.m_toi}else{G=H.m_fixtureA;D=H.m_fixtureB;G=G.m_body;D=D.m_body;if((G.GetType()!=AS.b2_dynamicBody||G.IsAwake()==false)&&(D.GetType()!=AS.b2_dynamicBody||D.IsAwake()==false)){continue}var K=G.m_sweep.t0;if(G.m_sweep.t0<D.m_sweep.t0){K=D.m_sweep.t0;G.m_sweep.Advance(K)}else{if(D.m_sweep.t0<G.m_sweep.t0){K=G.m_sweep.t0;D.m_sweep.Advance(K)}}G=H.ComputeTOI(G.m_sweep,D.m_sweep);AN.b2Assert(0<=G&&G<=1);if(G>0&&G<1){G=(1-G)*K+G;if(G>1){G=1}}H.m_toi=G;H.m_flags|=AR.e_toiFlag}if(Number.MIN_VALUE<G&&G<A){B=H;A=G}}}if(B==null||1-100*Number.MIN_VALUE<A){break}G=B.m_fixtureA;D=B.m_fixtureB;G=G.m_body;D=D.m_body;AU.s_backupA.Set(G.m_sweep);AU.s_backupB.Set(D.m_sweep);G.Advance(A);D.Advance(A);B.Update(this.m_contactManager.m_contactListener);B.m_flags&=~AR.e_toiFlag;if(B.IsSensor()==true||B.IsEnabled()==false){G.m_sweep.Set(AU.s_backupA);D.m_sweep.Set(AU.s_backupB);G.SynchronizeTransform();D.SynchronizeTransform()}else{if(B.IsTouching()!=false){G=G;if(G.GetType()!=AS.b2_dynamicBody){G=D}F.Clear();B=H=0;E[H+B++]=G;for(G.m_flags|=AS.e_islandFlag;B>0;){G=E[H++];--B;F.AddBody(G);G.IsAwake()==false&&G.SetAwake(true);if(G.GetType()==AS.b2_dynamicBody){for(D=G.m_contactList;D;D=D.next){if(F.m_contactCount==F.m_contactCapacity){break}if(!(D.contact.m_flags&AR.e_islandFlag)){if(!(D.contact.IsSensor()==true||D.contact.IsEnabled()==false||D.contact.IsTouching()==false)){F.AddContact(D.contact);D.contact.m_flags|=AR.e_islandFlag;K=D.other;if(!(K.m_flags&AS.e_islandFlag)){if(K.GetType()!=AS.b2_staticBody){K.Advance(A);K.SetAwake(true)}E[H+B]=K;++B;K.m_flags|=AS.e_islandFlag}}}}for(G=G.m_jointList;G;G=G.next){if(F.m_jointCount!=F.m_jointCapacity){if(G.joint.m_islandFlag!=true){K=G.other;if(K.IsActive()!=false){F.AddJoint(G.joint);G.joint.m_islandFlag=true;if(!(K.m_flags&AS.e_islandFlag)){if(K.GetType()!=AS.b2_staticBody){K.Advance(A);K.SetAwake(true)}E[H+B]=K;++B;K.m_flags|=AS.e_islandFlag}}}}}}}H=AU.s_timestep;H.warmStarting=false;H.dt=(1-A)*I.dt;H.inv_dt=1/H.dt;H.dtRatio=0;H.velocityIterations=I.velocityIterations;H.positionIterations=I.positionIterations;F.SolveTOI(H);for(A=A=0;A<F.m_bodyCount;++A){G=F.m_bodies[A];G.m_flags&=~AS.e_islandFlag;if(G.IsAwake()!=false){if(G.GetType()==AS.b2_dynamicBody){G.SynchronizeFixtures();for(D=G.m_contactList;D;D=D.next){D.contact.m_flags&=~AR.e_toiFlag}}}}for(A=0;A<F.m_contactCount;++A){H=F.m_contacts[A];H.m_flags&=~(AR.e_toiFlag|AR.e_islandFlag)}for(A=0;A<F.m_jointCount;++A){H=F.m_joints[A];H.m_islandFlag=false}this.m_contactManager.FindNewContacts()}}}};AU.prototype.DrawJoint=function(D){var I=D.GetBodyA(),F=D.GetBodyB(),B=I.m_xf.position,H=F.m_xf.position,G=D.GetAnchorA(),A=D.GetAnchorB(),E=AU.s_jointColor;switch(D.m_type){case AL.e_distanceJoint:this.m_debugDraw.DrawSegment(G,A,E);break;case AL.e_pulleyJoint:I=D instanceof AQ?D:null;D=I.GetGroundAnchorA();I=I.GetGroundAnchorB();this.m_debugDraw.DrawSegment(D,G,E);this.m_debugDraw.DrawSegment(I,A,E);this.m_debugDraw.DrawSegment(D,I,E);break;case AL.e_mouseJoint:this.m_debugDraw.DrawSegment(G,A,E);break;default:I!=this.m_groundBody&&this.m_debugDraw.DrawSegment(B,G,E);this.m_debugDraw.DrawSegment(G,A,E);F!=this.m_groundBody&&this.m_debugDraw.DrawSegment(H,A,E)}};AU.prototype.DrawShape=function(B,G,D){switch(B.m_type){case J.e_circleShape:var A=B instanceof t?B:null;this.m_debugDraw.DrawSolidCircle(AI.MulX(G,A.m_p),A.m_radius,G.R.col1,D);break;case J.e_polygonShape:A=0;A=B instanceof P?B:null;B=parseInt(A.GetVertexCount());var F=A.GetVertices(),E=new Vector(B);for(A=0;A<B;++A){E[A]=AI.MulX(G,F[A])}this.m_debugDraw.DrawSolidPolygon(E,B,D);break;case J.e_edgeShape:A=B instanceof x?B:null;this.m_debugDraw.DrawSegment(AI.MulX(G,A.GetVertex1()),AI.MulX(G,A.GetVertex2()),D)}};Box2D.postDefs.push(function(){Box2D.Dynamics.b2World.s_timestep2=new AV;Box2D.Dynamics.b2World.s_xf=new AB;Box2D.Dynamics.b2World.s_backupA=new AG;Box2D.Dynamics.b2World.s_backupB=new AG;Box2D.Dynamics.b2World.s_timestep=new AV;Box2D.Dynamics.b2World.s_queue=new Vector;Box2D.Dynamics.b2World.s_jointColor=new AF(0.5,0.8,0.8);Box2D.Dynamics.b2World.e_newFixture=1;Box2D.Dynamics.b2World.e_locked=2})})();(function(){var AG=Box2D.Collision.Shapes.b2CircleShape,AE=Box2D.Collision.Shapes.b2EdgeShape,x=Box2D.Collision.Shapes.b2PolygonShape,AA=Box2D.Collision.Shapes.b2Shape,AD=Box2D.Dynamics.Contacts.b2CircleContact,AK=Box2D.Dynamics.Contacts.b2Contact,X=Box2D.Dynamics.Contacts.b2ContactConstraint,AL=Box2D.Dynamics.Contacts.b2ContactConstraintPoint,AJ=Box2D.Dynamics.Contacts.b2ContactEdge,f=Box2D.Dynamics.Contacts.b2ContactFactory,T=Box2D.Dynamics.Contacts.b2ContactRegister,n=Box2D.Dynamics.Contacts.b2ContactResult,o=Box2D.Dynamics.Contacts.b2ContactSolver,AB=Box2D.Dynamics.Contacts.b2EdgeAndCircleContact,P=Box2D.Dynamics.Contacts.b2NullContact,J=Box2D.Dynamics.Contacts.b2PolyAndCircleContact,AN=Box2D.Dynamics.Contacts.b2PolyAndEdgeContact,t=Box2D.Dynamics.Contacts.b2PolygonContact,AF=Box2D.Dynamics.Contacts.b2PositionSolverManifold,AI=Box2D.Dynamics.b2Body,AC=Box2D.Dynamics.b2TimeStep,g=Box2D.Common.b2Settings,AH=Box2D.Common.Math.b2Mat22,e=Box2D.Common.Math.b2Math,m=Box2D.Common.Math.b2Vec2,b=Box2D.Collision.b2Collision,AQ=Box2D.Collision.b2ContactID,C=Box2D.Collision.b2Manifold,AP=Box2D.Collision.b2TimeOfImpact,AO=Box2D.Collision.b2TOIInput,AM=Box2D.Collision.b2WorldManifold;Box2D.inherit(AD,Box2D.Dynamics.Contacts.b2Contact);AD.prototype.__super=Box2D.Dynamics.Contacts.b2Contact.prototype;AD.b2CircleContact=function(){Box2D.Dynamics.Contacts.b2Contact.b2Contact.apply(this,arguments)};AD.Create=function(){return new AD};AD.Destroy=function(){};AD.prototype.Reset=function(A,B){this.__super.Reset.call(this,A,B)};AD.prototype.Evaluate=function(){var A=this.m_fixtureA.GetBody(),B=this.m_fixtureB.GetBody();b.CollideCircles(this.m_manifold,this.m_fixtureA.GetShape() instanceof AG?this.m_fixtureA.GetShape():null,A.m_xf,this.m_fixtureB.GetShape() instanceof AG?this.m_fixtureB.GetShape():null,B.m_xf)};AK.b2Contact=function(){this.m_nodeA=new AJ;this.m_nodeB=new AJ;this.m_manifold=new C;this.m_oldManifold=new C};AK.prototype.GetManifold=function(){return this.m_manifold};AK.prototype.GetWorldManifold=function(B){var E=this.m_fixtureA.GetBody(),D=this.m_fixtureB.GetBody(),F=this.m_fixtureA.GetShape(),A=this.m_fixtureB.GetShape();B.Initialize(this.m_manifold,E.GetTransform(),F.m_radius,D.GetTransform(),A.m_radius)};AK.prototype.IsTouching=function(){return(this.m_flags&AK.e_touchingFlag)==AK.e_touchingFlag};AK.prototype.IsContinuous=function(){return(this.m_flags&AK.e_continuousFlag)==AK.e_continuousFlag};AK.prototype.SetSensor=function(A){if(A){this.m_flags|=AK.e_sensorFlag}else{this.m_flags&=~AK.e_sensorFlag}};AK.prototype.IsSensor=function(){return(this.m_flags&AK.e_sensorFlag)==AK.e_sensorFlag};AK.prototype.SetEnabled=function(A){if(A){this.m_flags|=AK.e_enabledFlag}else{this.m_flags&=~AK.e_enabledFlag}};AK.prototype.IsEnabled=function(){return(this.m_flags&AK.e_enabledFlag)==AK.e_enabledFlag};AK.prototype.GetNext=function(){return this.m_next};AK.prototype.GetFixtureA=function(){return this.m_fixtureA};AK.prototype.GetFixtureB=function(){return this.m_fixtureB};AK.prototype.FlagForFiltering=function(){this.m_flags|=AK.e_filterFlag};AK.prototype.b2Contact=function(){};AK.prototype.Reset=function(A,D){if(A===undefined){A=null}if(D===undefined){D=null}this.m_flags=AK.e_enabledFlag;if(!A||!D){this.m_fixtureB=this.m_fixtureA=null}else{if(A.IsSensor()||D.IsSensor()){this.m_flags|=AK.e_sensorFlag}var B=A.GetBody(),E=D.GetBody();if(B.GetType()!=AI.b2_dynamicBody||B.IsBullet()||E.GetType()!=AI.b2_dynamicBody||E.IsBullet()){this.m_flags|=AK.e_continuousFlag}this.m_fixtureA=A;this.m_fixtureB=D;this.m_manifold.m_pointCount=0;this.m_next=this.m_prev=null;this.m_nodeA.contact=null;this.m_nodeA.prev=null;this.m_nodeA.next=null;this.m_nodeA.other=null;this.m_nodeB.contact=null;this.m_nodeB.prev=null;this.m_nodeB.next=null;this.m_nodeB.other=null}};AK.prototype.Update=function(E){var B=this.m_oldManifold;this.m_oldManifold=this.m_manifold;this.m_manifold=B;this.m_flags|=AK.e_enabledFlag;var A=false;B=(this.m_flags&AK.e_touchingFlag)==AK.e_touchingFlag;var D=this.m_fixtureA.m_body,L=this.m_fixtureB.m_body,I=this.m_fixtureA.m_aabb.TestOverlap(this.m_fixtureB.m_aabb);if(this.m_flags&AK.e_sensorFlag){if(I){A=this.m_fixtureA.GetShape();I=this.m_fixtureB.GetShape();D=D.GetTransform();L=L.GetTransform();A=AA.TestOverlap(A,D,I,L)}this.m_manifold.m_pointCount=0}else{if(D.GetType()!=AI.b2_dynamicBody||D.IsBullet()||L.GetType()!=AI.b2_dynamicBody||L.IsBullet()){this.m_flags|=AK.e_continuousFlag}else{this.m_flags&=~AK.e_continuousFlag}if(I){this.Evaluate();A=this.m_manifold.m_pointCount>0;for(I=0;I<this.m_manifold.m_pointCount;++I){var F=this.m_manifold.m_points[I];F.m_normalImpulse=0;F.m_tangentImpulse=0;for(var K=F.m_id,H=0;H<this.m_oldManifold.m_pointCount;++H){var G=this.m_oldManifold.m_points[H];if(G.m_id.key==K.key){F.m_normalImpulse=G.m_normalImpulse;F.m_tangentImpulse=G.m_tangentImpulse;break}}}}else{this.m_manifold.m_pointCount=0}if(A!=B){D.SetAwake(true);L.SetAwake(true)}}if(A){this.m_flags|=AK.e_touchingFlag}else{this.m_flags&=~AK.e_touchingFlag}B==false&&A==true&&E.BeginContact(this);B==true&&A==false&&E.EndContact(this);(this.m_flags&AK.e_sensorFlag)==0&&E.PreSolve(this,this.m_oldManifold)};AK.prototype.Evaluate=function(){};AK.prototype.ComputeTOI=function(A,B){AK.s_input.proxyA.Set(this.m_fixtureA.GetShape());AK.s_input.proxyB.Set(this.m_fixtureB.GetShape());AK.s_input.sweepA=A;AK.s_input.sweepB=B;AK.s_input.tolerance=g.b2_linearSlop;return AP.TimeOfImpact(AK.s_input)};Box2D.postDefs.push(function(){Box2D.Dynamics.Contacts.b2Contact.e_sensorFlag=1;Box2D.Dynamics.Contacts.b2Contact.e_continuousFlag=2;Box2D.Dynamics.Contacts.b2Contact.e_islandFlag=4;Box2D.Dynamics.Contacts.b2Contact.e_toiFlag=8;Box2D.Dynamics.Contacts.b2Contact.e_touchingFlag=16;Box2D.Dynamics.Contacts.b2Contact.e_enabledFlag=32;Box2D.Dynamics.Contacts.b2Contact.e_filterFlag=64;Box2D.Dynamics.Contacts.b2Contact.s_input=new AO});X.b2ContactConstraint=function(){this.localPlaneNormal=new m;this.localPoint=new m;this.normal=new m;this.normalMass=new AH;this.K=new AH};X.prototype.b2ContactConstraint=function(){this.points=new Vector(g.b2_maxManifoldPoints);for(var A=0;A<g.b2_maxManifoldPoints;A++){this.points[A]=new AL}};AL.b2ContactConstraintPoint=function(){this.localPoint=new m;this.rA=new m;this.rB=new m};AJ.b2ContactEdge=function(){};f.b2ContactFactory=function(){};f.prototype.b2ContactFactory=function(A){this.m_allocator=A;this.InitializeRegisters()};f.prototype.AddType=function(A,D,B,E){if(B===undefined){B=0}if(E===undefined){E=0}this.m_registers[B][E].createFcn=A;this.m_registers[B][E].destroyFcn=D;this.m_registers[B][E].primary=true;if(B!=E){this.m_registers[E][B].createFcn=A;this.m_registers[E][B].destroyFcn=D;this.m_registers[E][B].primary=false}};f.prototype.InitializeRegisters=function(){this.m_registers=new Vector(AA.e_shapeTypeCount);for(var A=0;A<AA.e_shapeTypeCount;A++){this.m_registers[A]=new Vector(AA.e_shapeTypeCount);for(var B=0;B<AA.e_shapeTypeCount;B++){this.m_registers[A][B]=new T}}this.AddType(AD.Create,AD.Destroy,AA.e_circleShape,AA.e_circleShape);this.AddType(J.Create,J.Destroy,AA.e_polygonShape,AA.e_circleShape);this.AddType(t.Create,t.Destroy,AA.e_polygonShape,AA.e_polygonShape);this.AddType(AB.Create,AB.Destroy,AA.e_edgeShape,AA.e_circleShape);this.AddType(AN.Create,AN.Destroy,AA.e_polygonShape,AA.e_edgeShape)};f.prototype.Create=function(A,D){var B=parseInt(A.GetType()),E=parseInt(D.GetType());B=this.m_registers[B][E];if(B.pool){E=B.pool;B.pool=E.m_next;B.poolCount--;E.Reset(A,D);return E}E=B.createFcn;if(E!=null){if(B.primary){E=E(this.m_allocator);E.Reset(A,D)}else{E=E(this.m_allocator);E.Reset(D,A)}return E}else{return null}};f.prototype.Destroy=function(A){if(A.m_manifold.m_pointCount>0){A.m_fixtureA.m_body.SetAwake(true);A.m_fixtureB.m_body.SetAwake(true)}var D=parseInt(A.m_fixtureA.GetType()),B=parseInt(A.m_fixtureB.GetType());D=this.m_registers[D][B];D.poolCount++;A.m_next=D.pool;D.pool=A;D=D.destroyFcn;D(A,this.m_allocator)};T.b2ContactRegister=function(){};n.b2ContactResult=function(){this.position=new m;this.normal=new m;this.id=new AQ};o.b2ContactSolver=function(){this.m_step=new AC;this.m_constraints=new Vector};o.prototype.b2ContactSolver=function(){};o.prototype.Initialize=function(V,R,O,S){if(O===undefined){O=0}var l;this.m_step.Set(V);this.m_allocator=S;V=0;for(this.m_constraintCount=O;this.m_constraints.length<this.m_constraintCount;){this.m_constraints[this.m_constraints.length]=new X}for(V=0;V<O;++V){l=R[V];S=l.m_fixtureA;var h=l.m_fixtureB,W=S.m_shape.m_radius,k=h.m_shape.m_radius,Z=S.m_body,Y=h.m_body,U=l.GetManifold(),N=g.b2MixFriction(S.GetFriction(),h.GetFriction()),L=g.b2MixRestitution(S.GetRestitution(),h.GetRestitution()),I=Z.m_linearVelocity.x,K=Z.m_linearVelocity.y,H=Y.m_linearVelocity.x,M=Y.m_linearVelocity.y,G=Z.m_angularVelocity,B=Y.m_angularVelocity;g.b2Assert(U.m_pointCount>0);o.s_worldManifold.Initialize(U,Z.m_xf,W,Y.m_xf,k);h=o.s_worldManifold.m_normal.x;l=o.s_worldManifold.m_normal.y;S=this.m_constraints[V];S.bodyA=Z;S.bodyB=Y;S.manifold=U;S.normal.x=h;S.normal.y=l;S.pointCount=U.m_pointCount;S.friction=N;S.restitution=L;S.localPlaneNormal.x=U.m_localPlaneNormal.x;S.localPlaneNormal.y=U.m_localPlaneNormal.y;S.localPoint.x=U.m_localPoint.x;S.localPoint.y=U.m_localPoint.y;S.radius=W+k;S.type=U.m_type;for(W=0;W<S.pointCount;++W){N=U.m_points[W];k=S.points[W];k.normalImpulse=N.m_normalImpulse;k.tangentImpulse=N.m_tangentImpulse;k.localPoint.SetV(N.m_localPoint);N=k.rA.x=o.s_worldManifold.m_points[W].x-Z.m_sweep.c.x;L=k.rA.y=o.s_worldManifold.m_points[W].y-Z.m_sweep.c.y;var F=k.rB.x=o.s_worldManifold.m_points[W].x-Y.m_sweep.c.x,A=k.rB.y=o.s_worldManifold.m_points[W].y-Y.m_sweep.c.y,D=N*l-L*h,E=F*l-A*h;D*=D;E*=E;k.normalMass=1/(Z.m_invMass+Y.m_invMass+Z.m_invI*D+Y.m_invI*E);var Q=Z.m_mass*Z.m_invMass+Y.m_mass*Y.m_invMass;Q+=Z.m_mass*Z.m_invI*D+Y.m_mass*Y.m_invI*E;k.equalizedMass=1/Q;E=l;Q=-h;D=N*Q-L*E;E=F*Q-A*E;D*=D;E*=E;k.tangentMass=1/(Z.m_invMass+Y.m_invMass+Z.m_invI*D+Y.m_invI*E);k.velocityBias=0;N=S.normal.x*(H+-B*A-I- -G*L)+S.normal.y*(M+B*F-K-G*N);if(N<-g.b2_velocityThreshold){k.velocityBias+=-S.restitution*N}}if(S.pointCount==2){M=S.points[0];H=S.points[1];U=Z.m_invMass;Z=Z.m_invI;I=Y.m_invMass;Y=Y.m_invI;K=M.rA.x*l-M.rA.y*h;M=M.rB.x*l-M.rB.y*h;G=H.rA.x*l-H.rA.y*h;H=H.rB.x*l-H.rB.y*h;h=U+I+Z*K*K+Y*M*M;l=U+I+Z*G*G+Y*H*H;Y=U+I+Z*K*G+Y*M*H;if(h*h<100*(h*l-Y*Y)){S.K.col1.Set(h,Y);S.K.col2.Set(Y,l);S.K.GetInverse(S.normalMass)}else{S.pointCount=1}}}};o.prototype.InitVelocityConstraints=function(N){for(var K=0;K<this.m_constraintCount;++K){var I=this.m_constraints[K],L=I.bodyA,V=I.bodyB,S=L.m_invMass,O=L.m_invI,U=V.m_invMass,R=V.m_invI,Q=I.normal.x,M=I.normal.y,H=M,F=-Q,D=0,E=0;if(N.warmStarting){E=I.pointCount;for(D=0;D<E;++D){var B=I.points[D];B.normalImpulse*=N.dtRatio;B.tangentImpulse*=N.dtRatio;var G=B.normalImpulse*Q+B.tangentImpulse*H,A=B.normalImpulse*M+B.tangentImpulse*F;L.m_angularVelocity-=O*(B.rA.x*A-B.rA.y*G);L.m_linearVelocity.x-=S*G;L.m_linearVelocity.y-=S*A;V.m_angularVelocity+=R*(B.rB.x*A-B.rB.y*G);V.m_linearVelocity.x+=U*G;V.m_linearVelocity.y+=U*A}}else{E=I.pointCount;for(D=0;D<E;++D){L=I.points[D];L.normalImpulse=0;L.tangentImpulse=0}}}};o.prototype.SolveVelocityConstraints=function(){for(var V=0,R,O=0,S=0,l=0,h=S=S=O=O=0,W=O=O=0,k=O=l=0,Z=0,Y,U=0;U<this.m_constraintCount;++U){l=this.m_constraints[U];var N=l.bodyA,L=l.bodyB,I=N.m_angularVelocity,K=L.m_angularVelocity,H=N.m_linearVelocity,M=L.m_linearVelocity,G=N.m_invMass,B=N.m_invI,F=L.m_invMass,A=L.m_invI;k=l.normal.x;var D=Z=l.normal.y;Y=-k;W=l.friction;for(V=0;V<l.pointCount;V++){R=l.points[V];O=M.x-K*R.rB.y-H.x+I*R.rA.y;S=M.y+K*R.rB.x-H.y-I*R.rA.x;O=O*D+S*Y;O=R.tangentMass*-O;S=W*R.normalImpulse;S=e.Clamp(R.tangentImpulse+O,-S,S);O=S-R.tangentImpulse;h=O*D;O=O*Y;H.x-=G*h;H.y-=G*O;I-=B*(R.rA.x*O-R.rA.y*h);M.x+=F*h;M.y+=F*O;K+=A*(R.rB.x*O-R.rB.y*h);R.tangentImpulse=S}parseInt(l.pointCount);if(l.pointCount==1){R=l.points[0];O=M.x+-K*R.rB.y-H.x- -I*R.rA.y;S=M.y+K*R.rB.x-H.y-I*R.rA.x;l=O*k+S*Z;O=-R.normalMass*(l-R.velocityBias);S=R.normalImpulse+O;S=S>0?S:0;O=S-R.normalImpulse;h=O*k;O=O*Z;H.x-=G*h;H.y-=G*O;I-=B*(R.rA.x*O-R.rA.y*h);M.x+=F*h;M.y+=F*O;K+=A*(R.rB.x*O-R.rB.y*h);R.normalImpulse=S}else{R=l.points[0];V=l.points[1];O=R.normalImpulse;W=V.normalImpulse;var E=(M.x-K*R.rB.y-H.x+I*R.rA.y)*k+(M.y+K*R.rB.x-H.y-I*R.rA.x)*Z,Q=(M.x-K*V.rB.y-H.x+I*V.rA.y)*k+(M.y+K*V.rB.x-H.y-I*V.rA.x)*Z;S=E-R.velocityBias;h=Q-V.velocityBias;Y=l.K;S-=Y.col1.x*O+Y.col2.x*W;for(h-=Y.col1.y*O+Y.col2.y*W;;){Y=l.normalMass;D=-(Y.col1.x*S+Y.col2.x*h);Y=-(Y.col1.y*S+Y.col2.y*h);if(D>=0&&Y>=0){O=D-O;W=Y-W;l=O*k;O=O*Z;k=W*k;Z=W*Z;H.x-=G*(l+k);H.y-=G*(O+Z);I-=B*(R.rA.x*O-R.rA.y*l+V.rA.x*Z-V.rA.y*k);M.x+=F*(l+k);M.y+=F*(O+Z);K+=A*(R.rB.x*O-R.rB.y*l+V.rB.x*Z-V.rB.y*k);R.normalImpulse=D;V.normalImpulse=Y;break}D=-R.normalMass*S;Y=0;Q=l.K.col1.y*D+h;if(D>=0&&Q>=0){O=D-O;W=Y-W;l=O*k;O=O*Z;k=W*k;Z=W*Z;H.x-=G*(l+k);H.y-=G*(O+Z);I-=B*(R.rA.x*O-R.rA.y*l+V.rA.x*Z-V.rA.y*k);M.x+=F*(l+k);M.y+=F*(O+Z);K+=A*(R.rB.x*O-R.rB.y*l+V.rB.x*Z-V.rB.y*k);R.normalImpulse=D;V.normalImpulse=Y;break}D=0;Y=-V.normalMass*h;E=l.K.col2.x*Y+S;if(Y>=0&&E>=0){O=D-O;W=Y-W;l=O*k;O=O*Z;k=W*k;Z=W*Z;H.x-=G*(l+k);H.y-=G*(O+Z);I-=B*(R.rA.x*O-R.rA.y*l+V.rA.x*Z-V.rA.y*k);M.x+=F*(l+k);M.y+=F*(O+Z);K+=A*(R.rB.x*O-R.rB.y*l+V.rB.x*Z-V.rB.y*k);R.normalImpulse=D;V.normalImpulse=Y;break}Y=D=0;E=S;Q=h;if(E>=0&&Q>=0){O=D-O;W=Y-W;l=O*k;O=O*Z;k=W*k;Z=W*Z;H.x-=G*(l+k);H.y-=G*(O+Z);I-=B*(R.rA.x*O-R.rA.y*l+V.rA.x*Z-V.rA.y*k);M.x+=F*(l+k);M.y+=F*(O+Z);K+=A*(R.rB.x*O-R.rB.y*l+V.rB.x*Z-V.rB.y*k);R.normalImpulse=D;V.normalImpulse=Y;break}break}}N.m_angularVelocity=I;L.m_angularVelocity=K}};o.prototype.FinalizeVelocityConstraints=function(){for(var B=0;B<this.m_constraintCount;++B){for(var E=this.m_constraints[B],D=E.manifold,G=0;G<E.pointCount;++G){var A=D.m_points[G],F=E.points[G];A.m_normalImpulse=F.normalImpulse;A.m_tangentImpulse=F.tangentImpulse}}};o.prototype.SolvePositionConstraints=function(N){if(N===undefined){N=0}for(var K=0,I=0;I<this.m_constraintCount;I++){var L=this.m_constraints[I],V=L.bodyA,S=L.bodyB,O=V.m_mass*V.m_invMass,U=V.m_mass*V.m_invI,R=S.m_mass*S.m_invMass,Q=S.m_mass*S.m_invI;o.s_psm.Initialize(L);for(var M=o.s_psm.m_normal,H=0;H<L.pointCount;H++){var F=L.points[H],D=o.s_psm.m_points[H],E=o.s_psm.m_separations[H],B=D.x-V.m_sweep.c.x,G=D.y-V.m_sweep.c.y,A=D.x-S.m_sweep.c.x;D=D.y-S.m_sweep.c.y;K=K<E?K:E;E=e.Clamp(N*(E+g.b2_linearSlop),-g.b2_maxLinearCorrection,0);E=-F.equalizedMass*E;F=E*M.x;E=E*M.y;V.m_sweep.c.x-=O*F;V.m_sweep.c.y-=O*E;V.m_sweep.a-=U*(B*E-G*F);V.SynchronizeTransform();S.m_sweep.c.x+=R*F;S.m_sweep.c.y+=R*E;S.m_sweep.a+=Q*(A*E-D*F);S.SynchronizeTransform()}}return K>-1.5*g.b2_linearSlop};Box2D.postDefs.push(function(){Box2D.Dynamics.Contacts.b2ContactSolver.s_worldManifold=new AM;Box2D.Dynamics.Contacts.b2ContactSolver.s_psm=new AF});Box2D.inherit(AB,Box2D.Dynamics.Contacts.b2Contact);AB.prototype.__super=Box2D.Dynamics.Contacts.b2Contact.prototype;AB.b2EdgeAndCircleContact=function(){Box2D.Dynamics.Contacts.b2Contact.b2Contact.apply(this,arguments)};AB.Create=function(){return new AB};AB.Destroy=function(){};AB.prototype.Reset=function(A,B){this.__super.Reset.call(this,A,B)};AB.prototype.Evaluate=function(){var A=this.m_fixtureA.GetBody(),B=this.m_fixtureB.GetBody();this.b2CollideEdgeAndCircle(this.m_manifold,this.m_fixtureA.GetShape() instanceof AE?this.m_fixtureA.GetShape():null,A.m_xf,this.m_fixtureB.GetShape() instanceof AG?this.m_fixtureB.GetShape():null,B.m_xf)};AB.prototype.b2CollideEdgeAndCircle=function(){};Box2D.inherit(P,Box2D.Dynamics.Contacts.b2Contact);P.prototype.__super=Box2D.Dynamics.Contacts.b2Contact.prototype;P.b2NullContact=function(){Box2D.Dynamics.Contacts.b2Contact.b2Contact.apply(this,arguments)};P.prototype.b2NullContact=function(){this.__super.b2Contact.call(this)};P.prototype.Evaluate=function(){};Box2D.inherit(J,Box2D.Dynamics.Contacts.b2Contact);J.prototype.__super=Box2D.Dynamics.Contacts.b2Contact.prototype;J.b2PolyAndCircleContact=function(){Box2D.Dynamics.Contacts.b2Contact.b2Contact.apply(this,arguments)};J.Create=function(){return new J};J.Destroy=function(){};J.prototype.Reset=function(A,B){this.__super.Reset.call(this,A,B);g.b2Assert(A.GetType()==AA.e_polygonShape);g.b2Assert(B.GetType()==AA.e_circleShape)};J.prototype.Evaluate=function(){var A=this.m_fixtureA.m_body,B=this.m_fixtureB.m_body;b.CollidePolygonAndCircle(this.m_manifold,this.m_fixtureA.GetShape() instanceof x?this.m_fixtureA.GetShape():null,A.m_xf,this.m_fixtureB.GetShape() instanceof AG?this.m_fixtureB.GetShape():null,B.m_xf)};Box2D.inherit(AN,Box2D.Dynamics.Contacts.b2Contact);AN.prototype.__super=Box2D.Dynamics.Contacts.b2Contact.prototype;AN.b2PolyAndEdgeContact=function(){Box2D.Dynamics.Contacts.b2Contact.b2Contact.apply(this,arguments)};AN.Create=function(){return new AN};AN.Destroy=function(){};AN.prototype.Reset=function(A,B){this.__super.Reset.call(this,A,B);g.b2Assert(A.GetType()==AA.e_polygonShape);g.b2Assert(B.GetType()==AA.e_edgeShape)};AN.prototype.Evaluate=function(){var A=this.m_fixtureA.GetBody(),B=this.m_fixtureB.GetBody();this.b2CollidePolyAndEdge(this.m_manifold,this.m_fixtureA.GetShape() instanceof x?this.m_fixtureA.GetShape():null,A.m_xf,this.m_fixtureB.GetShape() instanceof AE?this.m_fixtureB.GetShape():null,B.m_xf)};AN.prototype.b2CollidePolyAndEdge=function(){};Box2D.inherit(t,Box2D.Dynamics.Contacts.b2Contact);t.prototype.__super=Box2D.Dynamics.Contacts.b2Contact.prototype;t.b2PolygonContact=function(){Box2D.Dynamics.Contacts.b2Contact.b2Contact.apply(this,arguments)};t.Create=function(){return new t};t.Destroy=function(){};t.prototype.Reset=function(A,B){this.__super.Reset.call(this,A,B)};t.prototype.Evaluate=function(){var A=this.m_fixtureA.GetBody(),B=this.m_fixtureB.GetBody();b.CollidePolygons(this.m_manifold,this.m_fixtureA.GetShape() instanceof x?this.m_fixtureA.GetShape():null,A.m_xf,this.m_fixtureB.GetShape() instanceof x?this.m_fixtureB.GetShape():null,B.m_xf)};AF.b2PositionSolverManifold=function(){};AF.prototype.b2PositionSolverManifold=function(){this.m_normal=new m;this.m_separations=new Vector_a2j_Number(g.b2_maxManifoldPoints);this.m_points=new Vector(g.b2_maxManifoldPoints);for(var A=0;A<g.b2_maxManifoldPoints;A++){this.m_points[A]=new m}};AF.prototype.Initialize=function(D){g.b2Assert(D.pointCount>0);var G=0,F=0,I=0,B,H=0,E=0;switch(D.type){case C.e_circles:B=D.bodyA.m_xf.R;I=D.localPoint;G=D.bodyA.m_xf.position.x+(B.col1.x*I.x+B.col2.x*I.y);F=D.bodyA.m_xf.position.y+(B.col1.y*I.x+B.col2.y*I.y);B=D.bodyB.m_xf.R;I=D.points[0].localPoint;H=D.bodyB.m_xf.position.x+(B.col1.x*I.x+B.col2.x*I.y);B=D.bodyB.m_xf.position.y+(B.col1.y*I.x+B.col2.y*I.y);I=H-G;E=B-F;var A=I*I+E*E;if(A>Number.MIN_VALUE*Number.MIN_VALUE){A=Math.sqrt(A);this.m_normal.x=I/A;this.m_normal.y=E/A}else{this.m_normal.x=1;this.m_normal.y=0}this.m_points[0].x=0.5*(G+H);this.m_points[0].y=0.5*(F+B);this.m_separations[0]=I*this.m_normal.x+E*this.m_normal.y-D.radius;break;case C.e_faceA:B=D.bodyA.m_xf.R;I=D.localPlaneNormal;this.m_normal.x=B.col1.x*I.x+B.col2.x*I.y;this.m_normal.y=B.col1.y*I.x+B.col2.y*I.y;B=D.bodyA.m_xf.R;I=D.localPoint;H=D.bodyA.m_xf.position.x+(B.col1.x*I.x+B.col2.x*I.y);E=D.bodyA.m_xf.position.y+(B.col1.y*I.x+B.col2.y*I.y);B=D.bodyB.m_xf.R;for(G=0;G<D.pointCount;++G){I=D.points[G].localPoint;F=D.bodyB.m_xf.position.x+(B.col1.x*I.x+B.col2.x*I.y);I=D.bodyB.m_xf.position.y+(B.col1.y*I.x+B.col2.y*I.y);this.m_separations[G]=(F-H)*this.m_normal.x+(I-E)*this.m_normal.y-D.radius;this.m_points[G].x=F;this.m_points[G].y=I}break;case C.e_faceB:B=D.bodyB.m_xf.R;I=D.localPlaneNormal;this.m_normal.x=B.col1.x*I.x+B.col2.x*I.y;this.m_normal.y=B.col1.y*I.x+B.col2.y*I.y;B=D.bodyB.m_xf.R;I=D.localPoint;H=D.bodyB.m_xf.position.x+(B.col1.x*I.x+B.col2.x*I.y);E=D.bodyB.m_xf.position.y+(B.col1.y*I.x+B.col2.y*I.y);B=D.bodyA.m_xf.R;for(G=0;G<D.pointCount;++G){I=D.points[G].localPoint;F=D.bodyA.m_xf.position.x+(B.col1.x*I.x+B.col2.x*I.y);I=D.bodyA.m_xf.position.y+(B.col1.y*I.x+B.col2.y*I.y);this.m_separations[G]=(F-H)*this.m_normal.x+(I-E)*this.m_normal.y-D.radius;this.m_points[G].Set(F,I)}this.m_normal.x*=-1;this.m_normal.y*=-1}};Box2D.postDefs.push(function(){Box2D.Dynamics.Contacts.b2PositionSolverManifold.circlePointA=new m;Box2D.Dynamics.Contacts.b2PositionSolverManifold.circlePointB=new m})})();(function(){var P=Box2D.Common.Math.b2Mat22,O=Box2D.Common.Math.b2Math,M=Box2D.Common.Math.b2Vec2,L=Box2D.Common.b2Color,N=Box2D.Dynamics.Controllers.b2BuoyancyController,E=Box2D.Dynamics.Controllers.b2ConstantAccelController,I=Box2D.Dynamics.Controllers.b2ConstantForceController,D=Box2D.Dynamics.Controllers.b2Controller,C=Box2D.Dynamics.Controllers.b2ControllerEdge,J=Box2D.Dynamics.Controllers.b2GravityController,H=Box2D.Dynamics.Controllers.b2TensorDampingController;Box2D.inherit(N,Box2D.Dynamics.Controllers.b2Controller);N.prototype.__super=Box2D.Dynamics.Controllers.b2Controller.prototype;N.b2BuoyancyController=function(){Box2D.Dynamics.Controllers.b2Controller.b2Controller.apply(this,arguments);this.normal=new M(0,-1);this.density=this.offset=0;this.velocity=new M(0,0);this.linearDrag=2;this.angularDrag=1;this.useDensity=false;this.useWorldGravity=true;this.gravity=null};N.prototype.Step=function(){if(this.m_bodyList){if(this.useWorldGravity){this.gravity=this.GetWorld().GetGravity().Copy()}for(var K=this.m_bodyList;K;K=K.nextBody){var R=K.body;if(R.IsAwake()!=false){for(var S=new M,F=new M,B=0,G=0,Q=R.GetFixtureList();Q;Q=Q.GetNext()){var U=new M,A=Q.GetShape().ComputeSubmergedArea(this.normal,this.offset,R.GetTransform(),U);B+=A;S.x+=A*U.x;S.y+=A*U.y;var T=0;T=1;G+=A*T;F.x+=A*U.x*T;F.y+=A*U.y*T}S.x/=B;S.y/=B;F.x/=G;F.y/=G;if(!(B<Number.MIN_VALUE)){G=this.gravity.GetNegative();G.Multiply(this.density*B);R.ApplyForce(G,F);F=R.GetLinearVelocityFromWorldPoint(S);F.Subtract(this.velocity);F.Multiply(-this.linearDrag*B);R.ApplyForce(F,S);R.ApplyTorque(-R.GetInertia()/R.GetMass()*B*R.GetAngularVelocity()*this.angularDrag)}}}}};N.prototype.Draw=function(G){var B=new M,F=new M;B.x=this.normal.x*this.offset+this.normal.y*1000;B.y=this.normal.y*this.offset-this.normal.x*1000;F.x=this.normal.x*this.offset-this.normal.y*1000;F.y=this.normal.y*this.offset+this.normal.x*1000;var A=new L(0,0,1);G.DrawSegment(B,F,A)};Box2D.inherit(E,Box2D.Dynamics.Controllers.b2Controller);E.prototype.__super=Box2D.Dynamics.Controllers.b2Controller.prototype;E.b2ConstantAccelController=function(){Box2D.Dynamics.Controllers.b2Controller.b2Controller.apply(this,arguments);this.A=new M(0,0)};E.prototype.Step=function(F){F=new M(this.A.x*F.dt,this.A.y*F.dt);for(var A=this.m_bodyList;A;A=A.nextBody){var B=A.body;B.IsAwake()&&B.SetLinearVelocity(new M(B.GetLinearVelocity().x+F.x,B.GetLinearVelocity().y+F.y))}};Box2D.inherit(I,Box2D.Dynamics.Controllers.b2Controller);I.prototype.__super=Box2D.Dynamics.Controllers.b2Controller.prototype;I.b2ConstantForceController=function(){Box2D.Dynamics.Controllers.b2Controller.b2Controller.apply(this,arguments);this.F=new M(0,0)};I.prototype.Step=function(){for(var B=this.m_bodyList;B;B=B.nextBody){var A=B.body;A.IsAwake()&&A.ApplyForce(this.F,A.GetWorldCenter())}};D.b2Controller=function(){};D.prototype.Step=function(){};D.prototype.Draw=function(){};D.prototype.AddBody=function(B){var A=new C;A.controller=this;A.body=B;A.nextBody=this.m_bodyList;A.prevBody=null;this.m_bodyList=A;if(A.nextBody){A.nextBody.prevBody=A}this.m_bodyCount++;A.nextController=B.m_controllerList;A.prevController=null;B.m_controllerList=A;if(A.nextController){A.nextController.prevController=A}B.m_controllerCount++};D.prototype.RemoveBody=function(B){for(var A=B.m_controllerList;A&&A.controller!=this;){A=A.nextController}if(A.prevBody){A.prevBody.nextBody=A.nextBody}if(A.nextBody){A.nextBody.prevBody=A.prevBody}if(A.nextController){A.nextController.prevController=A.prevController}if(A.prevController){A.prevController.nextController=A.nextController}if(this.m_bodyList==A){this.m_bodyList=A.nextBody}if(B.m_controllerList==A){B.m_controllerList=A.nextController}B.m_controllerCount--;this.m_bodyCount--};D.prototype.Clear=function(){for(;this.m_bodyList;){this.RemoveBody(this.m_bodyList.body)}};D.prototype.GetNext=function(){return this.m_next};D.prototype.GetWorld=function(){return this.m_world};D.prototype.GetBodyList=function(){return this.m_bodyList};C.b2ControllerEdge=function(){};Box2D.inherit(J,Box2D.Dynamics.Controllers.b2Controller);J.prototype.__super=Box2D.Dynamics.Controllers.b2Controller.prototype;J.b2GravityController=function(){Box2D.Dynamics.Controllers.b2Controller.b2Controller.apply(this,arguments);this.G=1;this.invSqr=true};J.prototype.Step=function(){var K=null,R=null,S=null,F=0,B=null,G=null,Q=null,U=0,A=0,T=0;U=null;if(this.invSqr){for(K=this.m_bodyList;K;K=K.nextBody){R=K.body;S=R.GetWorldCenter();F=R.GetMass();for(B=this.m_bodyList;B!=K;B=B.nextBody){G=B.body;Q=G.GetWorldCenter();U=Q.x-S.x;A=Q.y-S.y;T=U*U+A*A;if(!(T<Number.MIN_VALUE)){U=new M(U,A);U.Multiply(this.G/T/Math.sqrt(T)*F*G.GetMass());R.IsAwake()&&R.ApplyForce(U,S);U.Multiply(-1);G.IsAwake()&&G.ApplyForce(U,Q)}}}}else{for(K=this.m_bodyList;K;K=K.nextBody){R=K.body;S=R.GetWorldCenter();F=R.GetMass();for(B=this.m_bodyList;B!=K;B=B.nextBody){G=B.body;Q=G.GetWorldCenter();U=Q.x-S.x;A=Q.y-S.y;T=U*U+A*A;if(!(T<Number.MIN_VALUE)){U=new M(U,A);U.Multiply(this.G/T*F*G.GetMass());R.IsAwake()&&R.ApplyForce(U,S);U.Multiply(-1);G.IsAwake()&&G.ApplyForce(U,Q)}}}}};Box2D.inherit(H,Box2D.Dynamics.Controllers.b2Controller);H.prototype.__super=Box2D.Dynamics.Controllers.b2Controller.prototype;H.b2TensorDampingController=function(){Box2D.Dynamics.Controllers.b2Controller.b2Controller.apply(this,arguments);this.T=new P;this.maxTimestep=0};H.prototype.SetAxisAligned=function(B,A){if(B===undefined){B=0}if(A===undefined){A=0}this.T.col1.x=-B;this.T.col1.y=0;this.T.col2.x=0;this.T.col2.y=-A;this.maxTimestep=B>0||A>0?1/Math.max(B,A):0};H.prototype.Step=function(G){G=G.dt;if(!(G<=Number.MIN_VALUE)){if(G>this.maxTimestep&&this.maxTimestep>0){G=this.maxTimestep}for(var B=this.m_bodyList;B;B=B.nextBody){var F=B.body;if(F.IsAwake()){var A=F.GetWorldVector(O.MulMV(this.T,F.GetLocalVector(F.GetLinearVelocity())));F.SetLinearVelocity(new M(F.GetLinearVelocity().x+A.x*G,F.GetLinearVelocity().y+A.y*G))}}}}})();(function(){var AE=Box2D.Common.b2Settings,AC=Box2D.Common.Math.b2Mat22,o=Box2D.Common.Math.b2Mat33,t=Box2D.Common.Math.b2Math,AB=Box2D.Common.Math.b2Vec2,AI=Box2D.Common.Math.b2Vec3,X=Box2D.Dynamics.Joints.b2DistanceJoint,AJ=Box2D.Dynamics.Joints.b2DistanceJointDef,AH=Box2D.Dynamics.Joints.b2FrictionJoint,f=Box2D.Dynamics.Joints.b2FrictionJointDef,T=Box2D.Dynamics.Joints.b2GearJoint,l=Box2D.Dynamics.Joints.b2GearJointDef,m=Box2D.Dynamics.Joints.b2Jacobian,x=Box2D.Dynamics.Joints.b2Joint,P=Box2D.Dynamics.Joints.b2JointDef,J=Box2D.Dynamics.Joints.b2JointEdge,AK=Box2D.Dynamics.Joints.b2LineJoint,n=Box2D.Dynamics.Joints.b2LineJointDef,AD=Box2D.Dynamics.Joints.b2MouseJoint,AG=Box2D.Dynamics.Joints.b2MouseJointDef,AA=Box2D.Dynamics.Joints.b2PrismaticJoint,g=Box2D.Dynamics.Joints.b2PrismaticJointDef,AF=Box2D.Dynamics.Joints.b2PulleyJoint,e=Box2D.Dynamics.Joints.b2PulleyJointDef,h=Box2D.Dynamics.Joints.b2RevoluteJoint,b=Box2D.Dynamics.Joints.b2RevoluteJointDef,AL=Box2D.Dynamics.Joints.b2WeldJoint,C=Box2D.Dynamics.Joints.b2WeldJointDef;Box2D.inherit(X,Box2D.Dynamics.Joints.b2Joint);X.prototype.__super=Box2D.Dynamics.Joints.b2Joint.prototype;X.b2DistanceJoint=function(){Box2D.Dynamics.Joints.b2Joint.b2Joint.apply(this,arguments);this.m_localAnchor1=new AB;this.m_localAnchor2=new AB;this.m_u=new AB};X.prototype.GetAnchorA=function(){return this.m_bodyA.GetWorldPoint(this.m_localAnchor1)};X.prototype.GetAnchorB=function(){return this.m_bodyB.GetWorldPoint(this.m_localAnchor2)};X.prototype.GetReactionForce=function(A){if(A===undefined){A=0}return new AB(A*this.m_impulse*this.m_u.x,A*this.m_impulse*this.m_u.y)};X.prototype.GetReactionTorque=function(){return 0};X.prototype.GetLength=function(){return this.m_length};X.prototype.SetLength=function(A){if(A===undefined){A=0}this.m_length=A};X.prototype.GetFrequency=function(){return this.m_frequencyHz};X.prototype.SetFrequency=function(A){if(A===undefined){A=0}this.m_frequencyHz=A};X.prototype.GetDampingRatio=function(){return this.m_dampingRatio};X.prototype.SetDampingRatio=function(A){if(A===undefined){A=0}this.m_dampingRatio=A};X.prototype.b2DistanceJoint=function(A){this.__super.b2Joint.call(this,A);this.m_localAnchor1.SetV(A.localAnchorA);this.m_localAnchor2.SetV(A.localAnchorB);this.m_length=A.length;this.m_frequencyHz=A.frequencyHz;this.m_dampingRatio=A.dampingRatio;this.m_bias=this.m_gamma=this.m_impulse=0};X.prototype.InitVelocityConstraints=function(I){var G,E=0,F=this.m_bodyA,B=this.m_bodyB;G=F.m_xf.R;var A=this.m_localAnchor1.x-F.m_sweep.localCenter.x,D=this.m_localAnchor1.y-F.m_sweep.localCenter.y;E=G.col1.x*A+G.col2.x*D;D=G.col1.y*A+G.col2.y*D;A=E;G=B.m_xf.R;var M=this.m_localAnchor2.x-B.m_sweep.localCenter.x,K=this.m_localAnchor2.y-B.m_sweep.localCenter.y;E=G.col1.x*M+G.col2.x*K;K=G.col1.y*M+G.col2.y*K;M=E;this.m_u.x=B.m_sweep.c.x+M-F.m_sweep.c.x-A;this.m_u.y=B.m_sweep.c.y+K-F.m_sweep.c.y-D;E=Math.sqrt(this.m_u.x*this.m_u.x+this.m_u.y*this.m_u.y);E>AE.b2_linearSlop?this.m_u.Multiply(1/E):this.m_u.SetZero();G=A*this.m_u.y-D*this.m_u.x;var H=M*this.m_u.y-K*this.m_u.x;G=F.m_invMass+F.m_invI*G*G+B.m_invMass+B.m_invI*H*H;this.m_mass=G!=0?1/G:0;if(this.m_frequencyHz>0){E=E-this.m_length;H=2*Math.PI*this.m_frequencyHz;var L=this.m_mass*H*H;this.m_gamma=I.dt*(2*this.m_mass*this.m_dampingRatio*H+I.dt*L);this.m_gamma=this.m_gamma!=0?1/this.m_gamma:0;this.m_bias=E*I.dt*L*this.m_gamma;this.m_mass=G+this.m_gamma;this.m_mass=this.m_mass!=0?1/this.m_mass:0}if(I.warmStarting){this.m_impulse*=I.dtRatio;I=this.m_impulse*this.m_u.x;G=this.m_impulse*this.m_u.y;F.m_linearVelocity.x-=F.m_invMass*I;F.m_linearVelocity.y-=F.m_invMass*G;F.m_angularVelocity-=F.m_invI*(A*G-D*I);B.m_linearVelocity.x+=B.m_invMass*I;B.m_linearVelocity.y+=B.m_invMass*G;B.m_angularVelocity+=B.m_invI*(M*G-K*I)}else{this.m_impulse=0}};X.prototype.SolveVelocityConstraints=function(){var H,E=this.m_bodyA,B=this.m_bodyB;H=E.m_xf.R;var D=this.m_localAnchor1.x-E.m_sweep.localCenter.x,G=this.m_localAnchor1.y-E.m_sweep.localCenter.y,F=H.col1.x*D+H.col2.x*G;G=H.col1.y*D+H.col2.y*G;D=F;H=B.m_xf.R;var I=this.m_localAnchor2.x-B.m_sweep.localCenter.x,A=this.m_localAnchor2.y-B.m_sweep.localCenter.y;F=H.col1.x*I+H.col2.x*A;A=H.col1.y*I+H.col2.y*A;I=F;F=-this.m_mass*(this.m_u.x*(B.m_linearVelocity.x+-B.m_angularVelocity*A-(E.m_linearVelocity.x+-E.m_angularVelocity*G))+this.m_u.y*(B.m_linearVelocity.y+B.m_angularVelocity*I-(E.m_linearVelocity.y+E.m_angularVelocity*D))+this.m_bias+this.m_gamma*this.m_impulse);this.m_impulse+=F;H=F*this.m_u.x;F=F*this.m_u.y;E.m_linearVelocity.x-=E.m_invMass*H;E.m_linearVelocity.y-=E.m_invMass*F;E.m_angularVelocity-=E.m_invI*(D*F-G*H);B.m_linearVelocity.x+=B.m_invMass*H;B.m_linearVelocity.y+=B.m_invMass*F;B.m_angularVelocity+=B.m_invI*(I*F-A*H)};X.prototype.SolvePositionConstraints=function(){var I;if(this.m_frequencyHz>0){return true}var G=this.m_bodyA,E=this.m_bodyB;I=G.m_xf.R;var F=this.m_localAnchor1.x-G.m_sweep.localCenter.x,B=this.m_localAnchor1.y-G.m_sweep.localCenter.y,A=I.col1.x*F+I.col2.x*B;B=I.col1.y*F+I.col2.y*B;F=A;I=E.m_xf.R;var D=this.m_localAnchor2.x-E.m_sweep.localCenter.x,L=this.m_localAnchor2.y-E.m_sweep.localCenter.y;A=I.col1.x*D+I.col2.x*L;L=I.col1.y*D+I.col2.y*L;D=A;A=E.m_sweep.c.x+D-G.m_sweep.c.x-F;var K=E.m_sweep.c.y+L-G.m_sweep.c.y-B;I=Math.sqrt(A*A+K*K);A/=I;K/=I;I=I-this.m_length;I=t.Clamp(I,-AE.b2_maxLinearCorrection,AE.b2_maxLinearCorrection);var H=-this.m_mass*I;this.m_u.Set(A,K);A=H*this.m_u.x;K=H*this.m_u.y;G.m_sweep.c.x-=G.m_invMass*A;G.m_sweep.c.y-=G.m_invMass*K;G.m_sweep.a-=G.m_invI*(F*K-B*A);E.m_sweep.c.x+=E.m_invMass*A;E.m_sweep.c.y+=E.m_invMass*K;E.m_sweep.a+=E.m_invI*(D*K-L*A);G.SynchronizeTransform();E.SynchronizeTransform();return t.Abs(I)<AE.b2_linearSlop};Box2D.inherit(AJ,Box2D.Dynamics.Joints.b2JointDef);AJ.prototype.__super=Box2D.Dynamics.Joints.b2JointDef.prototype;AJ.b2DistanceJointDef=function(){Box2D.Dynamics.Joints.b2JointDef.b2JointDef.apply(this,arguments);this.localAnchorA=new AB;this.localAnchorB=new AB};AJ.prototype.b2DistanceJointDef=function(){this.__super.b2JointDef.call(this);this.type=x.e_distanceJoint;this.length=1;this.dampingRatio=this.frequencyHz=0};AJ.prototype.Initialize=function(E,D,A,B){this.bodyA=E;this.bodyB=D;this.localAnchorA.SetV(this.bodyA.GetLocalPoint(A));this.localAnchorB.SetV(this.bodyB.GetLocalPoint(B));E=B.x-A.x;A=B.y-A.y;this.length=Math.sqrt(E*E+A*A);this.dampingRatio=this.frequencyHz=0};Box2D.inherit(AH,Box2D.Dynamics.Joints.b2Joint);AH.prototype.__super=Box2D.Dynamics.Joints.b2Joint.prototype;AH.b2FrictionJoint=function(){Box2D.Dynamics.Joints.b2Joint.b2Joint.apply(this,arguments);this.m_localAnchorA=new AB;this.m_localAnchorB=new AB;this.m_linearMass=new AC;this.m_linearImpulse=new AB};AH.prototype.GetAnchorA=function(){return this.m_bodyA.GetWorldPoint(this.m_localAnchorA)};AH.prototype.GetAnchorB=function(){return this.m_bodyB.GetWorldPoint(this.m_localAnchorB)};AH.prototype.GetReactionForce=function(A){if(A===undefined){A=0}return new AB(A*this.m_linearImpulse.x,A*this.m_linearImpulse.y)};AH.prototype.GetReactionTorque=function(A){if(A===undefined){A=0}return A*this.m_angularImpulse};AH.prototype.SetMaxForce=function(A){if(A===undefined){A=0}this.m_maxForce=A};AH.prototype.GetMaxForce=function(){return this.m_maxForce};AH.prototype.SetMaxTorque=function(A){if(A===undefined){A=0}this.m_maxTorque=A};AH.prototype.GetMaxTorque=function(){return this.m_maxTorque};AH.prototype.b2FrictionJoint=function(A){this.__super.b2Joint.call(this,A);this.m_localAnchorA.SetV(A.localAnchorA);this.m_localAnchorB.SetV(A.localAnchorB);this.m_linearMass.SetZero();this.m_angularMass=0;this.m_linearImpulse.SetZero();this.m_angularImpulse=0;this.m_maxForce=A.maxForce;this.m_maxTorque=A.maxTorque};AH.prototype.InitVelocityConstraints=function(K){var G,E=0,F=this.m_bodyA,B=this.m_bodyB;G=F.m_xf.R;var A=this.m_localAnchorA.x-F.m_sweep.localCenter.x,D=this.m_localAnchorA.y-F.m_sweep.localCenter.y;E=G.col1.x*A+G.col2.x*D;D=G.col1.y*A+G.col2.y*D;A=E;G=B.m_xf.R;var N=this.m_localAnchorB.x-B.m_sweep.localCenter.x,L=this.m_localAnchorB.y-B.m_sweep.localCenter.y;E=G.col1.x*N+G.col2.x*L;L=G.col1.y*N+G.col2.y*L;N=E;G=F.m_invMass;E=B.m_invMass;var H=F.m_invI,M=B.m_invI,I=new AC;I.col1.x=G+E;I.col2.x=0;I.col1.y=0;I.col2.y=G+E;I.col1.x+=H*D*D;I.col2.x+=-H*A*D;I.col1.y+=-H*A*D;I.col2.y+=H*A*A;I.col1.x+=M*L*L;I.col2.x+=-M*N*L;I.col1.y+=-M*N*L;I.col2.y+=M*N*N;I.GetInverse(this.m_linearMass);this.m_angularMass=H+M;if(this.m_angularMass>0){this.m_angularMass=1/this.m_angularMass}if(K.warmStarting){this.m_linearImpulse.x*=K.dtRatio;this.m_linearImpulse.y*=K.dtRatio;this.m_angularImpulse*=K.dtRatio;K=this.m_linearImpulse;F.m_linearVelocity.x-=G*K.x;F.m_linearVelocity.y-=G*K.y;F.m_angularVelocity-=H*(A*K.y-D*K.x+this.m_angularImpulse);B.m_linearVelocity.x+=E*K.x;B.m_linearVelocity.y+=E*K.y;B.m_angularVelocity+=M*(N*K.y-L*K.x+this.m_angularImpulse)}else{this.m_linearImpulse.SetZero();this.m_angularImpulse=0}};AH.prototype.SolveVelocityConstraints=function(R){var M,K=0,L=this.m_bodyA,G=this.m_bodyB,F=L.m_linearVelocity,H=L.m_angularVelocity,V=G.m_linearVelocity,S=G.m_angularVelocity,N=L.m_invMass,U=G.m_invMass,Q=L.m_invI,O=G.m_invI;M=L.m_xf.R;var I=this.m_localAnchorA.x-L.m_sweep.localCenter.x,E=this.m_localAnchorA.y-L.m_sweep.localCenter.y;K=M.col1.x*I+M.col2.x*E;E=M.col1.y*I+M.col2.y*E;I=K;M=G.m_xf.R;var D=this.m_localAnchorB.x-G.m_sweep.localCenter.x,A=this.m_localAnchorB.y-G.m_sweep.localCenter.y;K=M.col1.x*D+M.col2.x*A;A=M.col1.y*D+M.col2.y*A;D=K;M=0;K=-this.m_angularMass*(S-H);var B=this.m_angularImpulse;M=R.dt*this.m_maxTorque;this.m_angularImpulse=t.Clamp(this.m_angularImpulse+K,-M,M);K=this.m_angularImpulse-B;H-=Q*K;S+=O*K;M=t.MulMV(this.m_linearMass,new AB(-(V.x-S*A-F.x+H*E),-(V.y+S*D-F.y-H*I)));K=this.m_linearImpulse.Copy();this.m_linearImpulse.Add(M);M=R.dt*this.m_maxForce;if(this.m_linearImpulse.LengthSquared()>M*M){this.m_linearImpulse.Normalize();this.m_linearImpulse.Multiply(M)}M=t.SubtractVV(this.m_linearImpulse,K);F.x-=N*M.x;F.y-=N*M.y;H-=Q*(I*M.y-E*M.x);V.x+=U*M.x;V.y+=U*M.y;S+=O*(D*M.y-A*M.x);L.m_angularVelocity=H;G.m_angularVelocity=S};AH.prototype.SolvePositionConstraints=function(){return true};Box2D.inherit(f,Box2D.Dynamics.Joints.b2JointDef);f.prototype.__super=Box2D.Dynamics.Joints.b2JointDef.prototype;f.b2FrictionJointDef=function(){Box2D.Dynamics.Joints.b2JointDef.b2JointDef.apply(this,arguments);this.localAnchorA=new AB;this.localAnchorB=new AB};f.prototype.b2FrictionJointDef=function(){this.__super.b2JointDef.call(this);this.type=x.e_frictionJoint;this.maxTorque=this.maxForce=0};f.prototype.Initialize=function(D,B,A){this.bodyA=D;this.bodyB=B;this.localAnchorA.SetV(this.bodyA.GetLocalPoint(A));this.localAnchorB.SetV(this.bodyB.GetLocalPoint(A))};Box2D.inherit(T,Box2D.Dynamics.Joints.b2Joint);T.prototype.__super=Box2D.Dynamics.Joints.b2Joint.prototype;T.b2GearJoint=function(){Box2D.Dynamics.Joints.b2Joint.b2Joint.apply(this,arguments);this.m_groundAnchor1=new AB;this.m_groundAnchor2=new AB;this.m_localAnchor1=new AB;this.m_localAnchor2=new AB;this.m_J=new m};T.prototype.GetAnchorA=function(){return this.m_bodyA.GetWorldPoint(this.m_localAnchor1)};T.prototype.GetAnchorB=function(){return this.m_bodyB.GetWorldPoint(this.m_localAnchor2)};T.prototype.GetReactionForce=function(A){if(A===undefined){A=0}return new AB(A*this.m_impulse*this.m_J.linearB.x,A*this.m_impulse*this.m_J.linearB.y)};T.prototype.GetReactionTorque=function(F){if(F===undefined){F=0}var D=this.m_bodyB.m_xf.R,A=this.m_localAnchor1.x-this.m_bodyB.m_sweep.localCenter.x,B=this.m_localAnchor1.y-this.m_bodyB.m_sweep.localCenter.y,E=D.col1.x*A+D.col2.x*B;B=D.col1.y*A+D.col2.y*B;A=E;return F*(this.m_impulse*this.m_J.angularB-A*this.m_impulse*this.m_J.linearB.y+B*this.m_impulse*this.m_J.linearB.x)};T.prototype.GetRatio=function(){return this.m_ratio};T.prototype.SetRatio=function(A){if(A===undefined){A=0}this.m_ratio=A};T.prototype.b2GearJoint=function(F){this.__super.b2Joint.call(this,F);var D=parseInt(F.joint1.m_type),A=parseInt(F.joint2.m_type);this.m_prismatic2=this.m_revolute2=this.m_prismatic1=this.m_revolute1=null;var B=0,E=0;this.m_ground1=F.joint1.GetBodyA();this.m_bodyA=F.joint1.GetBodyB();if(D==x.e_revoluteJoint){this.m_revolute1=F.joint1 instanceof h?F.joint1:null;this.m_groundAnchor1.SetV(this.m_revolute1.m_localAnchor1);this.m_localAnchor1.SetV(this.m_revolute1.m_localAnchor2);B=this.m_revolute1.GetJointAngle()}else{this.m_prismatic1=F.joint1 instanceof AA?F.joint1:null;this.m_groundAnchor1.SetV(this.m_prismatic1.m_localAnchor1);this.m_localAnchor1.SetV(this.m_prismatic1.m_localAnchor2);B=this.m_prismatic1.GetJointTranslation()}this.m_ground2=F.joint2.GetBodyA();this.m_bodyB=F.joint2.GetBodyB();if(A==x.e_revoluteJoint){this.m_revolute2=F.joint2 instanceof h?F.joint2:null;this.m_groundAnchor2.SetV(this.m_revolute2.m_localAnchor1);this.m_localAnchor2.SetV(this.m_revolute2.m_localAnchor2);E=this.m_revolute2.GetJointAngle()}else{this.m_prismatic2=F.joint2 instanceof AA?F.joint2:null;this.m_groundAnchor2.SetV(this.m_prismatic2.m_localAnchor1);this.m_localAnchor2.SetV(this.m_prismatic2.m_localAnchor2);E=this.m_prismatic2.GetJointTranslation()}this.m_ratio=F.ratio;this.m_constant=B+this.m_ratio*E;this.m_impulse=0};T.prototype.InitVelocityConstraints=function(I){var G=this.m_ground1,E=this.m_ground2,F=this.m_bodyA,B=this.m_bodyB,A=0,D=0,M=0,K=0,H=M=0,L=0;this.m_J.SetZero();if(this.m_revolute1){this.m_J.angularA=-1;L+=F.m_invI}else{G=G.m_xf.R;D=this.m_prismatic1.m_localXAxis1;A=G.col1.x*D.x+G.col2.x*D.y;D=G.col1.y*D.x+G.col2.y*D.y;G=F.m_xf.R;M=this.m_localAnchor1.x-F.m_sweep.localCenter.x;K=this.m_localAnchor1.y-F.m_sweep.localCenter.y;H=G.col1.x*M+G.col2.x*K;K=G.col1.y*M+G.col2.y*K;M=H;M=M*D-K*A;this.m_J.linearA.Set(-A,-D);this.m_J.angularA=-M;L+=F.m_invMass+F.m_invI*M*M}if(this.m_revolute2){this.m_J.angularB=-this.m_ratio;L+=this.m_ratio*this.m_ratio*B.m_invI}else{G=E.m_xf.R;D=this.m_prismatic2.m_localXAxis1;A=G.col1.x*D.x+G.col2.x*D.y;D=G.col1.y*D.x+G.col2.y*D.y;G=B.m_xf.R;M=this.m_localAnchor2.x-B.m_sweep.localCenter.x;K=this.m_localAnchor2.y-B.m_sweep.localCenter.y;H=G.col1.x*M+G.col2.x*K;K=G.col1.y*M+G.col2.y*K;M=H;M=M*D-K*A;this.m_J.linearB.Set(-this.m_ratio*A,-this.m_ratio*D);this.m_J.angularB=-this.m_ratio*M;L+=this.m_ratio*this.m_ratio*(B.m_invMass+B.m_invI*M*M)}this.m_mass=L>0?1/L:0;if(I.warmStarting){F.m_linearVelocity.x+=F.m_invMass*this.m_impulse*this.m_J.linearA.x;F.m_linearVelocity.y+=F.m_invMass*this.m_impulse*this.m_J.linearA.y;F.m_angularVelocity+=F.m_invI*this.m_impulse*this.m_J.angularA;B.m_linearVelocity.x+=B.m_invMass*this.m_impulse*this.m_J.linearB.x;B.m_linearVelocity.y+=B.m_invMass*this.m_impulse*this.m_J.linearB.y;B.m_angularVelocity+=B.m_invI*this.m_impulse*this.m_J.angularB}else{this.m_impulse=0}};T.prototype.SolveVelocityConstraints=function(){var D=this.m_bodyA,B=this.m_bodyB,A=-this.m_mass*this.m_J.Compute(D.m_linearVelocity,D.m_angularVelocity,B.m_linearVelocity,B.m_angularVelocity);this.m_impulse+=A;D.m_linearVelocity.x+=D.m_invMass*A*this.m_J.linearA.x;D.m_linearVelocity.y+=D.m_invMass*A*this.m_J.linearA.y;D.m_angularVelocity+=D.m_invI*A*this.m_J.angularA;B.m_linearVelocity.x+=B.m_invMass*A*this.m_J.linearB.x;B.m_linearVelocity.y+=B.m_invMass*A*this.m_J.linearB.y;B.m_angularVelocity+=B.m_invI*A*this.m_J.angularB};T.prototype.SolvePositionConstraints=function(){var E=this.m_bodyA,D=this.m_bodyB,A=0,B=0;A=this.m_revolute1?this.m_revolute1.GetJointAngle():this.m_prismatic1.GetJointTranslation();B=this.m_revolute2?this.m_revolute2.GetJointAngle():this.m_prismatic2.GetJointTranslation();A=-this.m_mass*(this.m_constant-(A+this.m_ratio*B));E.m_sweep.c.x+=E.m_invMass*A*this.m_J.linearA.x;E.m_sweep.c.y+=E.m_invMass*A*this.m_J.linearA.y;E.m_sweep.a+=E.m_invI*A*this.m_J.angularA;D.m_sweep.c.x+=D.m_invMass*A*this.m_J.linearB.x;D.m_sweep.c.y+=D.m_invMass*A*this.m_J.linearB.y;D.m_sweep.a+=D.m_invI*A*this.m_J.angularB;E.SynchronizeTransform();D.SynchronizeTransform();return 0<AE.b2_linearSlop};Box2D.inherit(l,Box2D.Dynamics.Joints.b2JointDef);l.prototype.__super=Box2D.Dynamics.Joints.b2JointDef.prototype;l.b2GearJointDef=function(){Box2D.Dynamics.Joints.b2JointDef.b2JointDef.apply(this,arguments)};l.prototype.b2GearJointDef=function(){this.__super.b2JointDef.call(this);this.type=x.e_gearJoint;this.joint2=this.joint1=null;this.ratio=1};m.b2Jacobian=function(){this.linearA=new AB;this.linearB=new AB};m.prototype.SetZero=function(){this.linearA.SetZero();this.angularA=0;this.linearB.SetZero();this.angularB=0};m.prototype.Set=function(E,D,A,B){if(D===undefined){D=0}if(B===undefined){B=0}this.linearA.SetV(E);this.angularA=D;this.linearB.SetV(A);this.angularB=B};m.prototype.Compute=function(E,D,A,B){if(D===undefined){D=0}if(B===undefined){B=0}return this.linearA.x*E.x+this.linearA.y*E.y+this.angularA*D+(this.linearB.x*A.x+this.linearB.y*A.y)+this.angularB*B};x.b2Joint=function(){this.m_edgeA=new J;this.m_edgeB=new J;this.m_localCenterA=new AB;this.m_localCenterB=new AB};x.prototype.GetType=function(){return this.m_type};x.prototype.GetAnchorA=function(){return null};x.prototype.GetAnchorB=function(){return null};x.prototype.GetReactionForce=function(){return null};x.prototype.GetReactionTorque=function(){return 0};x.prototype.GetBodyA=function(){return this.m_bodyA};x.prototype.GetBodyB=function(){return this.m_bodyB};x.prototype.GetNext=function(){return this.m_next};x.prototype.GetUserData=function(){return this.m_userData};x.prototype.SetUserData=function(A){this.m_userData=A};x.prototype.IsActive=function(){return this.m_bodyA.IsActive()&&this.m_bodyB.IsActive()};x.Create=function(B){var A=null;switch(B.type){case x.e_distanceJoint:A=new X(B instanceof AJ?B:null);break;case x.e_mouseJoint:A=new AD(B instanceof AG?B:null);break;case x.e_prismaticJoint:A=new AA(B instanceof g?B:null);break;case x.e_revoluteJoint:A=new h(B instanceof b?B:null);break;case x.e_pulleyJoint:A=new AF(B instanceof e?B:null);break;case x.e_gearJoint:A=new T(B instanceof l?B:null);break;case x.e_lineJoint:A=new AK(B instanceof n?B:null);break;case x.e_weldJoint:A=new AL(B instanceof C?B:null);break;case x.e_frictionJoint:A=new AH(B instanceof f?B:null)}return A};x.Destroy=function(){};x.prototype.b2Joint=function(A){AE.b2Assert(A.bodyA!=A.bodyB);this.m_type=A.type;this.m_next=this.m_prev=null;this.m_bodyA=A.bodyA;this.m_bodyB=A.bodyB;this.m_collideConnected=A.collideConnected;this.m_islandFlag=false;this.m_userData=A.userData};x.prototype.InitVelocityConstraints=function(){};x.prototype.SolveVelocityConstraints=function(){};x.prototype.FinalizeVelocityConstraints=function(){};x.prototype.SolvePositionConstraints=function(){return false};Box2D.postDefs.push(function(){Box2D.Dynamics.Joints.b2Joint.e_unknownJoint=0;Box2D.Dynamics.Joints.b2Joint.e_revoluteJoint=1;Box2D.Dynamics.Joints.b2Joint.e_prismaticJoint=2;Box2D.Dynamics.Joints.b2Joint.e_distanceJoint=3;Box2D.Dynamics.Joints.b2Joint.e_pulleyJoint=4;Box2D.Dynamics.Joints.b2Joint.e_mouseJoint=5;Box2D.Dynamics.Joints.b2Joint.e_gearJoint=6;Box2D.Dynamics.Joints.b2Joint.e_lineJoint=7;Box2D.Dynamics.Joints.b2Joint.e_weldJoint=8;Box2D.Dynamics.Joints.b2Joint.e_frictionJoint=9;Box2D.Dynamics.Joints.b2Joint.e_inactiveLimit=0;Box2D.Dynamics.Joints.b2Joint.e_atLowerLimit=1;Box2D.Dynamics.Joints.b2Joint.e_atUpperLimit=2;Box2D.Dynamics.Joints.b2Joint.e_equalLimits=3});P.b2JointDef=function(){};P.prototype.b2JointDef=function(){this.type=x.e_unknownJoint;this.bodyB=this.bodyA=this.userData=null;this.collideConnected=false};J.b2JointEdge=function(){};Box2D.inherit(AK,Box2D.Dynamics.Joints.b2Joint);AK.prototype.__super=Box2D.Dynamics.Joints.b2Joint.prototype;AK.b2LineJoint=function(){Box2D.Dynamics.Joints.b2Joint.b2Joint.apply(this,arguments);this.m_localAnchor1=new AB;this.m_localAnchor2=new AB;this.m_localXAxis1=new AB;this.m_localYAxis1=new AB;this.m_axis=new AB;this.m_perp=new AB;this.m_K=new AC;this.m_impulse=new AB};AK.prototype.GetAnchorA=function(){return this.m_bodyA.GetWorldPoint(this.m_localAnchor1)};AK.prototype.GetAnchorB=function(){return this.m_bodyB.GetWorldPoint(this.m_localAnchor2)};AK.prototype.GetReactionForce=function(A){if(A===undefined){A=0}return new AB(A*(this.m_impulse.x*this.m_perp.x+(this.m_motorImpulse+this.m_impulse.y)*this.m_axis.x),A*(this.m_impulse.x*this.m_perp.y+(this.m_motorImpulse+this.m_impulse.y)*this.m_axis.y))};AK.prototype.GetReactionTorque=function(A){if(A===undefined){A=0}return A*this.m_impulse.y};AK.prototype.GetJointTranslation=function(){var E=this.m_bodyA,D=this.m_bodyB,A=E.GetWorldPoint(this.m_localAnchor1),B=D.GetWorldPoint(this.m_localAnchor2);D=B.x-A.x;A=B.y-A.y;E=E.GetWorldVector(this.m_localXAxis1);return E.x*D+E.y*A};AK.prototype.GetJointSpeed=function(){var I=this.m_bodyA,G=this.m_bodyB,E;E=I.m_xf.R;var F=this.m_localAnchor1.x-I.m_sweep.localCenter.x,B=this.m_localAnchor1.y-I.m_sweep.localCenter.y,A=E.col1.x*F+E.col2.x*B;B=E.col1.y*F+E.col2.y*B;F=A;E=G.m_xf.R;var D=this.m_localAnchor2.x-G.m_sweep.localCenter.x,M=this.m_localAnchor2.y-G.m_sweep.localCenter.y;A=E.col1.x*D+E.col2.x*M;M=E.col1.y*D+E.col2.y*M;D=A;E=G.m_sweep.c.x+D-(I.m_sweep.c.x+F);A=G.m_sweep.c.y+M-(I.m_sweep.c.y+B);var K=I.GetWorldVector(this.m_localXAxis1),H=I.m_linearVelocity,L=G.m_linearVelocity;I=I.m_angularVelocity;G=G.m_angularVelocity;return E*-I*K.y+A*I*K.x+(K.x*(L.x+-G*M-H.x- -I*B)+K.y*(L.y+G*D-H.y-I*F))};AK.prototype.IsLimitEnabled=function(){return this.m_enableLimit};AK.prototype.EnableLimit=function(A){this.m_bodyA.SetAwake(true);this.m_bodyB.SetAwake(true);this.m_enableLimit=A};AK.prototype.GetLowerLimit=function(){return this.m_lowerTranslation};AK.prototype.GetUpperLimit=function(){return this.m_upperTranslation};AK.prototype.SetLimits=function(B,A){if(B===undefined){B=0}if(A===undefined){A=0}this.m_bodyA.SetAwake(true);this.m_bodyB.SetAwake(true);this.m_lowerTranslation=B;this.m_upperTranslation=A};AK.prototype.IsMotorEnabled=function(){return this.m_enableMotor};AK.prototype.EnableMotor=function(A){this.m_bodyA.SetAwake(true);this.m_bodyB.SetAwake(true);this.m_enableMotor=A};AK.prototype.SetMotorSpeed=function(A){if(A===undefined){A=0}this.m_bodyA.SetAwake(true);this.m_bodyB.SetAwake(true);this.m_motorSpeed=A};AK.prototype.GetMotorSpeed=function(){return this.m_motorSpeed};AK.prototype.SetMaxMotorForce=function(A){if(A===undefined){A=0}this.m_bodyA.SetAwake(true);this.m_bodyB.SetAwake(true);this.m_maxMotorForce=A};AK.prototype.GetMaxMotorForce=function(){return this.m_maxMotorForce};AK.prototype.GetMotorForce=function(){return this.m_motorImpulse};AK.prototype.b2LineJoint=function(A){this.__super.b2Joint.call(this,A);this.m_localAnchor1.SetV(A.localAnchorA);this.m_localAnchor2.SetV(A.localAnchorB);this.m_localXAxis1.SetV(A.localAxisA);this.m_localYAxis1.x=-this.m_localXAxis1.y;this.m_localYAxis1.y=this.m_localXAxis1.x;this.m_impulse.SetZero();this.m_motorImpulse=this.m_motorMass=0;this.m_lowerTranslation=A.lowerTranslation;this.m_upperTranslation=A.upperTranslation;this.m_maxMotorForce=A.maxMotorForce;this.m_motorSpeed=A.motorSpeed;this.m_enableLimit=A.enableLimit;this.m_enableMotor=A.enableMotor;this.m_limitState=x.e_inactiveLimit;this.m_axis.SetZero();this.m_perp.SetZero()};AK.prototype.InitVelocityConstraints=function(I){var G=this.m_bodyA,E=this.m_bodyB,F,B=0;this.m_localCenterA.SetV(G.GetLocalCenter());this.m_localCenterB.SetV(E.GetLocalCenter());var A=G.GetTransform();E.GetTransform();F=G.m_xf.R;var D=this.m_localAnchor1.x-this.m_localCenterA.x,L=this.m_localAnchor1.y-this.m_localCenterA.y;B=F.col1.x*D+F.col2.x*L;L=F.col1.y*D+F.col2.y*L;D=B;F=E.m_xf.R;var K=this.m_localAnchor2.x-this.m_localCenterB.x,H=this.m_localAnchor2.y-this.m_localCenterB.y;B=F.col1.x*K+F.col2.x*H;H=F.col1.y*K+F.col2.y*H;K=B;F=E.m_sweep.c.x+K-G.m_sweep.c.x-D;B=E.m_sweep.c.y+H-G.m_sweep.c.y-L;this.m_invMassA=G.m_invMass;this.m_invMassB=E.m_invMass;this.m_invIA=G.m_invI;this.m_invIB=E.m_invI;this.m_axis.SetV(t.MulMV(A.R,this.m_localXAxis1));this.m_a1=(F+D)*this.m_axis.y-(B+L)*this.m_axis.x;this.m_a2=K*this.m_axis.y-H*this.m_axis.x;this.m_motorMass=this.m_invMassA+this.m_invMassB+this.m_invIA*this.m_a1*this.m_a1+this.m_invIB*this.m_a2*this.m_a2;this.m_motorMass=this.m_motorMass>Number.MIN_VALUE?1/this.m_motorMass:0;this.m_perp.SetV(t.MulMV(A.R,this.m_localYAxis1));this.m_s1=(F+D)*this.m_perp.y-(B+L)*this.m_perp.x;this.m_s2=K*this.m_perp.y-H*this.m_perp.x;A=this.m_invMassA;D=this.m_invMassB;L=this.m_invIA;K=this.m_invIB;this.m_K.col1.x=A+D+L*this.m_s1*this.m_s1+K*this.m_s2*this.m_s2;this.m_K.col1.y=L*this.m_s1*this.m_a1+K*this.m_s2*this.m_a2;this.m_K.col2.x=this.m_K.col1.y;this.m_K.col2.y=A+D+L*this.m_a1*this.m_a1+K*this.m_a2*this.m_a2;if(this.m_enableLimit){F=this.m_axis.x*F+this.m_axis.y*B;if(t.Abs(this.m_upperTranslation-this.m_lowerTranslation)<2*AE.b2_linearSlop){this.m_limitState=x.e_equalLimits}else{if(F<=this.m_lowerTranslation){if(this.m_limitState!=x.e_atLowerLimit){this.m_limitState=x.e_atLowerLimit;this.m_impulse.y=0}}else{if(F>=this.m_upperTranslation){if(this.m_limitState!=x.e_atUpperLimit){this.m_limitState=x.e_atUpperLimit;this.m_impulse.y=0}}else{this.m_limitState=x.e_inactiveLimit;this.m_impulse.y=0}}}}else{this.m_limitState=x.e_inactiveLimit}if(this.m_enableMotor==false){this.m_motorImpulse=0}if(I.warmStarting){this.m_impulse.x*=I.dtRatio;this.m_impulse.y*=I.dtRatio;this.m_motorImpulse*=I.dtRatio;I=this.m_impulse.x*this.m_perp.x+(this.m_motorImpulse+this.m_impulse.y)*this.m_axis.x;F=this.m_impulse.x*this.m_perp.y+(this.m_motorImpulse+this.m_impulse.y)*this.m_axis.y;B=this.m_impulse.x*this.m_s1+(this.m_motorImpulse+this.m_impulse.y)*this.m_a1;A=this.m_impulse.x*this.m_s2+(this.m_motorImpulse+this.m_impulse.y)*this.m_a2;G.m_linearVelocity.x-=this.m_invMassA*I;G.m_linearVelocity.y-=this.m_invMassA*F;G.m_angularVelocity-=this.m_invIA*B;E.m_linearVelocity.x+=this.m_invMassB*I;E.m_linearVelocity.y+=this.m_invMassB*F;E.m_angularVelocity+=this.m_invIB*A}else{this.m_impulse.SetZero();this.m_motorImpulse=0}};AK.prototype.SolveVelocityConstraints=function(I){var G=this.m_bodyA,E=this.m_bodyB,F=G.m_linearVelocity,B=G.m_angularVelocity,A=E.m_linearVelocity,D=E.m_angularVelocity,M=0,K=0,H=0,L=0;if(this.m_enableMotor&&this.m_limitState!=x.e_equalLimits){L=this.m_motorMass*(this.m_motorSpeed-(this.m_axis.x*(A.x-F.x)+this.m_axis.y*(A.y-F.y)+this.m_a2*D-this.m_a1*B));M=this.m_motorImpulse;K=I.dt*this.m_maxMotorForce;this.m_motorImpulse=t.Clamp(this.m_motorImpulse+L,-K,K);L=this.m_motorImpulse-M;M=L*this.m_axis.x;K=L*this.m_axis.y;H=L*this.m_a1;L=L*this.m_a2;F.x-=this.m_invMassA*M;F.y-=this.m_invMassA*K;B-=this.m_invIA*H;A.x+=this.m_invMassB*M;A.y+=this.m_invMassB*K;D+=this.m_invIB*L}K=this.m_perp.x*(A.x-F.x)+this.m_perp.y*(A.y-F.y)+this.m_s2*D-this.m_s1*B;if(this.m_enableLimit&&this.m_limitState!=x.e_inactiveLimit){H=this.m_axis.x*(A.x-F.x)+this.m_axis.y*(A.y-F.y)+this.m_a2*D-this.m_a1*B;M=this.m_impulse.Copy();I=this.m_K.Solve(new AB,-K,-H);this.m_impulse.Add(I);if(this.m_limitState==x.e_atLowerLimit){this.m_impulse.y=t.Max(this.m_impulse.y,0)}else{if(this.m_limitState==x.e_atUpperLimit){this.m_impulse.y=t.Min(this.m_impulse.y,0)}}K=-K-(this.m_impulse.y-M.y)*this.m_K.col2.x;H=0;H=this.m_K.col1.x!=0?K/this.m_K.col1.x+M.x:M.x;this.m_impulse.x=H;I.x=this.m_impulse.x-M.x;I.y=this.m_impulse.y-M.y;M=I.x*this.m_perp.x+I.y*this.m_axis.x;K=I.x*this.m_perp.y+I.y*this.m_axis.y;H=I.x*this.m_s1+I.y*this.m_a1;L=I.x*this.m_s2+I.y*this.m_a2}else{I=0;I=this.m_K.col1.x!=0?-K/this.m_K.col1.x:0;this.m_impulse.x+=I;M=I*this.m_perp.x;K=I*this.m_perp.y;H=I*this.m_s1;L=I*this.m_s2}F.x-=this.m_invMassA*M;F.y-=this.m_invMassA*K;B-=this.m_invIA*H;A.x+=this.m_invMassB*M;A.y+=this.m_invMassB*K;D+=this.m_invIB*L;G.m_linearVelocity.SetV(F);G.m_angularVelocity=B;E.m_linearVelocity.SetV(A);E.m_angularVelocity=D};AK.prototype.SolvePositionConstraints=function(){var N=this.m_bodyA,I=this.m_bodyB,G=N.m_sweep.c,H=N.m_sweep.a,D=I.m_sweep.c,B=I.m_sweep.a,E,R=0,O=0,K=0,Q=0,M=E=0,L=0;O=false;var F=0,A=AC.FromAngle(H);K=AC.FromAngle(B);E=A;L=this.m_localAnchor1.x-this.m_localCenterA.x;var U=this.m_localAnchor1.y-this.m_localCenterA.y;R=E.col1.x*L+E.col2.x*U;U=E.col1.y*L+E.col2.y*U;L=R;E=K;K=this.m_localAnchor2.x-this.m_localCenterB.x;Q=this.m_localAnchor2.y-this.m_localCenterB.y;R=E.col1.x*K+E.col2.x*Q;Q=E.col1.y*K+E.col2.y*Q;K=R;E=D.x+K-G.x-L;R=D.y+Q-G.y-U;if(this.m_enableLimit){this.m_axis=t.MulMV(A,this.m_localXAxis1);this.m_a1=(E+L)*this.m_axis.y-(R+U)*this.m_axis.x;this.m_a2=K*this.m_axis.y-Q*this.m_axis.x;var S=this.m_axis.x*E+this.m_axis.y*R;if(t.Abs(this.m_upperTranslation-this.m_lowerTranslation)<2*AE.b2_linearSlop){F=t.Clamp(S,-AE.b2_maxLinearCorrection,AE.b2_maxLinearCorrection);M=t.Abs(S);O=true}else{if(S<=this.m_lowerTranslation){F=t.Clamp(S-this.m_lowerTranslation+AE.b2_linearSlop,-AE.b2_maxLinearCorrection,0);M=this.m_lowerTranslation-S;O=true}else{if(S>=this.m_upperTranslation){F=t.Clamp(S-this.m_upperTranslation+AE.b2_linearSlop,0,AE.b2_maxLinearCorrection);M=S-this.m_upperTranslation;O=true}}}}this.m_perp=t.MulMV(A,this.m_localYAxis1);this.m_s1=(E+L)*this.m_perp.y-(R+U)*this.m_perp.x;this.m_s2=K*this.m_perp.y-Q*this.m_perp.x;A=new AB;U=this.m_perp.x*E+this.m_perp.y*R;M=t.Max(M,t.Abs(U));L=0;if(O){O=this.m_invMassA;K=this.m_invMassB;Q=this.m_invIA;E=this.m_invIB;this.m_K.col1.x=O+K+Q*this.m_s1*this.m_s1+E*this.m_s2*this.m_s2;this.m_K.col1.y=Q*this.m_s1*this.m_a1+E*this.m_s2*this.m_a2;this.m_K.col2.x=this.m_K.col1.y;this.m_K.col2.y=O+K+Q*this.m_a1*this.m_a1+E*this.m_a2*this.m_a2;this.m_K.Solve(A,-U,-F)}else{O=this.m_invMassA;K=this.m_invMassB;Q=this.m_invIA;E=this.m_invIB;F=O+K+Q*this.m_s1*this.m_s1+E*this.m_s2*this.m_s2;O=0;O=F!=0?-U/F:0;A.x=O;A.y=0}F=A.x*this.m_perp.x+A.y*this.m_axis.x;O=A.x*this.m_perp.y+A.y*this.m_axis.y;U=A.x*this.m_s1+A.y*this.m_a1;A=A.x*this.m_s2+A.y*this.m_a2;G.x-=this.m_invMassA*F;G.y-=this.m_invMassA*O;H-=this.m_invIA*U;D.x+=this.m_invMassB*F;D.y+=this.m_invMassB*O;B+=this.m_invIB*A;N.m_sweep.a=H;I.m_sweep.a=B;N.SynchronizeTransform();I.SynchronizeTransform();return M<=AE.b2_linearSlop&&L<=AE.b2_angularSlop};Box2D.inherit(n,Box2D.Dynamics.Joints.b2JointDef);n.prototype.__super=Box2D.Dynamics.Joints.b2JointDef.prototype;n.b2LineJointDef=function(){Box2D.Dynamics.Joints.b2JointDef.b2JointDef.apply(this,arguments);this.localAnchorA=new AB;this.localAnchorB=new AB;this.localAxisA=new AB};n.prototype.b2LineJointDef=function(){this.__super.b2JointDef.call(this);this.type=x.e_lineJoint;this.localAxisA.Set(1,0);this.enableLimit=false;this.upperTranslation=this.lowerTranslation=0;this.enableMotor=false;this.motorSpeed=this.maxMotorForce=0};n.prototype.Initialize=function(E,D,A,B){this.bodyA=E;this.bodyB=D;this.localAnchorA=this.bodyA.GetLocalPoint(A);this.localAnchorB=this.bodyB.GetLocalPoint(A);this.localAxisA=this.bodyA.GetLocalVector(B)};Box2D.inherit(AD,Box2D.Dynamics.Joints.b2Joint);AD.prototype.__super=Box2D.Dynamics.Joints.b2Joint.prototype;AD.b2MouseJoint=function(){Box2D.Dynamics.Joints.b2Joint.b2Joint.apply(this,arguments);this.K=new AC;this.K1=new AC;this.K2=new AC;this.m_localAnchor=new AB;this.m_target=new AB;this.m_impulse=new AB;this.m_mass=new AC;this.m_C=new AB};AD.prototype.GetAnchorA=function(){return this.m_target};AD.prototype.GetAnchorB=function(){return this.m_bodyB.GetWorldPoint(this.m_localAnchor)};AD.prototype.GetReactionForce=function(A){if(A===undefined){A=0}return new AB(A*this.m_impulse.x,A*this.m_impulse.y)};AD.prototype.GetReactionTorque=function(){return 0};AD.prototype.GetTarget=function(){return this.m_target};AD.prototype.SetTarget=function(A){this.m_bodyB.IsAwake()==false&&this.m_bodyB.SetAwake(true);this.m_target=A};AD.prototype.GetMaxForce=function(){return this.m_maxForce};AD.prototype.SetMaxForce=function(A){if(A===undefined){A=0}this.m_maxForce=A};AD.prototype.GetFrequency=function(){return this.m_frequencyHz};AD.prototype.SetFrequency=function(A){if(A===undefined){A=0}this.m_frequencyHz=A};AD.prototype.GetDampingRatio=function(){return this.m_dampingRatio};AD.prototype.SetDampingRatio=function(A){if(A===undefined){A=0}this.m_dampingRatio=A};AD.prototype.b2MouseJoint=function(E){this.__super.b2Joint.call(this,E);this.m_target.SetV(E.target);var D=this.m_target.x-this.m_bodyB.m_xf.position.x,A=this.m_target.y-this.m_bodyB.m_xf.position.y,B=this.m_bodyB.m_xf.R;this.m_localAnchor.x=D*B.col1.x+A*B.col1.y;this.m_localAnchor.y=D*B.col2.x+A*B.col2.y;this.m_maxForce=E.maxForce;this.m_impulse.SetZero();this.m_frequencyHz=E.frequencyHz;this.m_dampingRatio=E.dampingRatio;this.m_gamma=this.m_beta=0};AD.prototype.InitVelocityConstraints=function(G){var D=this.m_bodyB,A=D.GetMass(),B=2*Math.PI*this.m_frequencyHz,F=A*B*B;this.m_gamma=G.dt*(2*A*this.m_dampingRatio*B+G.dt*F);this.m_gamma=this.m_gamma!=0?1/this.m_gamma:0;this.m_beta=G.dt*F*this.m_gamma;F=D.m_xf.R;A=this.m_localAnchor.x-D.m_sweep.localCenter.x;B=this.m_localAnchor.y-D.m_sweep.localCenter.y;var E=F.col1.x*A+F.col2.x*B;B=F.col1.y*A+F.col2.y*B;A=E;F=D.m_invMass;E=D.m_invI;this.K1.col1.x=F;this.K1.col2.x=0;this.K1.col1.y=0;this.K1.col2.y=F;this.K2.col1.x=E*B*B;this.K2.col2.x=-E*A*B;this.K2.col1.y=-E*A*B;this.K2.col2.y=E*A*A;this.K.SetM(this.K1);this.K.AddM(this.K2);this.K.col1.x+=this.m_gamma;this.K.col2.y+=this.m_gamma;this.K.GetInverse(this.m_mass);this.m_C.x=D.m_sweep.c.x+A-this.m_target.x;this.m_C.y=D.m_sweep.c.y+B-this.m_target.y;D.m_angularVelocity*=0.98;this.m_impulse.x*=G.dtRatio;this.m_impulse.y*=G.dtRatio;D.m_linearVelocity.x+=F*this.m_impulse.x;D.m_linearVelocity.y+=F*this.m_impulse.y;D.m_angularVelocity+=E*(A*this.m_impulse.y-B*this.m_impulse.x)};AD.prototype.SolveVelocityConstraints=function(H){var E=this.m_bodyB,B,D=0,G=0;B=E.m_xf.R;var F=this.m_localAnchor.x-E.m_sweep.localCenter.x,I=this.m_localAnchor.y-E.m_sweep.localCenter.y;D=B.col1.x*F+B.col2.x*I;I=B.col1.y*F+B.col2.y*I;F=D;D=E.m_linearVelocity.x+-E.m_angularVelocity*I;var A=E.m_linearVelocity.y+E.m_angularVelocity*F;B=this.m_mass;D=D+this.m_beta*this.m_C.x+this.m_gamma*this.m_impulse.x;G=A+this.m_beta*this.m_C.y+this.m_gamma*this.m_impulse.y;A=-(B.col1.x*D+B.col2.x*G);G=-(B.col1.y*D+B.col2.y*G);B=this.m_impulse.x;D=this.m_impulse.y;this.m_impulse.x+=A;this.m_impulse.y+=G;H=H.dt*this.m_maxForce;this.m_impulse.LengthSquared()>H*H&&this.m_impulse.Multiply(H/this.m_impulse.Length());A=this.m_impulse.x-B;G=this.m_impulse.y-D;E.m_linearVelocity.x+=E.m_invMass*A;E.m_linearVelocity.y+=E.m_invMass*G;E.m_angularVelocity+=E.m_invI*(F*G-I*A)};AD.prototype.SolvePositionConstraints=function(){return true};Box2D.inherit(AG,Box2D.Dynamics.Joints.b2JointDef);AG.prototype.__super=Box2D.Dynamics.Joints.b2JointDef.prototype;AG.b2MouseJointDef=function(){Box2D.Dynamics.Joints.b2JointDef.b2JointDef.apply(this,arguments);this.target=new AB};AG.prototype.b2MouseJointDef=function(){this.__super.b2JointDef.call(this);this.type=x.e_mouseJoint;this.maxForce=0;this.frequencyHz=5;this.dampingRatio=0.7};Box2D.inherit(AA,Box2D.Dynamics.Joints.b2Joint);AA.prototype.__super=Box2D.Dynamics.Joints.b2Joint.prototype;AA.b2PrismaticJoint=function(){Box2D.Dynamics.Joints.b2Joint.b2Joint.apply(this,arguments);this.m_localAnchor1=new AB;this.m_localAnchor2=new AB;this.m_localXAxis1=new AB;this.m_localYAxis1=new AB;this.m_axis=new AB;this.m_perp=new AB;this.m_K=new o;this.m_impulse=new AI};AA.prototype.GetAnchorA=function(){return this.m_bodyA.GetWorldPoint(this.m_localAnchor1)};AA.prototype.GetAnchorB=function(){return this.m_bodyB.GetWorldPoint(this.m_localAnchor2)};AA.prototype.GetReactionForce=function(A){if(A===undefined){A=0}return new AB(A*(this.m_impulse.x*this.m_perp.x+(this.m_motorImpulse+this.m_impulse.z)*this.m_axis.x),A*(this.m_impulse.x*this.m_perp.y+(this.m_motorImpulse+this.m_impulse.z)*this.m_axis.y))};AA.prototype.GetReactionTorque=function(A){if(A===undefined){A=0}return A*this.m_impulse.y};AA.prototype.GetJointTranslation=function(){var E=this.m_bodyA,D=this.m_bodyB,A=E.GetWorldPoint(this.m_localAnchor1),B=D.GetWorldPoint(this.m_localAnchor2);D=B.x-A.x;A=B.y-A.y;E=E.GetWorldVector(this.m_localXAxis1);return E.x*D+E.y*A};AA.prototype.GetJointSpeed=function(){var I=this.m_bodyA,G=this.m_bodyB,E;E=I.m_xf.R;var F=this.m_localAnchor1.x-I.m_sweep.localCenter.x,B=this.m_localAnchor1.y-I.m_sweep.localCenter.y,A=E.col1.x*F+E.col2.x*B;B=E.col1.y*F+E.col2.y*B;F=A;E=G.m_xf.R;var D=this.m_localAnchor2.x-G.m_sweep.localCenter.x,M=this.m_localAnchor2.y-G.m_sweep.localCenter.y;A=E.col1.x*D+E.col2.x*M;M=E.col1.y*D+E.col2.y*M;D=A;E=G.m_sweep.c.x+D-(I.m_sweep.c.x+F);A=G.m_sweep.c.y+M-(I.m_sweep.c.y+B);var K=I.GetWorldVector(this.m_localXAxis1),H=I.m_linearVelocity,L=G.m_linearVelocity;I=I.m_angularVelocity;G=G.m_angularVelocity;return E*-I*K.y+A*I*K.x+(K.x*(L.x+-G*M-H.x- -I*B)+K.y*(L.y+G*D-H.y-I*F))};AA.prototype.IsLimitEnabled=function(){return this.m_enableLimit};AA.prototype.EnableLimit=function(A){this.m_bodyA.SetAwake(true);this.m_bodyB.SetAwake(true);this.m_enableLimit=A};AA.prototype.GetLowerLimit=function(){return this.m_lowerTranslation};AA.prototype.GetUpperLimit=function(){return this.m_upperTranslation};AA.prototype.SetLimits=function(B,A){if(B===undefined){B=0}if(A===undefined){A=0}this.m_bodyA.SetAwake(true);this.m_bodyB.SetAwake(true);this.m_lowerTranslation=B;this.m_upperTranslation=A};AA.prototype.IsMotorEnabled=function(){return this.m_enableMotor};AA.prototype.EnableMotor=function(A){this.m_bodyA.SetAwake(true);this.m_bodyB.SetAwake(true);this.m_enableMotor=A};AA.prototype.SetMotorSpeed=function(A){if(A===undefined){A=0}this.m_bodyA.SetAwake(true);this.m_bodyB.SetAwake(true);this.m_motorSpeed=A};AA.prototype.GetMotorSpeed=function(){return this.m_motorSpeed};AA.prototype.SetMaxMotorForce=function(A){if(A===undefined){A=0}this.m_bodyA.SetAwake(true);this.m_bodyB.SetAwake(true);this.m_maxMotorForce=A};AA.prototype.GetMotorForce=function(){return this.m_motorImpulse};AA.prototype.b2PrismaticJoint=function(A){this.__super.b2Joint.call(this,A);this.m_localAnchor1.SetV(A.localAnchorA);this.m_localAnchor2.SetV(A.localAnchorB);this.m_localXAxis1.SetV(A.localAxisA);this.m_localYAxis1.x=-this.m_localXAxis1.y;this.m_localYAxis1.y=this.m_localXAxis1.x;this.m_refAngle=A.referenceAngle;this.m_impulse.SetZero();this.m_motorImpulse=this.m_motorMass=0;this.m_lowerTranslation=A.lowerTranslation;this.m_upperTranslation=A.upperTranslation;this.m_maxMotorForce=A.maxMotorForce;this.m_motorSpeed=A.motorSpeed;this.m_enableLimit=A.enableLimit;this.m_enableMotor=A.enableMotor;this.m_limitState=x.e_inactiveLimit;this.m_axis.SetZero();this.m_perp.SetZero()};AA.prototype.InitVelocityConstraints=function(I){var G=this.m_bodyA,E=this.m_bodyB,F,B=0;this.m_localCenterA.SetV(G.GetLocalCenter());this.m_localCenterB.SetV(E.GetLocalCenter());var A=G.GetTransform();E.GetTransform();F=G.m_xf.R;var D=this.m_localAnchor1.x-this.m_localCenterA.x,L=this.m_localAnchor1.y-this.m_localCenterA.y;B=F.col1.x*D+F.col2.x*L;L=F.col1.y*D+F.col2.y*L;D=B;F=E.m_xf.R;var K=this.m_localAnchor2.x-this.m_localCenterB.x,H=this.m_localAnchor2.y-this.m_localCenterB.y;B=F.col1.x*K+F.col2.x*H;H=F.col1.y*K+F.col2.y*H;K=B;F=E.m_sweep.c.x+K-G.m_sweep.c.x-D;B=E.m_sweep.c.y+H-G.m_sweep.c.y-L;this.m_invMassA=G.m_invMass;this.m_invMassB=E.m_invMass;this.m_invIA=G.m_invI;this.m_invIB=E.m_invI;this.m_axis.SetV(t.MulMV(A.R,this.m_localXAxis1));this.m_a1=(F+D)*this.m_axis.y-(B+L)*this.m_axis.x;this.m_a2=K*this.m_axis.y-H*this.m_axis.x;this.m_motorMass=this.m_invMassA+this.m_invMassB+this.m_invIA*this.m_a1*this.m_a1+this.m_invIB*this.m_a2*this.m_a2;if(this.m_motorMass>Number.MIN_VALUE){this.m_motorMass=1/this.m_motorMass}this.m_perp.SetV(t.MulMV(A.R,this.m_localYAxis1));this.m_s1=(F+D)*this.m_perp.y-(B+L)*this.m_perp.x;this.m_s2=K*this.m_perp.y-H*this.m_perp.x;A=this.m_invMassA;D=this.m_invMassB;L=this.m_invIA;K=this.m_invIB;this.m_K.col1.x=A+D+L*this.m_s1*this.m_s1+K*this.m_s2*this.m_s2;this.m_K.col1.y=L*this.m_s1+K*this.m_s2;this.m_K.col1.z=L*this.m_s1*this.m_a1+K*this.m_s2*this.m_a2;this.m_K.col2.x=this.m_K.col1.y;this.m_K.col2.y=L+K;this.m_K.col2.z=L*this.m_a1+K*this.m_a2;this.m_K.col3.x=this.m_K.col1.z;this.m_K.col3.y=this.m_K.col2.z;this.m_K.col3.z=A+D+L*this.m_a1*this.m_a1+K*this.m_a2*this.m_a2;if(this.m_enableLimit){F=this.m_axis.x*F+this.m_axis.y*B;if(t.Abs(this.m_upperTranslation-this.m_lowerTranslation)<2*AE.b2_linearSlop){this.m_limitState=x.e_equalLimits}else{if(F<=this.m_lowerTranslation){if(this.m_limitState!=x.e_atLowerLimit){this.m_limitState=x.e_atLowerLimit;this.m_impulse.z=0}}else{if(F>=this.m_upperTranslation){if(this.m_limitState!=x.e_atUpperLimit){this.m_limitState=x.e_atUpperLimit;this.m_impulse.z=0}}else{this.m_limitState=x.e_inactiveLimit;this.m_impulse.z=0}}}}else{this.m_limitState=x.e_inactiveLimit}if(this.m_enableMotor==false){this.m_motorImpulse=0}if(I.warmStarting){this.m_impulse.x*=I.dtRatio;this.m_impulse.y*=I.dtRatio;this.m_motorImpulse*=I.dtRatio;I=this.m_impulse.x*this.m_perp.x+(this.m_motorImpulse+this.m_impulse.z)*this.m_axis.x;F=this.m_impulse.x*this.m_perp.y+(this.m_motorImpulse+this.m_impulse.z)*this.m_axis.y;B=this.m_impulse.x*this.m_s1+this.m_impulse.y+(this.m_motorImpulse+this.m_impulse.z)*this.m_a1;A=this.m_impulse.x*this.m_s2+this.m_impulse.y+(this.m_motorImpulse+this.m_impulse.z)*this.m_a2;G.m_linearVelocity.x-=this.m_invMassA*I;G.m_linearVelocity.y-=this.m_invMassA*F;G.m_angularVelocity-=this.m_invIA*B;E.m_linearVelocity.x+=this.m_invMassB*I;E.m_linearVelocity.y+=this.m_invMassB*F;E.m_angularVelocity+=this.m_invIB*A}else{this.m_impulse.SetZero();this.m_motorImpulse=0}};AA.prototype.SolveVelocityConstraints=function(I){var G=this.m_bodyA,E=this.m_bodyB,F=G.m_linearVelocity,B=G.m_angularVelocity,A=E.m_linearVelocity,D=E.m_angularVelocity,M=0,K=0,H=0,L=0;if(this.m_enableMotor&&this.m_limitState!=x.e_equalLimits){L=this.m_motorMass*(this.m_motorSpeed-(this.m_axis.x*(A.x-F.x)+this.m_axis.y*(A.y-F.y)+this.m_a2*D-this.m_a1*B));M=this.m_motorImpulse;I=I.dt*this.m_maxMotorForce;this.m_motorImpulse=t.Clamp(this.m_motorImpulse+L,-I,I);L=this.m_motorImpulse-M;M=L*this.m_axis.x;K=L*this.m_axis.y;H=L*this.m_a1;L=L*this.m_a2;F.x-=this.m_invMassA*M;F.y-=this.m_invMassA*K;B-=this.m_invIA*H;A.x+=this.m_invMassB*M;A.y+=this.m_invMassB*K;D+=this.m_invIB*L}H=this.m_perp.x*(A.x-F.x)+this.m_perp.y*(A.y-F.y)+this.m_s2*D-this.m_s1*B;K=D-B;if(this.m_enableLimit&&this.m_limitState!=x.e_inactiveLimit){I=this.m_axis.x*(A.x-F.x)+this.m_axis.y*(A.y-F.y)+this.m_a2*D-this.m_a1*B;M=this.m_impulse.Copy();I=this.m_K.Solve33(new AI,-H,-K,-I);this.m_impulse.Add(I);if(this.m_limitState==x.e_atLowerLimit){this.m_impulse.z=t.Max(this.m_impulse.z,0)}else{if(this.m_limitState==x.e_atUpperLimit){this.m_impulse.z=t.Min(this.m_impulse.z,0)}}H=-H-(this.m_impulse.z-M.z)*this.m_K.col3.x;K=-K-(this.m_impulse.z-M.z)*this.m_K.col3.y;K=this.m_K.Solve22(new AB,H,K);K.x+=M.x;K.y+=M.y;this.m_impulse.x=K.x;this.m_impulse.y=K.y;I.x=this.m_impulse.x-M.x;I.y=this.m_impulse.y-M.y;I.z=this.m_impulse.z-M.z;M=I.x*this.m_perp.x+I.z*this.m_axis.x;K=I.x*this.m_perp.y+I.z*this.m_axis.y;H=I.x*this.m_s1+I.y+I.z*this.m_a1;L=I.x*this.m_s2+I.y+I.z*this.m_a2}else{I=this.m_K.Solve22(new AB,-H,-K);this.m_impulse.x+=I.x;this.m_impulse.y+=I.y;M=I.x*this.m_perp.x;K=I.x*this.m_perp.y;H=I.x*this.m_s1+I.y;L=I.x*this.m_s2+I.y}F.x-=this.m_invMassA*M;F.y-=this.m_invMassA*K;B-=this.m_invIA*H;A.x+=this.m_invMassB*M;A.y+=this.m_invMassB*K;D+=this.m_invIB*L;G.m_linearVelocity.SetV(F);G.m_angularVelocity=B;E.m_linearVelocity.SetV(A);E.m_angularVelocity=D};AA.prototype.SolvePositionConstraints=function(){var N=this.m_bodyA,I=this.m_bodyB,G=N.m_sweep.c,H=N.m_sweep.a,D=I.m_sweep.c,B=I.m_sweep.a,E,R=0,O=0,K=0,Q=R=E=0,M=0;O=false;var L=0,F=AC.FromAngle(H),A=AC.FromAngle(B);E=F;M=this.m_localAnchor1.x-this.m_localCenterA.x;var U=this.m_localAnchor1.y-this.m_localCenterA.y;R=E.col1.x*M+E.col2.x*U;U=E.col1.y*M+E.col2.y*U;M=R;E=A;A=this.m_localAnchor2.x-this.m_localCenterB.x;K=this.m_localAnchor2.y-this.m_localCenterB.y;R=E.col1.x*A+E.col2.x*K;K=E.col1.y*A+E.col2.y*K;A=R;E=D.x+A-G.x-M;R=D.y+K-G.y-U;if(this.m_enableLimit){this.m_axis=t.MulMV(F,this.m_localXAxis1);this.m_a1=(E+M)*this.m_axis.y-(R+U)*this.m_axis.x;this.m_a2=A*this.m_axis.y-K*this.m_axis.x;var S=this.m_axis.x*E+this.m_axis.y*R;if(t.Abs(this.m_upperTranslation-this.m_lowerTranslation)<2*AE.b2_linearSlop){L=t.Clamp(S,-AE.b2_maxLinearCorrection,AE.b2_maxLinearCorrection);Q=t.Abs(S);O=true}else{if(S<=this.m_lowerTranslation){L=t.Clamp(S-this.m_lowerTranslation+AE.b2_linearSlop,-AE.b2_maxLinearCorrection,0);Q=this.m_lowerTranslation-S;O=true}else{if(S>=this.m_upperTranslation){L=t.Clamp(S-this.m_upperTranslation+AE.b2_linearSlop,0,AE.b2_maxLinearCorrection);Q=S-this.m_upperTranslation;O=true}}}}this.m_perp=t.MulMV(F,this.m_localYAxis1);this.m_s1=(E+M)*this.m_perp.y-(R+U)*this.m_perp.x;this.m_s2=A*this.m_perp.y-K*this.m_perp.x;F=new AI;U=this.m_perp.x*E+this.m_perp.y*R;A=B-H-this.m_refAngle;Q=t.Max(Q,t.Abs(U));M=t.Abs(A);if(O){O=this.m_invMassA;K=this.m_invMassB;E=this.m_invIA;R=this.m_invIB;this.m_K.col1.x=O+K+E*this.m_s1*this.m_s1+R*this.m_s2*this.m_s2;this.m_K.col1.y=E*this.m_s1+R*this.m_s2;this.m_K.col1.z=E*this.m_s1*this.m_a1+R*this.m_s2*this.m_a2;this.m_K.col2.x=this.m_K.col1.y;this.m_K.col2.y=E+R;this.m_K.col2.z=E*this.m_a1+R*this.m_a2;this.m_K.col3.x=this.m_K.col1.z;this.m_K.col3.y=this.m_K.col2.z;this.m_K.col3.z=O+K+E*this.m_a1*this.m_a1+R*this.m_a2*this.m_a2;this.m_K.Solve33(F,-U,-A,-L)}else{O=this.m_invMassA;K=this.m_invMassB;E=this.m_invIA;R=this.m_invIB;L=E*this.m_s1+R*this.m_s2;S=E+R;this.m_K.col1.Set(O+K+E*this.m_s1*this.m_s1+R*this.m_s2*this.m_s2,L,0);this.m_K.col2.Set(L,S,0);L=this.m_K.Solve22(new AB,-U,-A);F.x=L.x;F.y=L.y;F.z=0}L=F.x*this.m_perp.x+F.z*this.m_axis.x;O=F.x*this.m_perp.y+F.z*this.m_axis.y;U=F.x*this.m_s1+F.y+F.z*this.m_a1;F=F.x*this.m_s2+F.y+F.z*this.m_a2;G.x-=this.m_invMassA*L;G.y-=this.m_invMassA*O;H-=this.m_invIA*U;D.x+=this.m_invMassB*L;D.y+=this.m_invMassB*O;B+=this.m_invIB*F;N.m_sweep.a=H;I.m_sweep.a=B;N.SynchronizeTransform();I.SynchronizeTransform();return Q<=AE.b2_linearSlop&&M<=AE.b2_angularSlop};Box2D.inherit(g,Box2D.Dynamics.Joints.b2JointDef);g.prototype.__super=Box2D.Dynamics.Joints.b2JointDef.prototype;g.b2PrismaticJointDef=function(){Box2D.Dynamics.Joints.b2JointDef.b2JointDef.apply(this,arguments);this.localAnchorA=new AB;this.localAnchorB=new AB;this.localAxisA=new AB};g.prototype.b2PrismaticJointDef=function(){this.__super.b2JointDef.call(this);this.type=x.e_prismaticJoint;this.localAxisA.Set(1,0);this.referenceAngle=0;this.enableLimit=false;this.upperTranslation=this.lowerTranslation=0;this.enableMotor=false;this.motorSpeed=this.maxMotorForce=0};g.prototype.Initialize=function(E,D,A,B){this.bodyA=E;this.bodyB=D;this.localAnchorA=this.bodyA.GetLocalPoint(A);this.localAnchorB=this.bodyB.GetLocalPoint(A);this.localAxisA=this.bodyA.GetLocalVector(B);this.referenceAngle=this.bodyB.GetAngle()-this.bodyA.GetAngle()};Box2D.inherit(AF,Box2D.Dynamics.Joints.b2Joint);AF.prototype.__super=Box2D.Dynamics.Joints.b2Joint.prototype;AF.b2PulleyJoint=function(){Box2D.Dynamics.Joints.b2Joint.b2Joint.apply(this,arguments);this.m_groundAnchor1=new AB;this.m_groundAnchor2=new AB;this.m_localAnchor1=new AB;this.m_localAnchor2=new AB;this.m_u1=new AB;this.m_u2=new AB};AF.prototype.GetAnchorA=function(){return this.m_bodyA.GetWorldPoint(this.m_localAnchor1)};AF.prototype.GetAnchorB=function(){return this.m_bodyB.GetWorldPoint(this.m_localAnchor2)};AF.prototype.GetReactionForce=function(A){if(A===undefined){A=0}return new AB(A*this.m_impulse*this.m_u2.x,A*this.m_impulse*this.m_u2.y)};AF.prototype.GetReactionTorque=function(){return 0};AF.prototype.GetGroundAnchorA=function(){var A=this.m_ground.m_xf.position.Copy();A.Add(this.m_groundAnchor1);return A};AF.prototype.GetGroundAnchorB=function(){var A=this.m_ground.m_xf.position.Copy();A.Add(this.m_groundAnchor2);return A};AF.prototype.GetLength1=function(){var B=this.m_bodyA.GetWorldPoint(this.m_localAnchor1),A=B.x-(this.m_ground.m_xf.position.x+this.m_groundAnchor1.x);B=B.y-(this.m_ground.m_xf.position.y+this.m_groundAnchor1.y);return Math.sqrt(A*A+B*B)};AF.prototype.GetLength2=function(){var B=this.m_bodyB.GetWorldPoint(this.m_localAnchor2),A=B.x-(this.m_ground.m_xf.position.x+this.m_groundAnchor2.x);B=B.y-(this.m_ground.m_xf.position.y+this.m_groundAnchor2.y);return Math.sqrt(A*A+B*B)};AF.prototype.GetRatio=function(){return this.m_ratio};AF.prototype.b2PulleyJoint=function(A){this.__super.b2Joint.call(this,A);this.m_ground=this.m_bodyA.m_world.m_groundBody;this.m_groundAnchor1.x=A.groundAnchorA.x-this.m_ground.m_xf.position.x;this.m_groundAnchor1.y=A.groundAnchorA.y-this.m_ground.m_xf.position.y;this.m_groundAnchor2.x=A.groundAnchorB.x-this.m_ground.m_xf.position.x;this.m_groundAnchor2.y=A.groundAnchorB.y-this.m_ground.m_xf.position.y;this.m_localAnchor1.SetV(A.localAnchorA);this.m_localAnchor2.SetV(A.localAnchorB);this.m_ratio=A.ratio;this.m_constant=A.lengthA+this.m_ratio*A.lengthB;this.m_maxLength1=t.Min(A.maxLengthA,this.m_constant-this.m_ratio*AF.b2_minPulleyLength);this.m_maxLength2=t.Min(A.maxLengthB,(this.m_constant-AF.b2_minPulleyLength)/this.m_ratio);this.m_limitImpulse2=this.m_limitImpulse1=this.m_impulse=0};AF.prototype.InitVelocityConstraints=function(I){var G=this.m_bodyA,E=this.m_bodyB,F;F=G.m_xf.R;var B=this.m_localAnchor1.x-G.m_sweep.localCenter.x,A=this.m_localAnchor1.y-G.m_sweep.localCenter.y,D=F.col1.x*B+F.col2.x*A;A=F.col1.y*B+F.col2.y*A;B=D;F=E.m_xf.R;var M=this.m_localAnchor2.x-E.m_sweep.localCenter.x,K=this.m_localAnchor2.y-E.m_sweep.localCenter.y;D=F.col1.x*M+F.col2.x*K;K=F.col1.y*M+F.col2.y*K;M=D;F=E.m_sweep.c.x+M;D=E.m_sweep.c.y+K;var H=this.m_ground.m_xf.position.x+this.m_groundAnchor2.x,L=this.m_ground.m_xf.position.y+this.m_groundAnchor2.y;this.m_u1.Set(G.m_sweep.c.x+B-(this.m_ground.m_xf.position.x+this.m_groundAnchor1.x),G.m_sweep.c.y+A-(this.m_ground.m_xf.position.y+this.m_groundAnchor1.y));this.m_u2.Set(F-H,D-L);F=this.m_u1.Length();D=this.m_u2.Length();F>AE.b2_linearSlop?this.m_u1.Multiply(1/F):this.m_u1.SetZero();D>AE.b2_linearSlop?this.m_u2.Multiply(1/D):this.m_u2.SetZero();if(this.m_constant-F-this.m_ratio*D>0){this.m_state=x.e_inactiveLimit;this.m_impulse=0}else{this.m_state=x.e_atUpperLimit}if(F<this.m_maxLength1){this.m_limitState1=x.e_inactiveLimit;this.m_limitImpulse1=0}else{this.m_limitState1=x.e_atUpperLimit}if(D<this.m_maxLength2){this.m_limitState2=x.e_inactiveLimit;this.m_limitImpulse2=0}else{this.m_limitState2=x.e_atUpperLimit}F=B*this.m_u1.y-A*this.m_u1.x;D=M*this.m_u2.y-K*this.m_u2.x;this.m_limitMass1=G.m_invMass+G.m_invI*F*F;this.m_limitMass2=E.m_invMass+E.m_invI*D*D;this.m_pulleyMass=this.m_limitMass1+this.m_ratio*this.m_ratio*this.m_limitMass2;this.m_limitMass1=1/this.m_limitMass1;this.m_limitMass2=1/this.m_limitMass2;this.m_pulleyMass=1/this.m_pulleyMass;if(I.warmStarting){this.m_impulse*=I.dtRatio;this.m_limitImpulse1*=I.dtRatio;this.m_limitImpulse2*=I.dtRatio;I=(-this.m_impulse-this.m_limitImpulse1)*this.m_u1.x;F=(-this.m_impulse-this.m_limitImpulse1)*this.m_u1.y;D=(-this.m_ratio*this.m_impulse-this.m_limitImpulse2)*this.m_u2.x;H=(-this.m_ratio*this.m_impulse-this.m_limitImpulse2)*this.m_u2.y;G.m_linearVelocity.x+=G.m_invMass*I;G.m_linearVelocity.y+=G.m_invMass*F;G.m_angularVelocity+=G.m_invI*(B*F-A*I);E.m_linearVelocity.x+=E.m_invMass*D;E.m_linearVelocity.y+=E.m_invMass*H;E.m_angularVelocity+=E.m_invI*(M*H-K*D)}else{this.m_limitImpulse2=this.m_limitImpulse1=this.m_impulse=0}};AF.prototype.SolveVelocityConstraints=function(){var I=this.m_bodyA,G=this.m_bodyB,E;E=I.m_xf.R;var F=this.m_localAnchor1.x-I.m_sweep.localCenter.x,B=this.m_localAnchor1.y-I.m_sweep.localCenter.y,A=E.col1.x*F+E.col2.x*B;B=E.col1.y*F+E.col2.y*B;F=A;E=G.m_xf.R;var D=this.m_localAnchor2.x-G.m_sweep.localCenter.x,L=this.m_localAnchor2.y-G.m_sweep.localCenter.y;A=E.col1.x*D+E.col2.x*L;L=E.col1.y*D+E.col2.y*L;D=A;var K=A=E=0,H=0;E=H=E=H=K=A=E=0;if(this.m_state==x.e_atUpperLimit){E=I.m_linearVelocity.x+-I.m_angularVelocity*B;A=I.m_linearVelocity.y+I.m_angularVelocity*F;K=G.m_linearVelocity.x+-G.m_angularVelocity*L;H=G.m_linearVelocity.y+G.m_angularVelocity*D;E=-(this.m_u1.x*E+this.m_u1.y*A)-this.m_ratio*(this.m_u2.x*K+this.m_u2.y*H);H=this.m_pulleyMass*-E;E=this.m_impulse;this.m_impulse=t.Max(0,this.m_impulse+H);H=this.m_impulse-E;E=-H*this.m_u1.x;A=-H*this.m_u1.y;K=-this.m_ratio*H*this.m_u2.x;H=-this.m_ratio*H*this.m_u2.y;I.m_linearVelocity.x+=I.m_invMass*E;I.m_linearVelocity.y+=I.m_invMass*A;I.m_angularVelocity+=I.m_invI*(F*A-B*E);G.m_linearVelocity.x+=G.m_invMass*K;G.m_linearVelocity.y+=G.m_invMass*H;G.m_angularVelocity+=G.m_invI*(D*H-L*K)}if(this.m_limitState1==x.e_atUpperLimit){E=I.m_linearVelocity.x+-I.m_angularVelocity*B;A=I.m_linearVelocity.y+I.m_angularVelocity*F;E=-(this.m_u1.x*E+this.m_u1.y*A);H=-this.m_limitMass1*E;E=this.m_limitImpulse1;this.m_limitImpulse1=t.Max(0,this.m_limitImpulse1+H);H=this.m_limitImpulse1-E;E=-H*this.m_u1.x;A=-H*this.m_u1.y;I.m_linearVelocity.x+=I.m_invMass*E;I.m_linearVelocity.y+=I.m_invMass*A;I.m_angularVelocity+=I.m_invI*(F*A-B*E)}if(this.m_limitState2==x.e_atUpperLimit){K=G.m_linearVelocity.x+-G.m_angularVelocity*L;H=G.m_linearVelocity.y+G.m_angularVelocity*D;E=-(this.m_u2.x*K+this.m_u2.y*H);H=-this.m_limitMass2*E;E=this.m_limitImpulse2;this.m_limitImpulse2=t.Max(0,this.m_limitImpulse2+H);H=this.m_limitImpulse2-E;K=-H*this.m_u2.x;H=-H*this.m_u2.y;G.m_linearVelocity.x+=G.m_invMass*K;G.m_linearVelocity.y+=G.m_invMass*H;G.m_angularVelocity+=G.m_invI*(D*H-L*K)}};AF.prototype.SolvePositionConstraints=function(){var N=this.m_bodyA,I=this.m_bodyB,G,H=this.m_ground.m_xf.position.x+this.m_groundAnchor1.x,D=this.m_ground.m_xf.position.y+this.m_groundAnchor1.y,B=this.m_ground.m_xf.position.x+this.m_groundAnchor2.x,E=this.m_ground.m_xf.position.y+this.m_groundAnchor2.y,R=0,O=0,K=0,Q=0,M=G=0,L=0,F=0,A=M=F=G=M=G=0;if(this.m_state==x.e_atUpperLimit){G=N.m_xf.R;R=this.m_localAnchor1.x-N.m_sweep.localCenter.x;O=this.m_localAnchor1.y-N.m_sweep.localCenter.y;M=G.col1.x*R+G.col2.x*O;O=G.col1.y*R+G.col2.y*O;R=M;G=I.m_xf.R;K=this.m_localAnchor2.x-I.m_sweep.localCenter.x;Q=this.m_localAnchor2.y-I.m_sweep.localCenter.y;M=G.col1.x*K+G.col2.x*Q;Q=G.col1.y*K+G.col2.y*Q;K=M;G=N.m_sweep.c.x+R;M=N.m_sweep.c.y+O;L=I.m_sweep.c.x+K;F=I.m_sweep.c.y+Q;this.m_u1.Set(G-H,M-D);this.m_u2.Set(L-B,F-E);G=this.m_u1.Length();M=this.m_u2.Length();G>AE.b2_linearSlop?this.m_u1.Multiply(1/G):this.m_u1.SetZero();M>AE.b2_linearSlop?this.m_u2.Multiply(1/M):this.m_u2.SetZero();G=this.m_constant-G-this.m_ratio*M;A=t.Max(A,-G);G=t.Clamp(G+AE.b2_linearSlop,-AE.b2_maxLinearCorrection,0);F=-this.m_pulleyMass*G;G=-F*this.m_u1.x;M=-F*this.m_u1.y;L=-this.m_ratio*F*this.m_u2.x;F=-this.m_ratio*F*this.m_u2.y;N.m_sweep.c.x+=N.m_invMass*G;N.m_sweep.c.y+=N.m_invMass*M;N.m_sweep.a+=N.m_invI*(R*M-O*G);I.m_sweep.c.x+=I.m_invMass*L;I.m_sweep.c.y+=I.m_invMass*F;I.m_sweep.a+=I.m_invI*(K*F-Q*L);N.SynchronizeTransform();I.SynchronizeTransform()}if(this.m_limitState1==x.e_atUpperLimit){G=N.m_xf.R;R=this.m_localAnchor1.x-N.m_sweep.localCenter.x;O=this.m_localAnchor1.y-N.m_sweep.localCenter.y;M=G.col1.x*R+G.col2.x*O;O=G.col1.y*R+G.col2.y*O;R=M;G=N.m_sweep.c.x+R;M=N.m_sweep.c.y+O;this.m_u1.Set(G-H,M-D);G=this.m_u1.Length();if(G>AE.b2_linearSlop){this.m_u1.x*=1/G;this.m_u1.y*=1/G}else{this.m_u1.SetZero()}G=this.m_maxLength1-G;A=t.Max(A,-G);G=t.Clamp(G+AE.b2_linearSlop,-AE.b2_maxLinearCorrection,0);F=-this.m_limitMass1*G;G=-F*this.m_u1.x;M=-F*this.m_u1.y;N.m_sweep.c.x+=N.m_invMass*G;N.m_sweep.c.y+=N.m_invMass*M;N.m_sweep.a+=N.m_invI*(R*M-O*G);N.SynchronizeTransform()}if(this.m_limitState2==x.e_atUpperLimit){G=I.m_xf.R;K=this.m_localAnchor2.x-I.m_sweep.localCenter.x;Q=this.m_localAnchor2.y-I.m_sweep.localCenter.y;M=G.col1.x*K+G.col2.x*Q;Q=G.col1.y*K+G.col2.y*Q;K=M;L=I.m_sweep.c.x+K;F=I.m_sweep.c.y+Q;this.m_u2.Set(L-B,F-E);M=this.m_u2.Length();if(M>AE.b2_linearSlop){this.m_u2.x*=1/M;this.m_u2.y*=1/M}else{this.m_u2.SetZero()}G=this.m_maxLength2-M;A=t.Max(A,-G);G=t.Clamp(G+AE.b2_linearSlop,-AE.b2_maxLinearCorrection,0);F=-this.m_limitMass2*G;L=-F*this.m_u2.x;F=-F*this.m_u2.y;I.m_sweep.c.x+=I.m_invMass*L;I.m_sweep.c.y+=I.m_invMass*F;I.m_sweep.a+=I.m_invI*(K*F-Q*L);I.SynchronizeTransform()}return A<AE.b2_linearSlop};Box2D.postDefs.push(function(){Box2D.Dynamics.Joints.b2PulleyJoint.b2_minPulleyLength=2});Box2D.inherit(e,Box2D.Dynamics.Joints.b2JointDef);e.prototype.__super=Box2D.Dynamics.Joints.b2JointDef.prototype;e.b2PulleyJointDef=function(){Box2D.Dynamics.Joints.b2JointDef.b2JointDef.apply(this,arguments);this.groundAnchorA=new AB;this.groundAnchorB=new AB;this.localAnchorA=new AB;this.localAnchorB=new AB};e.prototype.b2PulleyJointDef=function(){this.__super.b2JointDef.call(this);this.type=x.e_pulleyJoint;this.groundAnchorA.Set(-1,1);this.groundAnchorB.Set(1,1);this.localAnchorA.Set(-1,0);this.localAnchorB.Set(1,0);this.maxLengthB=this.lengthB=this.maxLengthA=this.lengthA=0;this.ratio=1;this.collideConnected=true};e.prototype.Initialize=function(G,D,A,B,F,E,H){if(H===undefined){H=0}this.bodyA=G;this.bodyB=D;this.groundAnchorA.SetV(A);this.groundAnchorB.SetV(B);this.localAnchorA=this.bodyA.GetLocalPoint(F);this.localAnchorB=this.bodyB.GetLocalPoint(E);G=F.x-A.x;A=F.y-A.y;this.lengthA=Math.sqrt(G*G+A*A);A=E.x-B.x;B=E.y-B.y;this.lengthB=Math.sqrt(A*A+B*B);this.ratio=H;H=this.lengthA+this.ratio*this.lengthB;this.maxLengthA=H-this.ratio*AF.b2_minPulleyLength;this.maxLengthB=(H-AF.b2_minPulleyLength)/this.ratio};Box2D.inherit(h,Box2D.Dynamics.Joints.b2Joint);h.prototype.__super=Box2D.Dynamics.Joints.b2Joint.prototype;h.b2RevoluteJoint=function(){Box2D.Dynamics.Joints.b2Joint.b2Joint.apply(this,arguments);this.K=new AC;this.K1=new AC;this.K2=new AC;this.K3=new AC;this.impulse3=new AI;this.impulse2=new AB;this.reduced=new AB;this.m_localAnchor1=new AB;this.m_localAnchor2=new AB;this.m_impulse=new AI;this.m_mass=new o};h.prototype.GetAnchorA=function(){return this.m_bodyA.GetWorldPoint(this.m_localAnchor1)};h.prototype.GetAnchorB=function(){return this.m_bodyB.GetWorldPoint(this.m_localAnchor2)};h.prototype.GetReactionForce=function(A){if(A===undefined){A=0}return new AB(A*this.m_impulse.x,A*this.m_impulse.y)};h.prototype.GetReactionTorque=function(A){if(A===undefined){A=0}return A*this.m_impulse.z};h.prototype.GetJointAngle=function(){return this.m_bodyB.m_sweep.a-this.m_bodyA.m_sweep.a-this.m_referenceAngle};h.prototype.GetJointSpeed=function(){return this.m_bodyB.m_angularVelocity-this.m_bodyA.m_angularVelocity};h.prototype.IsLimitEnabled=function(){return this.m_enableLimit};h.prototype.EnableLimit=function(A){this.m_enableLimit=A};h.prototype.GetLowerLimit=function(){return this.m_lowerAngle};h.prototype.GetUpperLimit=function(){return this.m_upperAngle};h.prototype.SetLimits=function(B,A){if(B===undefined){B=0}if(A===undefined){A=0}this.m_lowerAngle=B;this.m_upperAngle=A};h.prototype.IsMotorEnabled=function(){this.m_bodyA.SetAwake(true);this.m_bodyB.SetAwake(true);return this.m_enableMotor};h.prototype.EnableMotor=function(A){this.m_enableMotor=A};h.prototype.SetMotorSpeed=function(A){if(A===undefined){A=0}this.m_bodyA.SetAwake(true);this.m_bodyB.SetAwake(true);this.m_motorSpeed=A};h.prototype.GetMotorSpeed=function(){return this.m_motorSpeed};h.prototype.SetMaxMotorTorque=function(A){if(A===undefined){A=0}this.m_maxMotorTorque=A};h.prototype.GetMotorTorque=function(){return this.m_maxMotorTorque};h.prototype.b2RevoluteJoint=function(A){this.__super.b2Joint.call(this,A);this.m_localAnchor1.SetV(A.localAnchorA);this.m_localAnchor2.SetV(A.localAnchorB);this.m_referenceAngle=A.referenceAngle;this.m_impulse.SetZero();this.m_motorImpulse=0;this.m_lowerAngle=A.lowerAngle;this.m_upperAngle=A.upperAngle;this.m_maxMotorTorque=A.maxMotorTorque;this.m_motorSpeed=A.motorSpeed;this.m_enableLimit=A.enableLimit;this.m_enableMotor=A.enableMotor;this.m_limitState=x.e_inactiveLimit};h.prototype.InitVelocityConstraints=function(K){var G=this.m_bodyA,E=this.m_bodyB,F,B=0;F=G.m_xf.R;var A=this.m_localAnchor1.x-G.m_sweep.localCenter.x,D=this.m_localAnchor1.y-G.m_sweep.localCenter.y;B=F.col1.x*A+F.col2.x*D;D=F.col1.y*A+F.col2.y*D;A=B;F=E.m_xf.R;var N=this.m_localAnchor2.x-E.m_sweep.localCenter.x,L=this.m_localAnchor2.y-E.m_sweep.localCenter.y;B=F.col1.x*N+F.col2.x*L;L=F.col1.y*N+F.col2.y*L;N=B;F=G.m_invMass;B=E.m_invMass;var H=G.m_invI,M=E.m_invI;this.m_mass.col1.x=F+B+D*D*H+L*L*M;this.m_mass.col2.x=-D*A*H-L*N*M;this.m_mass.col3.x=-D*H-L*M;this.m_mass.col1.y=this.m_mass.col2.x;this.m_mass.col2.y=F+B+A*A*H+N*N*M;this.m_mass.col3.y=A*H+N*M;this.m_mass.col1.z=this.m_mass.col3.x;this.m_mass.col2.z=this.m_mass.col3.y;this.m_mass.col3.z=H+M;this.m_motorMass=1/(H+M);if(this.m_enableMotor==false){this.m_motorImpulse=0}if(this.m_enableLimit){var I=E.m_sweep.a-G.m_sweep.a-this.m_referenceAngle;if(t.Abs(this.m_upperAngle-this.m_lowerAngle)<2*AE.b2_angularSlop){this.m_limitState=x.e_equalLimits}else{if(I<=this.m_lowerAngle){if(this.m_limitState!=x.e_atLowerLimit){this.m_impulse.z=0}this.m_limitState=x.e_atLowerLimit}else{if(I>=this.m_upperAngle){if(this.m_limitState!=x.e_atUpperLimit){this.m_impulse.z=0}this.m_limitState=x.e_atUpperLimit}else{this.m_limitState=x.e_inactiveLimit;this.m_impulse.z=0}}}}else{this.m_limitState=x.e_inactiveLimit}if(K.warmStarting){this.m_impulse.x*=K.dtRatio;this.m_impulse.y*=K.dtRatio;this.m_motorImpulse*=K.dtRatio;K=this.m_impulse.x;I=this.m_impulse.y;G.m_linearVelocity.x-=F*K;G.m_linearVelocity.y-=F*I;G.m_angularVelocity-=H*(A*I-D*K+this.m_motorImpulse+this.m_impulse.z);E.m_linearVelocity.x+=B*K;E.m_linearVelocity.y+=B*I;E.m_angularVelocity+=M*(N*I-L*K+this.m_motorImpulse+this.m_impulse.z)}else{this.m_impulse.SetZero();this.m_motorImpulse=0}};h.prototype.SolveVelocityConstraints=function(N){var I=this.m_bodyA,G=this.m_bodyB,H=0,D=H=0,B=0,E=0,R=0,O=I.m_linearVelocity,K=I.m_angularVelocity,Q=G.m_linearVelocity,M=G.m_angularVelocity,L=I.m_invMass,F=G.m_invMass,A=I.m_invI,U=G.m_invI;if(this.m_enableMotor&&this.m_limitState!=x.e_equalLimits){D=this.m_motorMass*-(M-K-this.m_motorSpeed);B=this.m_motorImpulse;E=N.dt*this.m_maxMotorTorque;this.m_motorImpulse=t.Clamp(this.m_motorImpulse+D,-E,E);D=this.m_motorImpulse-B;K-=A*D;M+=U*D}if(this.m_enableLimit&&this.m_limitState!=x.e_inactiveLimit){N=I.m_xf.R;D=this.m_localAnchor1.x-I.m_sweep.localCenter.x;B=this.m_localAnchor1.y-I.m_sweep.localCenter.y;H=N.col1.x*D+N.col2.x*B;B=N.col1.y*D+N.col2.y*B;D=H;N=G.m_xf.R;E=this.m_localAnchor2.x-G.m_sweep.localCenter.x;R=this.m_localAnchor2.y-G.m_sweep.localCenter.y;H=N.col1.x*E+N.col2.x*R;R=N.col1.y*E+N.col2.y*R;E=H;N=Q.x+-M*R-O.x- -K*B;var S=Q.y+M*E-O.y-K*D;this.m_mass.Solve33(this.impulse3,-N,-S,-(M-K));if(this.m_limitState==x.e_equalLimits){this.m_impulse.Add(this.impulse3)}else{if(this.m_limitState==x.e_atLowerLimit){H=this.m_impulse.z+this.impulse3.z;if(H<0){this.m_mass.Solve22(this.reduced,-N,-S);this.impulse3.x=this.reduced.x;this.impulse3.y=this.reduced.y;this.impulse3.z=-this.m_impulse.z;this.m_impulse.x+=this.reduced.x;this.m_impulse.y+=this.reduced.y;this.m_impulse.z=0}}else{if(this.m_limitState==x.e_atUpperLimit){H=this.m_impulse.z+this.impulse3.z;if(H>0){this.m_mass.Solve22(this.reduced,-N,-S);this.impulse3.x=this.reduced.x;this.impulse3.y=this.reduced.y;this.impulse3.z=-this.m_impulse.z;this.m_impulse.x+=this.reduced.x;this.m_impulse.y+=this.reduced.y;this.m_impulse.z=0}}}}O.x-=L*this.impulse3.x;O.y-=L*this.impulse3.y;K-=A*(D*this.impulse3.y-B*this.impulse3.x+this.impulse3.z);Q.x+=F*this.impulse3.x;Q.y+=F*this.impulse3.y;M+=U*(E*this.impulse3.y-R*this.impulse3.x+this.impulse3.z)}else{N=I.m_xf.R;D=this.m_localAnchor1.x-I.m_sweep.localCenter.x;B=this.m_localAnchor1.y-I.m_sweep.localCenter.y;H=N.col1.x*D+N.col2.x*B;B=N.col1.y*D+N.col2.y*B;D=H;N=G.m_xf.R;E=this.m_localAnchor2.x-G.m_sweep.localCenter.x;R=this.m_localAnchor2.y-G.m_sweep.localCenter.y;H=N.col1.x*E+N.col2.x*R;R=N.col1.y*E+N.col2.y*R;E=H;this.m_mass.Solve22(this.impulse2,-(Q.x+-M*R-O.x- -K*B),-(Q.y+M*E-O.y-K*D));this.m_impulse.x+=this.impulse2.x;this.m_impulse.y+=this.impulse2.y;O.x-=L*this.impulse2.x;O.y-=L*this.impulse2.y;K-=A*(D*this.impulse2.y-B*this.impulse2.x);Q.x+=F*this.impulse2.x;Q.y+=F*this.impulse2.y;M+=U*(E*this.impulse2.y-R*this.impulse2.x)}I.m_linearVelocity.SetV(O);I.m_angularVelocity=K;G.m_linearVelocity.SetV(Q);G.m_angularVelocity=M};h.prototype.SolvePositionConstraints=function(){var N=0,I,G=this.m_bodyA,H=this.m_bodyB,D=0,B=I=0,E=0,R=0;if(this.m_enableLimit&&this.m_limitState!=x.e_inactiveLimit){N=H.m_sweep.a-G.m_sweep.a-this.m_referenceAngle;var O=0;if(this.m_limitState==x.e_equalLimits){N=t.Clamp(N-this.m_lowerAngle,-AE.b2_maxAngularCorrection,AE.b2_maxAngularCorrection);O=-this.m_motorMass*N;D=t.Abs(N)}else{if(this.m_limitState==x.e_atLowerLimit){N=N-this.m_lowerAngle;D=-N;N=t.Clamp(N+AE.b2_angularSlop,-AE.b2_maxAngularCorrection,0);O=-this.m_motorMass*N}else{if(this.m_limitState==x.e_atUpperLimit){D=N=N-this.m_upperAngle;N=t.Clamp(N-AE.b2_angularSlop,0,AE.b2_maxAngularCorrection);O=-this.m_motorMass*N}}}G.m_sweep.a-=G.m_invI*O;H.m_sweep.a+=H.m_invI*O;G.SynchronizeTransform();H.SynchronizeTransform()}I=G.m_xf.R;O=this.m_localAnchor1.x-G.m_sweep.localCenter.x;N=this.m_localAnchor1.y-G.m_sweep.localCenter.y;B=I.col1.x*O+I.col2.x*N;N=I.col1.y*O+I.col2.y*N;O=B;I=H.m_xf.R;var K=this.m_localAnchor2.x-H.m_sweep.localCenter.x,Q=this.m_localAnchor2.y-H.m_sweep.localCenter.y;B=I.col1.x*K+I.col2.x*Q;Q=I.col1.y*K+I.col2.y*Q;K=B;E=H.m_sweep.c.x+K-G.m_sweep.c.x-O;R=H.m_sweep.c.y+Q-G.m_sweep.c.y-N;var M=E*E+R*R;I=Math.sqrt(M);B=G.m_invMass;var L=H.m_invMass,F=G.m_invI,A=H.m_invI,S=10*AE.b2_linearSlop;if(M>S*S){M=1/(B+L);E=M*-E;R=M*-R;G.m_sweep.c.x-=0.5*B*E;G.m_sweep.c.y-=0.5*B*R;H.m_sweep.c.x+=0.5*L*E;H.m_sweep.c.y+=0.5*L*R;E=H.m_sweep.c.x+K-G.m_sweep.c.x-O;R=H.m_sweep.c.y+Q-G.m_sweep.c.y-N}this.K1.col1.x=B+L;this.K1.col2.x=0;this.K1.col1.y=0;this.K1.col2.y=B+L;this.K2.col1.x=F*N*N;this.K2.col2.x=-F*O*N;this.K2.col1.y=-F*O*N;this.K2.col2.y=F*O*O;this.K3.col1.x=A*Q*Q;this.K3.col2.x=-A*K*Q;this.K3.col1.y=-A*K*Q;this.K3.col2.y=A*K*K;this.K.SetM(this.K1);this.K.AddM(this.K2);this.K.AddM(this.K3);this.K.Solve(h.tImpulse,-E,-R);E=h.tImpulse.x;R=h.tImpulse.y;G.m_sweep.c.x-=G.m_invMass*E;G.m_sweep.c.y-=G.m_invMass*R;G.m_sweep.a-=G.m_invI*(O*R-N*E);H.m_sweep.c.x+=H.m_invMass*E;H.m_sweep.c.y+=H.m_invMass*R;H.m_sweep.a+=H.m_invI*(K*R-Q*E);G.SynchronizeTransform();H.SynchronizeTransform();return I<=AE.b2_linearSlop&&D<=AE.b2_angularSlop};Box2D.postDefs.push(function(){Box2D.Dynamics.Joints.b2RevoluteJoint.tImpulse=new AB});Box2D.inherit(b,Box2D.Dynamics.Joints.b2JointDef);b.prototype.__super=Box2D.Dynamics.Joints.b2JointDef.prototype;b.b2RevoluteJointDef=function(){Box2D.Dynamics.Joints.b2JointDef.b2JointDef.apply(this,arguments);this.localAnchorA=new AB;this.localAnchorB=new AB};b.prototype.b2RevoluteJointDef=function(){this.__super.b2JointDef.call(this);this.type=x.e_revoluteJoint;this.localAnchorA.Set(0,0);this.localAnchorB.Set(0,0);this.motorSpeed=this.maxMotorTorque=this.upperAngle=this.lowerAngle=this.referenceAngle=0;this.enableMotor=this.enableLimit=false};b.prototype.Initialize=function(D,B,A){this.bodyA=D;this.bodyB=B;this.localAnchorA=this.bodyA.GetLocalPoint(A);this.localAnchorB=this.bodyB.GetLocalPoint(A);this.referenceAngle=this.bodyB.GetAngle()-this.bodyA.GetAngle()};Box2D.inherit(AL,Box2D.Dynamics.Joints.b2Joint);AL.prototype.__super=Box2D.Dynamics.Joints.b2Joint.prototype;AL.b2WeldJoint=function(){Box2D.Dynamics.Joints.b2Joint.b2Joint.apply(this,arguments);this.m_localAnchorA=new AB;this.m_localAnchorB=new AB;this.m_impulse=new AI;this.m_mass=new o};AL.prototype.GetAnchorA=function(){return this.m_bodyA.GetWorldPoint(this.m_localAnchorA)};AL.prototype.GetAnchorB=function(){return this.m_bodyB.GetWorldPoint(this.m_localAnchorB)};AL.prototype.GetReactionForce=function(A){if(A===undefined){A=0}return new AB(A*this.m_impulse.x,A*this.m_impulse.y)};AL.prototype.GetReactionTorque=function(A){if(A===undefined){A=0}return A*this.m_impulse.z};AL.prototype.b2WeldJoint=function(A){this.__super.b2Joint.call(this,A);this.m_localAnchorA.SetV(A.localAnchorA);this.m_localAnchorB.SetV(A.localAnchorB);this.m_referenceAngle=A.referenceAngle;this.m_impulse.SetZero();this.m_mass=new o};AL.prototype.InitVelocityConstraints=function(I){var G,E=0,F=this.m_bodyA,B=this.m_bodyB;G=F.m_xf.R;var A=this.m_localAnchorA.x-F.m_sweep.localCenter.x,D=this.m_localAnchorA.y-F.m_sweep.localCenter.y;E=G.col1.x*A+G.col2.x*D;D=G.col1.y*A+G.col2.y*D;A=E;G=B.m_xf.R;var M=this.m_localAnchorB.x-B.m_sweep.localCenter.x,K=this.m_localAnchorB.y-B.m_sweep.localCenter.y;E=G.col1.x*M+G.col2.x*K;K=G.col1.y*M+G.col2.y*K;M=E;G=F.m_invMass;E=B.m_invMass;var H=F.m_invI,L=B.m_invI;this.m_mass.col1.x=G+E+D*D*H+K*K*L;this.m_mass.col2.x=-D*A*H-K*M*L;this.m_mass.col3.x=-D*H-K*L;this.m_mass.col1.y=this.m_mass.col2.x;this.m_mass.col2.y=G+E+A*A*H+M*M*L;this.m_mass.col3.y=A*H+M*L;this.m_mass.col1.z=this.m_mass.col3.x;this.m_mass.col2.z=this.m_mass.col3.y;this.m_mass.col3.z=H+L;if(I.warmStarting){this.m_impulse.x*=I.dtRatio;this.m_impulse.y*=I.dtRatio;this.m_impulse.z*=I.dtRatio;F.m_linearVelocity.x-=G*this.m_impulse.x;F.m_linearVelocity.y-=G*this.m_impulse.y;F.m_angularVelocity-=H*(A*this.m_impulse.y-D*this.m_impulse.x+this.m_impulse.z);B.m_linearVelocity.x+=E*this.m_impulse.x;B.m_linearVelocity.y+=E*this.m_impulse.y;B.m_angularVelocity+=L*(M*this.m_impulse.y-K*this.m_impulse.x+this.m_impulse.z)}else{this.m_impulse.SetZero()}};AL.prototype.SolveVelocityConstraints=function(){var R,M=0,K=this.m_bodyA,L=this.m_bodyB,G=K.m_linearVelocity,F=K.m_angularVelocity,H=L.m_linearVelocity,V=L.m_angularVelocity,S=K.m_invMass,N=L.m_invMass,U=K.m_invI,Q=L.m_invI;R=K.m_xf.R;var O=this.m_localAnchorA.x-K.m_sweep.localCenter.x,I=this.m_localAnchorA.y-K.m_sweep.localCenter.y;M=R.col1.x*O+R.col2.x*I;I=R.col1.y*O+R.col2.y*I;O=M;R=L.m_xf.R;var E=this.m_localAnchorB.x-L.m_sweep.localCenter.x,D=this.m_localAnchorB.y-L.m_sweep.localCenter.y;M=R.col1.x*E+R.col2.x*D;D=R.col1.y*E+R.col2.y*D;E=M;R=H.x-V*D-G.x+F*I;M=H.y+V*E-G.y-F*O;var A=V-F,B=new AI;this.m_mass.Solve33(B,-R,-M,-A);this.m_impulse.Add(B);G.x-=S*B.x;G.y-=S*B.y;F-=U*(O*B.y-I*B.x+B.z);H.x+=N*B.x;H.y+=N*B.y;V+=Q*(E*B.y-D*B.x+B.z);K.m_angularVelocity=F;L.m_angularVelocity=V};AL.prototype.SolvePositionConstraints=function(){var N,I=0,G=this.m_bodyA,H=this.m_bodyB;N=G.m_xf.R;var D=this.m_localAnchorA.x-G.m_sweep.localCenter.x,B=this.m_localAnchorA.y-G.m_sweep.localCenter.y;I=N.col1.x*D+N.col2.x*B;B=N.col1.y*D+N.col2.y*B;D=I;N=H.m_xf.R;var E=this.m_localAnchorB.x-H.m_sweep.localCenter.x,R=this.m_localAnchorB.y-H.m_sweep.localCenter.y;I=N.col1.x*E+N.col2.x*R;R=N.col1.y*E+N.col2.y*R;E=I;N=G.m_invMass;I=H.m_invMass;var O=G.m_invI,K=H.m_invI,Q=H.m_sweep.c.x+E-G.m_sweep.c.x-D,M=H.m_sweep.c.y+R-G.m_sweep.c.y-B,L=H.m_sweep.a-G.m_sweep.a-this.m_referenceAngle,F=10*AE.b2_linearSlop,A=Math.sqrt(Q*Q+M*M),S=t.Abs(L);if(A>F){O*=1;K*=1}this.m_mass.col1.x=N+I+B*B*O+R*R*K;this.m_mass.col2.x=-B*D*O-R*E*K;this.m_mass.col3.x=-B*O-R*K;this.m_mass.col1.y=this.m_mass.col2.x;this.m_mass.col2.y=N+I+D*D*O+E*E*K;this.m_mass.col3.y=D*O+E*K;this.m_mass.col1.z=this.m_mass.col3.x;this.m_mass.col2.z=this.m_mass.col3.y;this.m_mass.col3.z=O+K;F=new AI;this.m_mass.Solve33(F,-Q,-M,-L);G.m_sweep.c.x-=N*F.x;G.m_sweep.c.y-=N*F.y;G.m_sweep.a-=O*(D*F.y-B*F.x+F.z);H.m_sweep.c.x+=I*F.x;H.m_sweep.c.y+=I*F.y;H.m_sweep.a+=K*(E*F.y-R*F.x+F.z);G.SynchronizeTransform();H.SynchronizeTransform();return A<=AE.b2_linearSlop&&S<=AE.b2_angularSlop};Box2D.inherit(C,Box2D.Dynamics.Joints.b2JointDef);C.prototype.__super=Box2D.Dynamics.Joints.b2JointDef.prototype;C.b2WeldJointDef=function(){Box2D.Dynamics.Joints.b2JointDef.b2JointDef.apply(this,arguments);this.localAnchorA=new AB;this.localAnchorB=new AB};C.prototype.b2WeldJointDef=function(){this.__super.b2JointDef.call(this);this.type=x.e_weldJoint;this.referenceAngle=0};C.prototype.Initialize=function(D,B,A){this.bodyA=D;this.bodyB=B;this.localAnchorA.SetV(this.bodyA.GetLocalPoint(A));this.localAnchorB.SetV(this.bodyB.GetLocalPoint(A));this.referenceAngle=this.bodyB.GetAngle()-this.bodyA.GetAngle()}})();(function(){var A=Box2D.Dynamics.b2DebugDraw;A.b2DebugDraw=function(){this.m_xformScale=this.m_fillAlpha=this.m_alpha=this.m_lineThickness=this.m_drawScale=1;var B=this;this.m_sprite={graphics:{clear:function(){B.m_ctx.clearRect(0,0,B.m_ctx.canvas.width,B.m_ctx.canvas.height)}}}};A.prototype._color=function(C,B){return"rgba("+((C&16711680)>>16)+","+((C&65280)>>8)+","+(C&255)+","+B+")"};A.prototype.b2DebugDraw=function(){this.m_drawFlags=0};A.prototype.SetFlags=function(B){if(B===undefined){B=0}this.m_drawFlags=B};A.prototype.GetFlags=function(){return this.m_drawFlags};A.prototype.AppendFlags=function(B){if(B===undefined){B=0}this.m_drawFlags|=B};A.prototype.ClearFlags=function(B){if(B===undefined){B=0}this.m_drawFlags&=~B};A.prototype.SetSprite=function(B){this.m_ctx=B};A.prototype.GetSprite=function(){return this.m_ctx};A.prototype.SetDrawScale=function(B){if(B===undefined){B=0}this.m_drawScale=B};A.prototype.GetDrawScale=function(){return this.m_drawScale};A.prototype.SetLineThickness=function(B){if(B===undefined){B=0}this.m_lineThickness=B;this.m_ctx.strokeWidth=B};A.prototype.GetLineThickness=function(){return this.m_lineThickness};A.prototype.SetAlpha=function(B){if(B===undefined){B=0}this.m_alpha=B};A.prototype.GetAlpha=function(){return this.m_alpha};A.prototype.SetFillAlpha=function(B){if(B===undefined){B=0}this.m_fillAlpha=B};A.prototype.GetFillAlpha=function(){return this.m_fillAlpha};A.prototype.SetXFormScale=function(B){if(B===undefined){B=0}this.m_xformScale=B};A.prototype.GetXFormScale=function(){return this.m_xformScale};A.prototype.DrawPolygon=function(E,D,F){if(D){var C=this.m_ctx,B=this.m_drawScale;C.beginPath();C.strokeStyle=this._color(F.color,this.m_alpha);C.moveTo(E[0].x*B,E[0].y*B);for(F=1;F<D;F++){C.lineTo(E[F].x*B,E[F].y*B)}C.lineTo(E[0].x*B,E[0].y*B);C.closePath();C.stroke()}};A.prototype.DrawSolidPolygon=function(E,D,F){if(D){var C=this.m_ctx,B=this.m_drawScale;C.beginPath();C.strokeStyle=this._color(F.color,this.m_alpha);C.fillStyle=this._color(F.color,this.m_fillAlpha);C.moveTo(E[0].x*B,E[0].y*B);for(F=1;F<D;F++){C.lineTo(E[F].x*B,E[F].y*B)}C.lineTo(E[0].x*B,E[0].y*B);C.closePath();C.fill();C.stroke()}};A.prototype.DrawCircle=function(E,D,F){if(D){var C=this.m_ctx,B=this.m_drawScale;C.beginPath();C.strokeStyle=this._color(F.color,this.m_alpha);C.arc(E.x*B,E.y*B,D*B,0,Math.PI*2,true);C.closePath();C.stroke()}};A.prototype.DrawSolidCircle=function(H,E,L,D){if(E){var C=this.m_ctx,F=this.m_drawScale,I=H.x*F,J=H.y*F;C.moveTo(0,0);C.beginPath();C.strokeStyle=this._color(D.color,this.m_alpha);C.fillStyle=this._color(D.color,this.m_fillAlpha);C.arc(I,J,E*F,0,Math.PI*2,true);C.moveTo(I,J);C.lineTo((H.x+L.x*E)*F,(H.y+L.y*E)*F);C.closePath();C.fill();C.stroke()}};A.prototype.DrawSegment=function(E,D,F){var C=this.m_ctx,B=this.m_drawScale;C.strokeStyle=this._color(F.color,this.m_alpha);C.beginPath();C.moveTo(E.x*B,E.y*B);C.lineTo(D.x*B,D.y*B);C.closePath();C.stroke()};A.prototype.DrawTransform=function(C){var B=this.m_ctx,D=this.m_drawScale;B.beginPath();B.strokeStyle=this._color(16711680,this.m_alpha);B.moveTo(C.position.x*D,C.position.y*D);B.lineTo((C.position.x+this.m_xformScale*C.R.col1.x)*D,(C.position.y+this.m_xformScale*C.R.col1.y)*D);B.strokeStyle=this._color(65280,this.m_alpha);B.moveTo(C.position.x*D,C.position.y*D);B.lineTo((C.position.x+this.m_xformScale*C.R.col2.x)*D,(C.position.y+this.m_xformScale*C.R.col2.y)*D);B.closePath();B.stroke()}})();var i;for(i=0;i<Box2D.postDefs.length;++i){Box2D.postDefs[i]()}delete Box2D.postDefs;(function(B){B.fn.vs=function(){};B.fn._vs={};B.fn._vs.token={};B.fn._vs.draw={};B.fn._vs.stream={};B.fn._vs.chart={};B.fn._vs.phy={};B.fn._vs.decay={};B.fn._vs.flocculate={};B.fn._vs.strata={};B.fn._vs.aggregate={};var A=function(E,O){this.token=B.fn._vs.token;this.draw=B.fn._vs.draw;this.stream=B.fn._vs.stream;this.chart=B.fn._vs.chart;this.phy=B.fn._vs.phy;this.decay=B.fn._vs.decay;this.flocculate=B.fn._vs.flocculate;this.strata=B.fn._vs.strata;this.requestAnimFrame;this.mouse={};this.mouse.x=0;this.mouse.y=0;this.mouse.isMouseDragging=false;this.mouse.isMouseDown=false;this.mouse.selectedBody=null;this.dataFlow=[];this.chartPhySetup={};this.tokens=[];this.world=null;this.ctx=null;var D=B(E);var M=this;var L=[];var N;var C;var H={x:0,y:0,width:290.5,height:300.5,DOMelement:null,chart:{x:undefined,y:undefined,width:undefined,height:undefined,colorRange:d3.scale.category10(),scale:d3.scale,type:"StackedAreaChart",spacer:5,column:3,wallColor:"rgba(230,230,230,0)",label:true,radius:10},data:{model:[{label:"Column A"},{label:"Column B"},{label:"Column C"},],strata:[[{initValue:100,label:"Strata 1 col A"}],[{initValue:20,label:"Strata 1 col B"}],[{initValue:175,label:"Strata 2 col C"}]],token:[{timestamp:1,category:1,value:1,userdata:{},callback:{}}],tokenPast:0,stream:{provider:"generator",refresh:10000/8,now:0},},sedimentation:{token:{size:{original:4,minimum:2},visible:true},incoming:{strategy:1,point:[{x:50,y:0},{x:100,y:0},{x:150,y:0}],target:[{x:50,y:0},{x:100,y:0},{x:150,y:0}]},granulate:{visible:false},flocculate:{number:1,action:"buffer",strategy:"Size",bufferSize:5,bufferTime:1000,bufferHeight:50,bufferFrameRate:25,buffer:[]},suspension:{height:null,incomming:"top",decay:{power:1.001},refresh:200},accumulation:{height:null},aggregation:{height:0,maxData:0,invertStrata:false},},options:{refresh:1000/25,panel:false,scale:30,layout:false,canvasFirst:true}};this.now=function(){return(new Date().getTime())};this.globalDecay=function(P){if(typeof(P)=="undefined"){return this.settings.sedimentation.suspension.decay.power}else{return this.settings.sedimentation.suspension.decay.power=P}};this.getWorld=function(){return this.world};this.chartUpdate=function(P,R){var Q={cat:P,y:R};this.chart[this.settings.chart.type](M,"update",Q)};this.flocculateTokens=function(P){return this.flocculate.update(M,P)};this.flocculateAll=function(){return this.flocculate.all(M)};this.addToken=function(P){return this.token.addToken(M,P)};this.selectAll=function(P,Q){return this.token.selectAll(M,P,Q)};this.select=function(P,Q){return this.token.select(M,P,Q)};this.updateAll=function(P){var Q=this.chart.updateAll(M,key,value);return Q};this.update=function(P,Q){var R=this.chart.update(M,P,Q);return R};function J(S,R){var Q={};for(var P in S){Q[P]=S[P]}for(var P in R){Q[P]=R[P]}return Q}J(H,O);if(O.data!=undefined){H.data=O.data}this.settings=B.extend(true,H,O);this.settings.DOMelement=E;if(typeof(this.settings.chart.width)=="undefined"){this.settings.chart.width=this.settings.width}if(typeof(this.settings.chart.x)=="undefined"){this.settings.chart.x=0}if(typeof(this.settings.chart.y)=="undefined"){this.settings.chart.y=0}if(typeof(this.settings.chart.height)=="undefined"){this.settings.chart.height=this.settings.height}if(typeof(this.settings.stream)=="undefined"){this.settings.stream={}}if(typeof(this.settings.stream.now)=="undefined"){this.settings.stream.now=0}if(typeof(this.settings.stream.provider)=="undefined"){this.settings.stream.provider="generator"}if(typeof(this.settings.stream.refresh)=="undefined"){this.settings.stream.refresh=1000}if(typeof(this.settings.data.tokenPast)=="undefined"){this.settings.data.tokenPast=0}if(typeof(this.settings.data.tokens)=="undefined"){this.settings.data.tokens=[]}if(typeof(this.settings.data.strata)!="undefined"&&this.settings.data.strata.length!=0){if(typeof(this.settings.sedimentation.aggregation)=="undefined"){this.settings.sedimentation.aggregation={}}if(typeof(this.settings.sedimentation.aggregation.height)=="undefined"){this.settings.sedimentation.aggregation.height=this.settings.chart.height/2}if(typeof(this.settings.sedimentation.aggregation.maxData)=="undefined"){this.settings.sedimentation.aggregation.maxData=10}}this.init=function(){this.requestAnimFrame=(function(){return window.requestAnimationFrame||window.webkitRequestAnimationFrame||window.mozRequestAnimationFrame||window.oRequestAnimationFrame||window.msRequestAnimationFrame||function(W,V){window.setTimeout(W,1000/60)}})();this.world=new this.phy.b2World(new this.phy.b2Vec2(0,0),true);var Q=E.appendChild(document.createElement("div"));Q.id="box_sediviz_"+I();Q.width=this.settings.width;Q.height=this.settings.height;this.settings.DOMelement=Q;C=Q.appendChild(document.createElement("canvas"));C.id="canvas";C.width=this.settings.width;C.height=this.settings.height;C.style.position="absolute";this.ctx=C.getContext("2d");this.chart[this.settings.chart.type](M,"init");this.stream.init(M);this.flocculate.init(M);this.stream.update(M);this.token.init(M);this.strata.init(this);window.setInterval(function(){M.update(M)},M.settings.options.refresh/2);window.setInterval(function(){M.draw.update(M)},M.settings.options.refresh);window.setInterval(function(){M.decay.update(M)},M.settings.sedimentation.suspension.refresh);M.strata.update(M);this.getBodyAtMouse=function(b){var V=b.mouse.x/b.settings.options.scale;var Z=b.mouse.y/b.settings.options.scale;var Y=new b.phy.b2Vec2(V,Z);var W=new b.phy.b2AABB();var X=0.001;W.lowerBound.Set(V-X,Z-X);W.upperBound.Set(V+X,Z+X);b.mouse.selectedToken=null;b.world.QueryAABB(function(e){return T(e,b,Y)},W);return b.mouse.selectedToken};function T(W,X,V){X.mouse.selectedToken=W;if(W.GetBody().GetType()!=X.phy.b2Body.b2_staticBody){if(W.GetShape().TestPoint(W.GetBody().GetTransform(),V)){X.mouse.selectedToken=W;return false}}return true}this.handleMouseMove=function(V,W){canvasPosition=F(W.settings.DOMelement);W.mouse.x=(V.clientX-(canvasPosition.offsetLeft-this.getScrollPosition()[0]));W.mouse.y=(V.clientY-(canvasPosition.offsetTop-this.getScrollPosition()[1]))};this.getScrollPosition=function(){return Array((document.documentElement&&document.documentElement.scrollLeft)||window.pageXOffset||M.pageXOffset||document.body.scrollLeft,(document.documentElement&&document.documentElement.scrollTop)||window.pageYOffset||M.pageYOffset||document.body.scrollTop)};document.addEventListener("mousemove",function(V){S(V,M)});document.addEventListener("mouseup",function(V){U(V,M)});document.addEventListener("mousedown",function(V){R(V,M)});function P(Y,b){var W=b.getBodyAtMouse(b);if(W!=null){if(typeof(W.m_userData)!="undefined"){if(typeof(W.m_userData.callback)!="undefined"){if(typeof(W.m_userData.callback.mouseover)=="function"){var V=b.select("ID",W.m_userData.ID);W.m_userData.callback.mouseover(V)}if(typeof(W.m_userData.callback.mouseout)=="function"){var V=b.select("ID",W.m_userData.ID);var Z;var X=function(){var f=Z;var h=V;var e=b;var g=W;return function(){var k=e.getBodyAtMouse(e);var l=false;if(k!=null){if(typeof(k.m_userData)!="undefined"){if(k.m_userData.ID==h.attr("ID")){l=false}else{l=true}}else{l=true}}else{l=true}if(l){g.m_userData.callback.mouseout(h);clearInterval(Z)}}};Z=window.setInterval(X(),100)}}}}}function R(X,Y){Y.mouse.isMouseDown=true;Y.handleMouseMove(X,Y);var W=Y.getBodyAtMouse(Y);if(W!=null){if(typeof(W.m_userData)!="undefined"){if(typeof(W.m_userData.callback)!="undefined"){if(typeof(W.m_userData.callback.onclick)=="function"){var V=Y.select("ID",W.m_userData.ID);W.m_userData.callback.onclick(V)}}}}}function U(V,W){W.mouse.isMouseDown=false}function S(V,W){if(W.mouse.isMouseDown){W.mouse.isMouseDragging=true;W.mouse.x=V.clientX;W.mouse.y=V.clientY}else{W.handleMouseMove(V,W);P("move",W)}}};this.mouse.update=function(Q){if(isMouseDown&&(!mouseJoint)){var P=getBodyAtMouse();if(P){var R=new b2MouseJointDef();R.bodyA=world.GetGroundBody();R.bodyB=P;R.target.Set(mouseX,mouseY);R.collideConnected=true;R.maxForce=300*P.GetMass();mouseJoint=world.CreateJoint(R);P.SetAwake(true)}}if(mouseJoint){if(isMouseDown){mouseJoint.SetTarget(new b2Vec2(mouseX,mouseY))}else{world.DestroyJoint(mouseJoint);mouseJoint=null}}};this.update=function(P){this.world.Step(1/60,10,10);this.world.DrawDebugData();this.world.ClearForces()};var G=function(){ctx.fillStyle="rgb(200,0,0)";this.ctx.font="14pt Calibri,Geneva,Arial";this.ctx.fillText("Canvas ready for Visual Sedimentation ",10,20);window.setInterval(B.fn.vs.draw.refresh(ctx,world,this.settings),this.settings.options.refresh);console.log("draw Init ")};var F=function(R){var Q=R.offsetTop;var P=R.offsetLeft;while(R=R.offsetParent){Q+=R.offsetTop;P+=R.offsetLeft}return{offsetLeft:P,offsetTop:Q}};var I=function(){var P=function(){return Math.floor(Math.random()*65536).toString(16)};return(P()+P()+"-"+P()+"-"+P()+"-"+P()+"-"+P()+P()+P())};function K(Q){if(null==Q||"object"!=typeof Q){return Q}var R=Q.constructor();for(var P in Q){if(Q.hasOwnProperty(P)){R[P]=Q[P]}}return R}this.utile={};this.utile.GUID=I;this.utile.clone=K;this.settings=B.extend(this.settings,{}||{});this.init()};B.fn.vs=function(C){if(!arguments.length){var C={}}return this.each(function(){var D=B(this);if(D.data("VisualSedimentation")){return}var E=new A(this,C);D.data("visualSedimentation",E)})}})($);(function(A){A.fn._vs.phy={b2Vec2:Box2D.Common.Math.b2Vec2,b2AABB:Box2D.Collision.b2AABB,b2BodyDef:Box2D.Dynamics.b2BodyDef,b2Body:Box2D.Dynamics.b2Body,b2FixtureDef:Box2D.Dynamics.b2FixtureDef,b2Fixture:Box2D.Dynamics.b2Fixture,b2World:Box2D.Dynamics.b2World,b2MassData:Box2D.Collision.Shapes.b2MassData,b2PolygonShape:Box2D.Collision.Shapes.b2PolygonShape,b2CircleShape:Box2D.Collision.Shapes.b2CircleShape,b2DebugDraw:Box2D.Dynamics.b2DebugDraw,b2MouseJointDef:Box2D.Dynamics.Joints.b2MouseJointDef,b2Shape:Box2D.Collision.Shapes.b2Shape,b2DistanceJointDef:Box2D.Dynamics.Joints.b2DistanceJointDef,b2RevoluteJointDef:Box2D.Dynamics.Joints.b2RevoluteJointDef,b2Joint:Box2D.Dynamics.Joints.b2Joint,b2PrismaticJointDef:Box2D.Dynamics.Joints.b2PrismaticJointDef,b2ContactListener:Box2D.Dynamics.b2ContactListener,b2Settings:Box2D.Common.b2Settings}})($);(function(A){A.fn.vs.chart={}})($);(function(A){A.fn._vs.draw={settings:{draw:{trail:1,showLayout:false}},update:function(D){if(this.settings.draw.trail==1){D.ctx.clearRect(0,0,D.ctx.canvas.clientWidth,D.ctx.canvas.clientHeight)}else{debugDrawChart(0,0,ctx.canvas.clientWidth,ctx.canvas.clientHeight,"rgba(255,255,255,"+this.settings.draw.trail+")",ctx)}for(var B=D.world.GetBodyList();B;B=B.GetNext()){for(var C=B.GetFixtureList();C!=null;C=C.GetNext()){this.drawShape(D,C)}}if(this.settings.draw.showLayout==true){this.debugDrawChart(chart.position.x,chart.position.y,chart.position.width,chart.position.height,"rgba(255,0,0,0.2)",ctx)}},debugDrawChart:function(B,G,D,F,E,C){C.save();C.translate(0,0);C.fillStyle=E;C.beginPath();C.rect(B,G,D,F);C.closePath();C.strokeStyle="#000";C.lineWidth=0.5;C.stroke();C.restore()},showTexture:function(C,B){if(typeof(C.m_userData.texture)!=="undefined"&&typeof(C.m_userData.texture.pattern)!=="undefined"){B.fillStyle=C.m_userData.texture.pattern;B.fill()}},drawShape:function(K,F){var Q=F.GetBody();var R=Q.GetPosition();var P=Q.GetAngle();var D=9;var C=10;var S=K.settings.options.scale;F.m_userData.x=Q.GetWorldCenter().x*S;F.m_userData.y=Q.GetWorldCenter().y*S;if(typeof(F)!="undefined"){switch(F.GetType()){case 0:switch(F.m_userData){case null:K.ctx.fillStyle="rgba(255,0,0,1)";break;default:K.ctx.fillStyle=F.m_userData.fillStyle;break}var B=F.m_shape.m_radius;if(K.settings.sedimentation.token.visible==true){K.ctx.save();K.ctx.translate(R.x*S,R.y*S);K.ctx.rotate(P);K.ctx.beginPath();var O=(B/C*D)*S;if(typeof(F.m_userData.strokeStyle)!="undefined"){K.ctx.strokeStyle=F.m_userData.strokeStyle}else{K.ctx.strokeStyle="rgba(0,0,0,0)"}if(typeof(F.m_userData.lineWidth)!="undefined"){K.ctx.lineWidth=F.m_userData.lineWidth}else{K.ctx.lineWidth=0}K.ctx.arc(0,0,O,0,Math.PI*2,true);K.ctx.closePath();if(K.settings.options.layout==true){K.ctx.strokeStyle="#000";K.ctx.lineWidth=0.5;K.ctx.stroke()}else{K.ctx.fill();K.ctx.stroke();this.showTexture(F,K.ctx)}K.ctx.restore()}break;case 1:switch(F.m_userData){case null:K.ctx.fillStyle="rgba(255,0,0,1)";break;default:K.ctx.fillStyle=F.m_userData.fillStyle;break}var I=F.m_shape.m_vertices[0].x*S;var G=F.m_shape.m_vertices[0].y*S;var J=R.x*S-F.m_shape.m_vertices[0].x*S;var H=R.y*S-F.m_shape.m_vertices[0].y*S;K.ctx.save();K.ctx.translate(R.x*S,R.y*S);K.ctx.rotate(P);K.ctx.beginPath();if(typeof(F.m_userData.strokeStyle)!="undefined"){K.ctx.strokeStyle=F.m_userData.strokeStyle}else{K.ctx.strokeStyle=F.m_userData.fillStyle}if(typeof(F.m_userData.lineWidth)!="undefined"){K.ctx.lineWidth=F.m_userData.lineWidth}else{K.ctx.lineWidth=0}for(var N=0;N<F.m_shape.m_vertices.length;N++){var M=F.m_shape.m_vertices;K.ctx.moveTo((M[0].x)*S,(M[0].y)*S);for(var L=1;L<M.length;L++){K.ctx.lineTo((M[L].x)*S,(M[L].y)*S)}K.ctx.lineTo((M[0].x)*S,(M[0].y)*S)}K.ctx.closePath();K.ctx.fill();this.showTexture(F,K.ctx);if(K.settings.options.layout==true){K.ctx.lineWidth=0.25;K.ctx.strokeStyle="rgb(0,0,0)";K.ctx.stroke()}else{K.ctx.stroke()}K.ctx.restore();break;case 2:break;K.ctx.fillStyle="rgb(0,0,0)"}}if(typeof(F.m_userData.callback)!="undefined"){if(typeof(F.m_userData.callback.draw)=="function"){var E=K.select("ID",F.m_userData.ID);F.m_userData.callback.draw(E)}}}}})($);(function(A){A.fn._vs.token={colorRange:function(){},init:function(B){this.colorRange=B.settings.chart.colorRange},ID:function(B){B.settings.data.tokenPast+=1;return B.settings.data.tokenPast},selectAll:function(G,D,F){var B=[];var E=false;B.flocculate=function(){var H=[];B.forEach(function(I){q=I.flocculate();H.push(q)});return H};B.attr=function(H,J,K){var I=[];B.forEach(function(L){q=L.attr(H,J,K);I.push(q)});return I};B.b2dObj=function(H,J,K){var I=[];B.forEach(function(L){q=L.myobj;I.push(q)});return I};if(typeof(F)=="undefined"&&typeof(D)=="undefined"){E=true}for(var C=G.tokens.length-1;C>=0;C--){if(G.tokens[C].attr(D)==F||E==true){B.push(G.tokens[C])}}return B},select:function(E,C,D){result=[];if(typeof(D)=="undefined"&&typeof(C)=="undefined"){return E.tokens}else{for(var B=E.tokens.length-1;B>=0;B--){if(E.tokens[B].attr(C)==D){result.push(E.tokens[B]);break}}}if(typeof(result[0])=="undefined"){return false}else{return result[0]}},addToken:function(H,G){var C={x:50,y:50,t:null,category:1,state:0,size:10,fillStyle:"###",strokeStyle:"rgba(0,0,0,0)",lineWidth:0,texture:undefined,shape:{type:"round"},userdata:{},callback:{},phy:{density:10,friction:0,restitution:0},targets:[],elbow:{}};var B=null;var D=null;var F={};F.toString=function(){return"Token ID="+this.setting.ID};if(typeof(G)=="undefined"){F.setting=C;F.setting.ID=this.ID(H)}else{F.setting=G;if(typeof(F.setting.phy)=="undefined"){F.setting.phy=C.phy}if(typeof(F.setting.t)=="undefined"){F.setting.t=H.settings.stream.now}if(typeof(F.setting.x)=="undefined"){F.setting.x=H.settings.sedimentation.incoming.point[G.category].x+(Math.random()*2)}if(typeof(F.setting.y)=="undefined"){F.setting.y=H.settings.sedimentation.incoming.point[G.category].y+(Math.random()*2)}if(typeof(F.setting.size)=="undefined"){F.setting.size=H.settings.sedimentation.token.size.original}if(typeof(F.setting.targets)=="undefined"){F.setting.targets=[]}F.setting.ID=F.setting.ID=this.ID(H);if(typeof(F.setting.state)=="undefined"){F.setting.state=0}if(typeof(F.setting.shape)=="undefined"){F.setting.shape=C.shape}}F.myobj=this.create(H,F.setting);F.flocculate=function(){H.tokens.indexOf(this);H.flocculate.destroyIt(H,this);return this};F.attr=function(I,J,K){if(typeof(J)=="undefined"){if(typeof(this[I])!="undefined"){return this[I]()}else{return this.myobj.m_userData[I]}}else{if(typeof(this[I])!="undefined"){this[I](J,K)}else{this.myobj.m_userData[I]=J}}return this};F.callback=function(I,J){if(!arguments.length){return this.myobj.m_userData.callback}if(typeof(this.myobj.m_userData.callback[I])=="function"){return this.myobj.m_userData.callback[I](J)}else{return function(K){console.log("callback undefined")}}};F.size=function(I){if(this.myobj!=null&&this.attr("state")<2){if(!arguments.length){return this.myobj.m_shape.m_radius*this.myobj.m_userData.scale}this.myobj.m_shape.m_radius=I/this.myobj.m_userData.scale}};F.b2dObj=function(){if(this.myobj!=null&&this.attr("state")<2){return this.myobj}};F.texture=function(J){if(!arguments.length){return this.myobj.m_userData.texture.img.src}console.log("texture",J);var I={};I.img=new Image();I.img.onload=function(){I.pattern=document.createElement("canvas").getContext("2d").createPattern(I.img,"repeat")};I.img.src=J;this.myobj.m_userData.texture=I};H.tokens.push(F);H.decay.tokens.push(F);if(typeof(this.myobj.m_userData.callback)!="undefined"){if(typeof(this.myobj.m_userData.callback.suspension)=="function"){var E=H.select("ID",F.setting.ID);this.myobj.m_userData.callback.suspension(E)}}return F},create:function(I,D){D.scale=scale=I.settings.options.scale;var H=D.x/scale+(Math.random()*0.1);var E=D.y/scale+(Math.random()*0.1);var G=new Box2D.Dynamics.b2FixtureDef;G.density=0.1;G.friction=0;G.restitution=0;if(D.shape.type=="round"){G.shape=new Box2D.Collision.Shapes.b2CircleShape(D.size/scale)}else{if(D.shape.type=="polygons"){G=this.setPolygons(I,D,G)}else{if(D.shape.type=="box"){G.shape=new Box2D.Collision.Shapes.b2PolygonShape;G.shape.SetAsBox(D.shape.width/scale,D.shape.height/scale)}}}var C=new Box2D.Dynamics.b2BodyDef;C.type=Box2D.Dynamics.b2Body.b2_dynamicBody;C.position.x=D.x/scale;C.position.y=D.y/scale;this.myobj=I.world.CreateBody(C).CreateFixture(G);if(typeof(D.texture)!="undefined"){var B=D.texture;B.img=new Image();B.img.onload=function(){B.pattern=document.createElement("canvas").getContext("2d").createPattern(B.img,"repeat")};B.img.src=B.src}if(typeof(D.impulse)!="undefined"){this.applyImpulse(this.myobj,D.impulse.angle,D.impulse.power)}if(typeof(D.fillStyle)=="undefined"){D.fillStyle=this.colorRange(D.category)}if(typeof(D.lineWidth)=="undefined"){D.lineWidth=0}if(typeof(D.type)=="undefined"){D.type="token"}if(typeof(D.callback)=="undefined"){D.callback={}}this.myobj.m_userData=D;this.myobj.attr=this.attr;this.myobj.m_userData.mouse={};this.myobj.m_userData.mouse.over=false;this.myobj.m_userData.mouse.down=false;this.myobj.m_userData.mouse.dragging=false;this.myobj.m_userData.mouse.statebefore=false;this.myobj.m_userData.state=1;if(D.targets.length==0&&I.settings.chart.type=="CircleLayout"){D.targets[0]={x:I.settings.sedimentation.incoming.target[D.category].x,y:I.settings.sedimentation.incoming.target[D.category].y}}if(D.targets.length>0){var F=new I.phy.b2MouseJointDef();F.bodyA=I.world.GetGroundBody();F.bodyB=this.myobj.GetBody();F.target.Set(H,E);F.collideConnected=true;F.maxForce=50*this.myobj.GetBody().GetMass();mouseJoint=I.world.CreateJoint(F);mouseJoint.SetTarget(new I.phy.b2Vec2(D.targets[0].x/scale,D.targets[0].y/scale))}return this.myobj},applyImpulse:function(D,E,C){var B=D.GetBody();B.ApplyImpulse(new Box2D.Common.Math.b2Vec2(Math.cos(E*(Math.PI/180))*C,Math.sin(E*(Math.PI/180))*C),B.GetWorldCenter())},setPolygons:function(F,D,E){E.shape=new Box2D.Collision.Shapes.b2PolygonShape;if(D.shape.points==null){D.shape.points=[{x:-1,y:-1},{x:1,y:-1},{x:-1,y:-1},{x:1,y:-1}]}for(var C=0;C<D.shape.points.length;C++){var B=new Box2D.Common.Math.b2Vec2();B.Set(D.shape.points[C].x/scale,D.shape.points[C].y/scale);D.shape.points[C]=B}E.shape.SetAsArray(D.shape.points,D.shape.points.length);return E},createDataBarBall:function(I,B,H,E,F){var G=new Box2D.Dynamics.b2FixtureDef;G.density=10;G.friction=0.5;G.restitution=0.2;G.shape=new Box2D.Collision.Shapes.b2CircleShape(E/I.settings.options.scale);var D=new Box2D.Dynamics.b2BodyDef;D.type=Box2D.Dynamics.b2Body.b2_dynamicBody;D.position.x=B/I.settings.options.scale;D.position.y=H/I.settings.options.scale;var C=I.world.CreateBody(D).CreateFixture(G);C.m_userData={type:"BarChartBall",familyID:"family",fillColor:this.colorRange(F)};return C},createBox:function(I,K,J,D,L,F,C,G){if(typeof(G)=="undefined"){G=true}var B=new b2FixtureDef;if(!G){B.density=100}B.friction=0.6;B.restitution=0.3;var E=new b2BodyDef;E.type=b2Body.b2_staticBody;E.angle=F;B.shape=new b2PolygonShape;B.shape.SetAsBox(D/scale,L/scale);E.position.Set(K/scale,J/scale);var H=I.CreateBody(E).CreateFixture(B);H.m_userData={type:"Wall",fillColor:C};console.log(H.m_userData);return H},createBoxPie:function(I,E,K,J,D,L,G,C){var F=new b2BodyDef;F.type=Box2D.Dynamics.b2Body.b2_dynamicBody;var B=new Box2D.Dynamics.b2FixtureDef;B.shape=new b2PolygonShape;B.shape.SetAsBox(D/scale,L/scale);B.density=1000000;B.friction=0.5;B.restitution=0.2;F.position.Set(K/scale,J/scale);F.angle=0;var H=I.CreateBody(F).CreateFixture(B);H.m_userData={type:"Wall",fillColor:C};return H},createBox0D:function(H,C,I,F,B,G){if(typeof(G)=="undefined"){G=true}var E=new b2BoxDef();E.restitution=-0.6;E.friction=0.3;if(!G){E.density=0.01}E.extents.Set(F,B);var D=new b2BodyDef();D.AddShape(E);D.position.Set(C,I);return H.CreateBody(D)},createHiddenBox:function(G,I,H,B,J,D){if(typeof(D)=="undefined"){D=true}var E=new b2BoxDef();E.restitution=0.6;E.friction=0.3;if(!D){E.density=1}E.extents.Set(B,J);var C=new b2BodyDef();C.AddShape(E);C.position.Set(I,H);var F=G.CreateBody(C);F.m_shapeList.visibility="hidden";console.log(F);return F},createBigBall:function(E,B,G){var F=new Box2D.Dynamics.b2FixtureDef;F.density=1000000;F.friction=0.5;F.restitution=0.2;F.shape=new Box2D.Collision.Shapes.b2CircleShape(20/30);var D=new Box2D.Dynamics.b2BodyDef;D.type=Box2D.Dynamics.b2Body.b2_dynamicBody;D.position.x=B;D.position.y=G;var C=E.CreateBody(D).CreateFixture(F);return C},createPieBox:function(G,J,I,C,K,L,D,M){M=A.extend(true,{density:10000000,friction:1,restitution:0.2,linearDamping:0,angularDamping:0,gravityScale:0,type:b2Body.b2_dynamicBody},M);var B=new b2BodyDef();var E=new b2FixtureDef;E.density=M.density;E.friction=M.friction;E.restitution=M.restitution;E.shape=new b2PolygonShape();E.shape.SetAsBox(C/scale,K/scale);B.position.Set(J/scale,I/scale);B.linearDamping=M.linearDamping;B.angularDamping=M.angularDamping;B.angle=L;B.type=M.type;var H=G.CreateBody(B);var F=H.CreateFixture(E);F.m_userData={type:"box",familyID:null,fillColor:D};return H},createDataBallTarget:function(H,L,I,M,K,N,F){var G=M/scale+(Math.random()*0.1);var C=K/scale+(Math.random()*0.1);var B=new Box2D.Dynamics.b2FixtureDef;B.density=0.1;B.friction=0;B.restitution=0;B.shape=new Box2D.Collision.Shapes.b2CircleShape(N/scale);var D=new Box2D.Dynamics.b2BodyDef;D.type=Box2D.Dynamics.b2Body.b2_dynamicBody;D.position.x=G;D.position.y=C;var E=H.CreateBody(D).CreateFixture(B);var J=new b2MouseJointDef();J.bodyA=H.GetGroundBody();J.bodyB=E.GetBody();J.target.Set(G,C);J.collideConnected=true;J.maxForce=50*E.GetBody().GetMass();mouseJoint=H.CreateJoint(J);mouseJoint.SetTarget(new b2Vec2(L/scale,I/scale));E.m_userData={type:"PieBall",familyID:F,fillColor:colorScale(F)};categorys[F].value+=1;categorys[F].joins.push(mouseJoint);return E},createDataBallPie:function(H,I,M,K,N,F){console.log(I);var G=categorys[F].incomingPoint.x/scale+(Math.random()*2/scale);var C=categorys[F].incomingPoint.y/scale;var B=new Box2D.Dynamics.b2FixtureDef;B.density=0.1;B.friction=0;B.restitution=0;B.shape=new Box2D.Collision.Shapes.b2CircleShape(N/scale);var D=new Box2D.Dynamics.b2BodyDef;D.type=Box2D.Dynamics.b2Body.b2_dynamicBody;D.position.x=G;D.position.y=C;var L=H.CreateBody(D);L.m_userData={type:"PieBall",familyID:F,fillColor:categorys[F].color};listBodies.push(L);var E=L.CreateFixture(B);var J=new b2MouseJointDef();J.bodyA=H.GetGroundBody();J.bodyB=E.GetBody();J.target.Set(G,C);J.collideConnected=true;J.maxForce=100*E.GetBody().GetMass();mouseJoint=H.CreateJoint(J);mouseJoint.SetTarget(new b2Vec2(I.position.x/scale,I.position.y/scale));E.m_userData={type:"PieBall",familyID:F,fillColor:colorScale(F)};categorys[F].value+=1;return E},createDataBall:function(H,B,G,E){var F=new Box2D.Dynamics.b2FixtureDef;F.density=1;F.friction=0.5;F.restitution=0.2;F.shape=new Box2D.Collision.Shapes.b2CircleShape(E/H.settings.options.scale);var D=new Box2D.Dynamics.b2BodyDef;D.type=Box2D.Dynamics.b2Body.b2_dynamicBody;D.position.x=B;D.position.y=G;var C=H.world.CreateBody(D).CreateFixture(F);C.m_userData={type:"PieBall",familyID:"family",fillColor:"rgb(200,0,0)"};return C},}})($);(function(A){A.fn._vs.stream={i:null,buffer:[],speed:10000/6,strategy:null,type:null,init:function(B){this.speed=B.settings.data.stream.refresh;type=B.settings.data.stream.provider},push:function(C){console.log(C);for(var B=C.length-1;B>=0;B--){buffer.push(C)}},update:function(C){if(type=="generator"){for(var B=0;B<C.settings.data.model.length;B++){C.dataFlow[B]=setInterval((function(D,E){return function(){E.settings.data.stream.now++;var F=E.chart[E.settings.chart.type](E,"token",D);E.addToken(F)}})(B,C),this.speed)}}else{if(type=="tokens"){C.dataFlow[0]=setInterval((function(D,E){return function(){E.settings.data.stream.now++;for(var F=0;F<E.settings.data.tokens.length;F++){if(E.settings.data.tokens[F].t==E.settings.data.stream.now){E.addToken(E.settings.data.tokens[F])}}}})(B,C),this.speed)}else{}}},generator:function(C,B){},test:function(B){B.tokens.push(B.token.createDataBarBall(B,(B.settings.sedimentation.incoming[i].x+(Math.random()*2)),(B.settings.sedimentation.incoming[i].y+(Math.random()*1)),B.settings.sedimentation.token.size,i))},setSpeed:function(D,C){speedFlow=C;for(var B=0;B<categorys.length;B++){window.clearInterval(dataFlow[B])}window.clearInterval(decayFlow);dataFlow(categorys)}}})($);(function(A){A.fn._vs.decay={tokens:[],update:function(G){var D=1;var J=G.settings.sedimentation.suspension.height;var K=G.settings.height;var H=G.settings.sedimentation.token.size/4;var B=G.settings.sedimentation.suspension.decay.power;var E=G.settings.options.scale;var F=G.settings.sedimentation.token.size.minimum;if(B==null){var B=0}for(var I=0;I<this.tokens.length;I++){var C=this.tokens[I].attr("size");if(B!=0){this.tokens[I].attr("size",C/B)}if(C<=F){if(G.settings.sedimentation.flocculate.strategy!=null){G.flocculate.destroyIt(G,this.tokens[I]);G.strata.update(G)}}}}}})($);(function(A){A.fn._vs.flocculate={buffer:[],init:function(C){for(var B=0;B<C.settings.data.model.length;B++){this.buffer[B]=[]}},addtobuffer:function(C,B){c=B.attr("category");bufferSize=C.settings.sedimentation.flocculate.bufferSize;this.buffer[c].push(B);C.decay.tokens.splice(C.decay.tokens.indexOf(B),1);B.attr("callback","bufferFlocculation",B);if(this.buffer[c].length>bufferSize){this.update(C,c,bufferSize)}},destroyIt:function(D,C){C.attr("callback","flocculation",C);C.attr("state",2);var B=D.world.DestroyBody(C.myobj.GetBody());return B},update:function(E,D,B){if(E.settings.sedimentation.flocculate.number==1){while(this.buffer[D].length>B){var C=this.buffer[D].shift();this.destroyIt(E,C)}}else{while(this.buffer[D].length>E.settings.sedimentation.flocculate.number){var C=this.buffer[D].shift();this.destroyIt(E,C)}}},disapear:function(C,B){window.setInterval(function(){B.update(self)},self.settings.options.refresh/2)},all:function(C){for(var B=C.decay.tokens-1;B>=0;B--){this.update(C,B,C.tokens.length)}},strategy:function(){if(flocullateBuffer.length>0){if(chart.flocullate.strategy=="Size"&&flocullateBuffer.length>=chart.flocullate.bufferSize){flocullateByArray(flocullateBuffer)}else{if(chart.flocullate.strategy=="Time"){}else{if(chart.flocullate.strategy=="Height"){}}}}}}})($);(function(A){A.fn._vs.aggregate={defaultSettings:{},strata_layers:function(H,G,B,D){var F=d3.scale.linear().domain([1,B-2]).range([Math.PI/2,2*Math.PI-Math.PI/2]);var C=d3.scale.pow().exponent(10).domain([0,B]).range([0,1]);return d3.range(G).map(function(I){var J=5*Math.random();return d3.range(B).map(function(L){if(H.settings.sedimentation.aggregation.strataType=="sin"){if(I==1){return 20}var K=5+J*5*Math.sin(F(L))+(I*50);if(K<0){return -K}else{return K}}else{if(H.settings.sedimentation.aggregation.strataType=="log"){return I+1}else{if(typeof(D)=="undefined"){D=0}return H.settings.data.strata[D][I].value}}}).map(E)});function E(J,I){return{x:I,y:Math.max(0,J)}}},init:function(L){if(typeof(L.settings.data.strata)=="undefined"||L.settings.data.strata.length==0||L.settings.data.strata[0].length==0){return}var M=L.token.colorRange;if(L.settings.chart.type=="StackedAreaChart"){var E=L.settings.chart.width/L.settings.data.model.length,O=L.settings.sedimentation.aggregation.height;var G=d3.select("#"+L.settings.DOMelement.id).append("div").attr("class","vis").style("z-index",10).append("svg").attr("width",L.settings.width).attr("height",L.settings.height).append("g").attr("transform","translate("+L.settings.chart.x+","+L.settings.chart.y+")");var Q=G.selectAll("g.gcol").data(L.settings.data.strata,function(V){return[V]}).enter().append("g").attr("transform",function(W,V){return"translate("+(V*E)+", "+(L.settings.chart.height-L.settings.sedimentation.aggregation.height)+")"}).attr("class",function(W,V){return"gcol col_"+V});var U=L.settings.data.strata.map(function(V){return{value:V[0].value}});var R=L.settings.data.strata[0].length,S=20;smx=S-1,smy=0;var D=0;var T=d3.svg.area().x(function(V){return L.settings.chart.spacer+V.x*(E-2*L.settings.chart.spacer)/smx}).y0(function(V){return(O-V.y0*D)}).y1(function(V){return(O-(V.y+V.y0)*D)});var K=[];var B=Q.selectAll("gpath").data(function(X,V){var W=d3.layout.stack().offset("expand")(L.aggregate.strata_layers(L,X.length,S,V));smy=d3.max(W,function(Y){return d3.max(Y,function(Z){return Z.y0+Z.y})});W.map(function(Y){Y.map(function(Z){Z.col=V;return Z})});return W}).enter().append("g").attr("class","gpath");B.append("path").attr("d",function(W,V){D=L.settings.chart.height-L.chart.getPosition(L)[W[0].col].y;return T(W)}).style("fill",function(W,V){if(L.settings.data.strata[W[0].col][V].texture!=null){return"url(#RectanglePattern_"+W[0].col+"_"+V+")"}else{return d3.rgb(M(W[0].col)).darker(L.settings.data.strata[W[0].col].length/2-(V+1)/2)}}).attr("class",function(W,V){return"layer"}).attr("class",function(W,V){return"col_"+W[0].col+" layer_"+V});var C=E/1;var I=C;for(var F=0;F<L.settings.data.strata.length;F++){for(var J=0;J<L.settings.data.strata[F].length;J++){if(L.settings.data.strata[F][J].texture!=null){var P=G.append("pattern").attr("id","RectanglePattern_"+F+"_"+J).attr("height",I).attr("width",C).attr("patternTransform","translate(0, 0) scale("+L.settings.data.strata[F][J].texture.size+", "+L.settings.data.strata[F][J].texture.size+") rotate(0)").attr("patternUnits","userSpaceOnUse");P.append("image").attr("x",0).attr("y",0).attr("height",I).attr("width",C).attr("xlink:href",function(){return L.settings.data.strata[F][J].texture.url})}}}}else{if(L.settings.chart.type=="CircleLayout"){var H=d3.select("#"+L.settings.DOMelement.id).append("div").attr("class","vis").attr("width",L.settings.width).attr("height",L.settings.height).append("svg").attr("width",L.settings.width).attr("height",L.settings.height);if(typeof(L.settings.chart.treeLayout)!="undefined"){for(var N=0;N<L.settings.data.model.length;N++){var U=L.settings.data.strata[N];var M=function(V){return L.token.colorRange(N)};L.aggregate.create_pie_chart(L,U,H,U[0].value,M,((N+1/2))*L.settings.chart.width/(L.settings.data.model.length)+L.settings.chart.x,L.settings.chart.y+L.settings.chart.height/6)}}else{var U=L.settings.data.strata.map(function(V){return{value:V[0].value}});console.log(L.settings.data.strata,U);var M=L.token.colorRange;L.aggregate.create_pie_chart(L,U,H,L.settings.chart.radius,M,L.settings.chart.x+L.settings.chart.width/2,L.settings.chart.y+L.settings.chart.height/2)}}}},create_pie_chart:function(O,T,K,J,P,N,M){var H=O.settings.width/O.settings.data.model.length,R=O.settings.sedimentation.aggregation.height;var G=d3.scale.linear().domain([0,O.settings.data.strata.length-1]).range([0,O.settings.width]);var F=d3.scale.linear().domain([0,d3.max(T,function(U){return U.value})]).rangeRound([0,R]);var C=O.settings.width,B=O.settings.height,I=O.settings.sedimentation.aggregation.height;labelr=J+30,donut=d3.layout.pie().sort(null),arc=d3.svg.arc().innerRadius(0).outerRadius(J);var L=Math.random();K.append("g.arcs_"+L).attr("class","arcs_"+L);var E=K.selectAll(".arcs").data(donut(T.map(function(V,U){return V.value}))).enter().append("svg:g").attr("transform","translate("+N+","+M+")");var D=0;var S=d3.svg.area().x(function(U){return O.settings.chart.spacer+U.x*(H-2*O.settings.chart.spacer)/smx}).y0(function(U){return(R-U.y0*D)}).y1(function(U){return(R-(U.y+U.y0)*D)});var Q=E.append("path").attr("fill",function(V,U){return P(U)}).attr("d",function(V,U){return arc(V)}).each(function(U){this._current=U})},update:function(K){if(typeof(K.settings.data.strata)=="undefined"||K.settings.data.strata.length==0||K.settings.data.strata[0].length==0){return}var N=K.settings.chart.width/K.settings.data.model.length;var I=K.settings.sedimentation.aggregation.height;var M=d3.scale.linear().domain([0,K.settings.data.strata.length-1]).range([0,K.settings.width]);var H=K.settings.data.strata.map(function(P){return{value:P[0].value}});var O=K.settings.data.strata.map(function(R){for(var P=0,Q=0;P<R.length;P++){Q+=R[P].value}return Q});var L=d3.scale.linear().domain([0,d3.max(O)]).range([0,K.settings.sedimentation.aggregation.height]);var E=K.settings.data.strata[0].length,F=20;smx=F-1,smy=0;var G=0;var D=d3.svg.area().x(function(P){return K.settings.chart.spacer+P.x*(N-2*K.settings.chart.spacer)/smx}).y0(function(P){return(I-P.y0*G)}).y1(function(P){return(I-(P.y+P.y0)*G)});var C=d3.select("svg");var J=C.selectAll(".gcol");J.data(K.settings.data.strata,function(Q,P){return[Q]});var B=J.selectAll(".gpath").data(function(R,P){var Q=d3.layout.stack().offset("expand")(K.aggregate.strata_layers(K,R.length,F,P));smy=d3.max(Q,function(S){return d3.max(S,function(T){return T.y0+T.y})});Q.map(function(S){S.map(function(T){T.col=P;return T})});return Q});B.select("path").transition().duration(100).attr("d",function(Q,P){K.chartUpdate(P,-L(O[P])-(I-K.settings.chart.height));G=K.settings.chart.height-K.chart.getPosition(K)[Q[0].col].y;return D(Q)})}}})($);(function($){$.fn._vs.strata={stratas:[],init:function(_this){if(_this.settings.chart.type!="StackedAreaChart"){_this.strata.create_strata(_this);return}settings=_this.settings;if((typeof(settings.data.strata)!="function")&&(typeof(settings.data.strata)=="undefined"||settings.data.strata.length==0)){for(var i=0;i<settings.data.model.length;i++){var defaultStrata={label:settings.data.model[i].label+"_"+i,category:i,value:function(t,s){return 0},};_this.strata.stratas[i]=[defaultStrata]}_this.strata.create_strata(_this);return}if(typeof settings.data.strata!="function"){if(typeof(settings.data.strata=="object")&&typeof(settings.data.strata[0])!="undefined"&&(typeof settings.data.strata[0][0].value!="undefined")&&typeof(settings.data.strata[0][0].value=="string")){var NB_STRATA=settings.data.strata[0].length;for(var i=0;i<settings.data.model.length;i++){_this.strata.stratas[i]=[];for(var n=0;n<NB_STRATA;n++){(function(a,b){var t=null;if((typeof settings.data.strata[a]!="undefined")&&(typeof settings.data.strata[a][b]!="undefined")&&(typeof settings.data.strata[a][b].texture!="undefined")){t=settings.data.strata[a][b].texture}var defaultStrata={};defaultStrata={label:settings.data.model[i].label+"_"+a,category:a,texture:t,value:function(){r=eval("f="+settings.data.strata[a][b].value);return r()}};_this.strata.stratas[a].push(defaultStrata)})(i,n)}}_this.strata.create_strata(_this);return}if(typeof(settings.data.strata[0])!="undefined"&&typeof(settings.data.strata[0][0])!="undefined"&&typeof(settings.data.strata[0][0].initValue!="undefined")){for(var c=0;c<settings.data.model.length;c++){var defaultStrata={label:settings.data.model[c].label+"_"+c,category:i,value:function(t,s){if(t.selectAll("category",s)){return settings.data.strata[s][0].initValue+t.selectAll("category",s).attr("state").filter(function(d){if(d==2){return d}}).length}else{return settings.data.strata[s][0].initValue}},};_this.strata.stratas[c]=[defaultStrata]}_this.strata.create_strata(_this);return}else{if(settings.data.strata[0].length==0){for(var i=0;i<settings.data.model.length;i++){var defaultStrata={label:settings.data.model[i].label+"_"+i,category:i,value:function(t,s){if(t.selectAll("category",s)){return t.selectAll("category",s).attr("state").filter(function(d){if(d==2){return d}}).length}else{return 0}},};_this.strata.stratas[i]=[defaultStrata]}_this.strata.create_strata(_this);return}else{var NB_STRATA=settings.data.strata[0].length;settings.data.strata_param=settings.data.strata;function fstrata(){var a=Array();for(var s=0;s<mySettings.data.model.length;s++){a.push(fstratum(s))}return a}function fstratum(a){var b=Array(NB_STRATA);for(var r=0;r<b.length;r++){b[r]=Array()}if(typeof _this!="undefined"){var tokens=_this.selectAll("category",s).attr("state").filter(function(d){if(d==2){return d}}).length;for(var k=0;k<tokens.length;k++){var tk=tokens[k];for(var r=0;r<b.length;r++){if(tk<_this.settings.stream.now-2*(r)&&tk>=_this.settings.stream.now-2*(r+1)){b[b.length-r-1].push(tk)}}}}var res=Array();for(var j=0;j<NB_STRATA;j++){var val=b[j].length;(function(v){res.push({value:function(){return v},label:"Strata "+j,category:a})})(val)}return res}_this.settings.data.strata=function(){return fstrata()};_this.strata.stratas=_this.settings.data.strata();_this.strata.create_strata(_this);return}}}if((typeof settings.data.strata=="function")||settings.data.strata[0].length>0||_this.strata.stratas.length>0){if(typeof settings.data.strata=="function"||(settings.data.strata[0].length>0&&typeof(settings.data.strata[0])=="object")){if(typeof settings.data.strata=="function"){_this.strata.stratas=settings.data.strata()}else{if(typeof settings.data.strata[0].value=="function"){for(var i=0;i<settings.data.model.length;i++){var defaultStrata={label:settings.data.model[i].label+"_"+i,category:i,initValue:settings.data.model[i].value,value:function(t,s){return settings.data.strata[i]},};_this.strata.stratas[i]=[defaultStrata]}}else{for(var i=0;i<settings.data.model.length;i++){var defaultStrata={label:settings.data.model[i].label+"_"+i,category:i,initValue:settings.data.model[i].value,value:function(t,s){if(typeof(t.selectAll("category",s).length)=="undefined"){return this.initValue}if(t.selectAll("category",s)){return this.initValue+t.selectAll("category",s).attr("state").filter(function(d){if(d==2){return d}}).length}else{return 0}},};_this.strata.stratas[i]=[defaultStrata]}}}}_this.strata.create_strata(_this)}},selectAll:function(_this,key,value){result=[];result.attr=function(key,value,param){var r=[];result.forEach(function(i){q=i.attr(key,value,param);r.push(q)});return r};if(typeof(value)=="undefined"&&typeof(key)=="undefined"){return this.stratas}else{for(var i=_this.strata.stratas.length-1;i>=0;i--){if(_this.strata.stratas[i].attr(key)==value){result.push(_this.strata.stratas[i]);break}}}if(typeof(result[0])=="undefined"){return false}else{return result[0]}},add:function(_this,setting){var strata=function(){};strata.myobj=setting;strata.attr=function(key,value,param){if(typeof(value)=="undefined"){if(typeof(this[key])!="undefined"){return this[key]()}else{return this.myobj[key]}}else{if(typeof(this[key])!="undefined"){this[key](value,param)}else{this.myobj[key]=value}}return this};return strata},remove:function(_this,key,value){},strata_layers:function(_this,n,m,p){var sn=d3.scale.linear().domain([1,m-2]).range([Math.PI/2,2*Math.PI-Math.PI/2]);var logscale=d3.scale.pow().exponent(10).domain([0,m]).range([0,1]);return d3.range(n).map(function(i){var r=5*Math.random();return d3.range(m).map(function(j){if(_this.settings.sedimentation.aggregation.strataType=="sin"){if(i==1){return 20}var x=5+r*5*Math.sin(sn(j))+(i*50);if(x<0){return -x}else{return x}}else{if(_this.settings.sedimentation.aggregation.strataType=="log"){return i+1}else{if(typeof(p)=="undefined"){p=0}return _this.strata.stratas[p][i].value(_this,p)}}}).map(stream_index)});function stream_index(d,i){return{x:i,y:Math.max(0,d)}}},create_strata:function(_this){if(_this.settings.chart.type=="StackedAreaChart"){var w=_this.settings.chart.width/_this.settings.data.model.length,h=_this.settings.sedimentation.aggregation.height;var color=_this.token.colorRange;if(typeof _this.settings.options.canvasFirst!="undefined"&&_this.settings.options.canvasFirst==false){var vis=d3.select("#"+_this.settings.DOMelement.id).insert("div",":first-child").style("position","absolute").attr("class","vis").style("z-index",10).append("svg").attr("width",_this.settings.width).attr("height",_this.settings.height).append("g").attr("transform","translate("+_this.settings.chart.x+","+_this.settings.chart.y+")")}else{var vis=d3.select("#"+_this.settings.DOMelement.id).append("div").attr("class","vis").style("z-index",10).append("svg").attr("width",_this.settings.width).attr("height",_this.settings.height).append("g").attr("transform","translate("+_this.settings.chart.x+","+_this.settings.chart.y+")")}var sn=_this.strata.stratas[0].length,sm=20;smx=sm-1,smy=0;var sum_strata=_this.strata.stratas.map(function(d,i){for(var v=0,res=0;v<d.length;v++){res+=d[v].value(_this,i)}return res});var y=d3.scale.linear().domain([0,Math.max(d3.max(sum_strata),_this.settings.sedimentation.aggregation.maxData)]).range([0,_this.settings.sedimentation.aggregation.height]);var g=vis.selectAll("g.gcol").data(_this.strata.stratas,function(d){return[d]}).enter().append("g").attr("transform",function(d,i){var align=_this.settings.sedimentation.aggregation.height;if(_this.settings.sedimentation.aggregation.invertStrata){align=2*_this.settings.sedimentation.aggregation.height-y(sum_strata[i])}return"translate("+(i*w)+", "+(_this.settings.chart.height-align)+")"}).attr("class",function(d,i){return"gcol col_"+i});var gpath=g.selectAll(".gpath").data(function(d,i){var sd=d3.layout.stack().offset("expand")(_this.strata.strata_layers(_this,d.length,sm,i));smy=d3.max(sd,function(d){return d3.max(d,function(d){return d.y0+d.y})});sd.map(function(d){d.map(function(d){d.col=i;return d})});return sd}).enter().append("g").attr("class","gpath");var area=d3.svg.area().x(function(d){return _this.settings.chart.spacer+d.x*(w-2*_this.settings.chart.spacer)/smx}).y0(function(d){return(h-d.y0*d.offshit)}).y1(function(d){return(h-(d.y+d.y0)*d.offshit)});var pathlayer=gpath.append("path").attr("d",function(d,i){_this.chartUpdate(i,-y(sum_strata[i])-(h-_this.settings.chart.height));hh=0;d.map(function(dd){dd.offshit=hh;return dd});return area(d)});pathlayer.style("fill",function(d,i){if(_this.strata.stratas[d[0].col][i].texture!=null){return"url(#RectanglePattern_"+d[0].col+"_"+i+")"}else{return d3.rgb(color(d[0].col)).darker(_this.strata.stratas[d[0].col].length/2-(i+1)/2)}}).attr("class",function(d,i){return"gcol col_"+d[0].col+" layer_"+i});var patternWidth=w/1;var patternHeight=patternWidth;if(typeof _this.settings.data.strata!="undefined"){for(var s=0;s<_this.settings.data.strata.length;s++){for(var l=0;l<_this.settings.data.strata[s].length;l++){if(_this.settings.data.strata[s][l].texture!=null){var pattern=vis.append("pattern").attr("id","RectanglePattern_"+s+"_"+l).attr("height",patternHeight).attr("width",patternWidth).attr("patternTransform","translate(0, 0) scale("+_this.settings.data.strata[s][l].texture.size+", "+_this.settings.data.strata[s][l].texture.size+") rotate(0)").attr("patternUnits","userSpaceOnUse");pattern.append("image").attr("x",0).attr("y",0).attr("height",patternHeight).attr("width",patternWidth).attr("xlink:href",function(){return _this.settings.data.strata[s][l].texture.url})}}}}}else{if(_this.settings.chart.type=="CircleLayout"){var svg=d3.select("#"+_this.settings.DOMelement.id).append("div").attr("class","vis").attr("width",_this.settings.width).attr("height",_this.settings.height).append("svg").attr("width",_this.settings.width).attr("height",_this.settings.height);if(typeof(_this.settings.chart.treeLayout)!="undefined"){for(var i=0;i<_this.settings.data.model.length;i++){var data=_this.settings.data.strata[i];var color=function(s){return _this.token.colorRange(i)};_this.strata.create_pie_chart(_this,data,svg,data[0].value,color,((i+1/2))*_this.settings.chart.width/(_this.settings.data.model.length)+_this.settings.chart.x,_this.settings.chart.y+_this.settings.chart.height/6)}}else{var data=_this.settings.data.strata.map(function(d){return{value:d[0].value}});var color=_this.token.colorRange;_this.strata.create_pie_chart(_this,data,svg,_this.settings.chart.radius,color,_this.settings.chart.x+_this.settings.chart.width/2,_this.settings.chart.y+_this.settings.chart.height/2)}}}},create_pie_chart:function(_this,data,svg,r,color,posx,posy){var w=_this.settings.width/_this.settings.data.model.length,h=_this.settings.sedimentation.aggregation.height;var x=d3.scale.linear().domain([0,_this.settings.data.strata.length-1]).range([0,_this.settings.width]);var y=d3.scale.linear().domain([0,d3.max(data,function(d){return d.value})]).rangeRound([0,h]);var wp=_this.settings.width,hp=_this.settings.height,hhp=_this.settings.sedimentation.aggregation.height;labelr=r+30,donut=d3.layout.pie().sort(null),arc=d3.svg.arc().innerRadius(0).outerRadius(r);var id=Math.random();svg.append("g.arcs_"+id).attr("class","arcs_"+id);var garcs=svg.selectAll(".arcs").data(donut(data.map(function(d,i){return d.value}))).enter().append("svg:g").attr("transform","translate("+posx+","+posy+")");var hh=0;var area=d3.svg.area().x(function(d){return _this.settings.chart.spacer+d.x*(w-2*_this.settings.chart.spacer)/smx}).y0(function(d){return(h-d.y0*hh)}).y1(function(d){return(h-(d.y+d.y0)*hh)});var arcs=garcs.append("path").attr("fill",function(d,i){return color(i)}).attr("d",function(d,i){return arc(d)}).each(function(d){this._current=d})},update:function(_this){if(typeof(_this.strata.stratas)=="undefined"||_this.strata.stratas.length==0){return}if(typeof settings.data.strata=="function"){_this.strata.stratas=settings.data.strata()}var sn=_this.strata.stratas[0].length,sm=20;smx=sm-1,smy=0;var w=_this.settings.chart.width/_this.settings.data.model.length,h=_this.settings.sedimentation.aggregation.height;var color=_this.token.colorRange;var area=d3.svg.area().x(function(d){return _this.settings.chart.spacer+d.x*(w-2*_this.settings.chart.spacer)/smx}).y0(function(d){return(h-d.y0*d.offshit)}).y1(function(d){return(h-(d.y+d.y0)*d.offshit)});var sum_strata=_this.strata.stratas.map(function(d,i){for(var v=0,res=0;v<d.length;v++){res+=d[v].value(_this,i)}return res});var y=d3.scale.linear().domain([0,Math.max(d3.max(sum_strata),_this.settings.sedimentation.aggregation.maxData)]).range([0,_this.settings.sedimentation.aggregation.height]);var vis=d3.select("#"+_this.settings.DOMelement.id);var g=vis.selectAll("g.gcol");if(_this.settings.sedimentation.aggregation.invertStrata){g.transition().duration(100).attr("transform",function(d,i){var align=_this.settings.sedimentation.aggregation.height;align=2*_this.settings.sedimentation.aggregation.height-y(sum_strata[i]);return"translate("+(i*w)+", "+(_this.settings.chart.height-(2*_this.settings.sedimentation.aggregation.height-y(sum_strata[i])))+")"})}var gpath=g.selectAll("path").data(function(d,i){var sd=d3.layout.stack().offset("expand")(_this.strata.strata_layers(_this,d.length,sm,i));smy=d3.max(sd,function(d){return d3.max(d,function(d){return d.y0+d.y})});sd.map(function(d){d.map(function(d){d.col=i;return d})});return sd});if(_this.settings.chart.type=="StackedAreaChart"){var pathlayer=vis.selectAll("path").transition().duration(100).attr("d",function(d,i){if(!_this.settings.sedimentation.aggregation.invertStrata){_this.chartUpdate(i,-y(sum_strata[i])-(h-_this.settings.chart.height));hh=_this.settings.chart.height-_this.chart.getPosition(_this)[d[0].col].y}else{_this.chartUpdate(i,-2*h+_this.settings.chart.height);hh=y(sum_strata[d[0].col])}d.map(function(dd){dd.offshit=hh;return dd});return area(d)})}}}})($);(function(A){A.fn._vs.chart.StackedAreaChart=function(F,E,D){var C;this.init=function(G){gravity=new G.phy.b2Vec2(0.001,10);G.world.m_gravity=gravity;G.chartPhySetup={grounds:[],wall:[]};this.setupChartPhysics(G)};this.setupChartPhysics=function(L){var M=L.settings.chart.spacer;var O=(L.settings.chart.width/L.settings.data.model.length);var H=M;var P=L.settings.chart.height/2+L.settings.chart.y;var N=L.settings.chart.height-L.settings.sedimentation.aggregation.height;var I=0;for(var K=0;K<L.settings.data.model.length;K++){L.settings.data.model[K].value=0;if(typeof(L.settings.data.strata)!="undefined"){if(typeof(L.settings.data.strata[K])!="undefined"){for(var J=0;J<L.settings.data.strata[K].length;J++){L.settings.data.model[K].value+=L.settings.data.strata[K][J].value}}}I+=L.settings.data.model[K].value}for(var K=0;K<L.settings.data.model.length+1;K++){var G=L.settings.chart.x+(K*O);L.chartPhySetup.wall[K]=this.createMyChartBox(L,G,P,H,L.settings.chart.height/2,"wall",L.settings.chart.wallColor);if(K<L.settings.data.model.length){L.settings.sedimentation.incoming.point[K]={x:G+(O/2),y:L.settings.y}}if(K<L.settings.data.model.length){L.chartPhySetup.grounds[K]=this.createMyChartBox(L,G+(O/2),L.settings.chart.height+L.settings.chart.y+L.settings.sedimentation.aggregation.height,O/2,L.settings.chart.height,"lift","rgba(250,250,250,0)");this.update(L,{cat:K,y:L.settings.chart.height})}}};this.token=function(J,G){var I=G;var H={x:(J.settings.sedimentation.incoming.point[I].x+(Math.random()*2)),y:(J.settings.sedimentation.incoming.point[I].y+(Math.random()*1)),t:J.now(),size:J.settings.sedimentation.token.size.original,category:I,lineWidth:0,};return H};this.createMyChartBox=function(M,P,O,Q,L,N,J){var I=M.settings.options.scale;var G=new M.phy.b2FixtureDef;G.density=1;G.friction=0.5;G.restitution=0.2;var H=new M.phy.b2BodyDef;H.type=M.phy.b2Body.b2_staticBody;G.shape=new M.phy.b2PolygonShape;G.shape.SetAsBox(Q/I,L/I);H.position.Set(P/I,O/I);var K=M.world.CreateBody(H).CreateFixture(G);K.m_userData={type:N,fillStyle:J,w:Q,h:L,x:P,y:O};return K};this.update=function(K,J){var I={cat:0,y:0};if(K.chartPhySetup.grounds[J.cat]!=null){var H=K.chartPhySetup.grounds[J.cat].GetBody();var G=H.GetWorldCenter();G.y=(J.y+K.settings.chart.height+K.settings.chart.y+K.settings.sedimentation.aggregation.height)/K.settings.options.scale;H.SetPosition(G)}};this.getPositionOld=function(I){var G=[];for(var H=0;H<I.chartPhySetup.grounds.length;H++){myElement=I.chartPhySetup.grounds[H];myBody=myElement.GetBody();G.push({x:(myBody.GetWorldCenter().x*I.settings.options.scale),y:(myBody.GetWorldCenter().y*I.settings.options.scale),a:myBody.GetAngle(),w:myElement.m_userData.w,h:myElement.m_userData.h,r:myElement.m_userData.r,})}return G};this.getPosition=function(I){var G=[];for(var H=0;H<I.chartPhySetup.grounds.length;H++){myElement=I.chartPhySetup.grounds[H];myBody=myElement.GetBody();G.push({x:(myBody.GetWorldCenter().x*I.settings.options.scale),y:(myBody.GetWorldCenter().y*I.settings.options.scale)-I.settings.chart.height-I.settings.chart.y,a:myBody.GetAngle(),w:myElement.m_userData.w,h:myElement.m_userData.h,r:myElement.m_userData.r,})}return G};if(typeof(E)!=undefined){var B=this[E](F,D);if(typeof(B)!=undefined){return B}}}})($);(function(A){A.fn._vs.chart.CircleLayout=function(I,M,Q){var H;var K;var J;var G;var N=[];var E=0;var I;this.init=function(U,S){console.log("Circle Layout Init");this._this=U;gravity=new U.phy.b2Vec2(0,0);U.world.m_gravity=gravity;U.chartPhySetup={grounds:[],wall:[]};this.treeLayout=U.settings.chart.treeLayout;for(var T=0;T<U.settings.data.model.length;T++){U.settings.data.strata[T][0].value=U.settings.data.strata[T][0].initValue}for(var T=0;T<U.settings.data.model.length;T++){U.settings.data.model[T].value=0;for(var R=0;R<U.settings.data.strata[T].length;R++){U.settings.data.model[T].value+=U.settings.data.strata[T][R].value}N.push(U.settings.data.model[T].value);E+=U.settings.data.model[T].value}if(this.treeLayout){console.log("ici");this.setupBubbleChartPhysics(U)}else{this.setupPieChartPhysics(U)}};this.setupPieChartPhysics=function(X){console.log("w",X.settings.width);var S=X.settings.chart.radius;K=X.settings.chart.width/2+X.settings.chart.x;J=X.settings.chart.height/2+X.settings.chart.y;var V=O(K,J,S,X.settings.chart.wallColor);for(var U=0;U<X.settings.data.model.length;U++){X.settings.sedimentation.incoming.target[U]={x:K,y:J}}var R=[];var T=X.settings.chart.spacer;var W=0;console.log("tdv",E);if(E==0){for(var U=0;U<X.settings.data.length;U++){N[U]=1}E=N.length}for(var U=0;U<N.length;U++){v=N[U];a2=((v/2+W)/E)*360-90;W+=v;a=(W/E)*360-90;c=L(a2,S*5,K,J);console.log(c);X.settings.sedimentation.incoming.point[U]=c;X.chartPhySetup.grounds[U]=this.createBox(X,K,J,T,S,a,S,"wall",X.settings.chart.wallColor)}console.log("w",X.settings.chart.width)};this.update=function(Y,U){console.log("update");var T={cat:0,r:0};U.r-=90;var W=(U.r+90)*(Math.PI/180);var X=L(U.r,Y.settings.chart.radius,Y.settings.chart.width/2+Y.settings.chart.x,Y.settings.chart.height/2+Y.settings.chart.y);if(Y.chartPhySetup.grounds[U.cat]!=null){var S=Y.chartPhySetup.grounds[U.cat].GetBody();var R=S.GetWorldCenter();var V=S.GetAngle();R.y=X.y/Y.settings.options.scale;R.x=X.x/Y.settings.options.scale;V=W;S.SetPosition(R);S.SetAngle(V)}};this.token=function(U,R){var T=R;var S={x:(U.settings.sedimentation.incoming.point[T].x+(Math.random()*2)),y:(U.settings.sedimentation.incoming.point[T].y+(Math.random()*1)),t:U.now(),size:U.settings.sedimentation.token.size.original,category:T,phy:{density:10,friction:0,restitution:0},targets:[{x:U.settings.sedimentation.incoming.target[T].x,y:U.settings.sedimentation.incoming.target[T].y}]};return S};function L(T,S,X,U){j=T*Math.PI/180;var R=(Math.cos(j)*S)+X;var W=(Math.sin(j)*S)+U;var V={x:R,y:W};return V}function O(W,V,R,T){var Y=I.settings.options.scale;var X=new I.phy.b2FixtureDef;X.density=1;X.friction=0.5;X.restitution=0.2;var S=new I.phy.b2BodyDef;X.shape=new I.phy.b2CircleShape(R/Y);S.position.Set(W/Y,V/Y);var U=I.world.CreateBody(S).CreateFixture(X);U.m_userData={type:"wall",familyID:null,fillStyle:T,strokeStyle:T,r:R};return U}this.createBox=function(Z,k,f,l,Y,g,R,e,W){var V=Z.settings.options.scale;var S=new Z.phy.b2FixtureDef;var b=L(g,R,k,f);S.density=1;S.friction=0.5;S.restitution=0.2;var U=new Z.phy.b2BodyDef;var T=(g+90)*(Math.PI/180);U.angle=T;U.type=Z.phy.b2Body.b2_staticBody;S.shape=new Z.phy.b2PolygonShape;S.shape.SetAsBox(l/V,Y/V);U.position.Set(b.x/V,b.y/V);var X=Z.world.CreateBody(U).CreateFixture(S);X.m_userData={type:e,fillStyle:W,w:l,h:Y,r:R};return X};this.getPosition=function(T){var R=[];for(var S=0;S<T.chartPhySetup.grounds.length;S++){myElement=T.chartPhySetup.grounds[S];myBody=myElement.GetBody();R.push({x:(myBody.GetWorldCenter().x*T.settings.options.scale),y:(myBody.GetWorldCenter().y*T.settings.options.scale),a:myBody.GetAngle(),w:myElement.m_userData.w,h:myElement.m_userData.h,r:myElement.m_userData.r,})}return R};this.setupBubbleChartPhysics=function(Y){console.log("setupBubbleChartPhysics");var V=(Y.settings.chart.width/Y.settings.data.model.length);var T=Y.settings.chart.spacer;var S=Y.settings.chart.height/2+Y.settings.y+T;var W=0;var X=0;var R=Y.settings.chart.column;for(var U=0;U<Y.settings.data.model.length;U++){X=Y.settings.chart.x+(U%R*T)+(T/2);W=Y.settings.chart.y+Math.floor(U/R)*T+(T/2);Y.settings.sedimentation.incoming.target[U]={x:X,y:W};O[U]=C(X,W,Y.settings.chart.spacer,U);Y.settings.data.model[U].incomingPoint={x:X,y:W}}};function C(b,W,X,S){console.log("CreatMyBubblePivot",b,W,X,S);var U=I.settings.options.scale;var R=new I.phy.b2FixtureDef;var Z=d3.scale.category10();R.density=10000;R.friction=0;R.restitution=0;var V=new I.phy.b2BodyDef;R.shape=new I.phy.b2CircleShape(X*U);V.position.Set(b/U,W/U);var T=I.world.CreateBody(V);var Y=T.CreateFixture(R);console.log(S,Z(S));Y.m_userData={type:"BubblePivot",familyID:S,fillStyle:I.settings.chart.wallColor};console.log(S,Y);Y.m_shape.m_radius=I.settings.data.model[S].value/U;return Y}this.getPivotPosition=function(T){if(typeof(T)!="undefined"){return this.pivot}else{var R=[];for(var S=0;S<I.settings.data.model.length;S++){R.push(I.settings.data.model[S])}return R}};function D(S,U,T){var R=O[T].GetBody();R.SetPosition(new b2Vec2(S/scale,U/scale));I.settings.data.model[T].incomingPoint.x=S;I.settings.data.model[T].incomingPoint.y=U;setFlowSpeed(speedFlow)}function B(R,U,T){for(var S=0;S<categorys[T].joins.length;S++){categorys[T].joins[S].SetTarget(new b2Vec2(R/scale,U/scale))}}function F(R,S){O[S].m_shape.m_radius=R}if(typeof(M)!=undefined){var P=this[M](I,Q);if(typeof(P)!=undefined){return P}}}})($);
-},{"jquery":12}],4:[function(require,module,exports){
+},{"jquery":27}],4:[function(require,module,exports){
 var jade = require("jade/runtime");
 
 module.exports = function template(locals) {
@@ -278,12 +515,17 @@ var jade_interp;
 buf.push("<div class=\"grid-sizer\"></div>");
 if ( item instanceof models.InstagramItem	 )
 {
-buf.push("<div class=\"element\"><figure><div><img" + (jade.attr("src", item.get('images').low_resolution.url, true, false)) + "/></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\">" + (null == (jade_interp = moment.unix(parseInt(item.get('created_time'))).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && item.get('tags').length < 7 ? item.get('tags').join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : item.get('tags').join(' ')) ) ? "" : jade_interp) + "</h3><span>" + (jade.escape((jade_interp = item.get('user').username) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\">Take a Look</a></div></figcaption></figure></div>");
+buf.push("<div" + (jade.attr("data-created", item.get('created_time'), true, false)) + (jade.attr("data-uid", item.get('id'), true, false)) + " class=\"element\"><figure><div><img" + (jade.attr("src", item.get('images').low_resolution.url, true, false)) + "/></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\" class=\"insta\">" + (null == (jade_interp = moment.unix(parseInt(item.get('created_time'))).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && item.get('tags').length < 7 ? item.get('tags').join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : item.get('tags').join(' ')) ) ? "" : jade_interp) + "</h3><span>" + (jade.escape((jade_interp = item.get('user').username) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\">Take a Look</a></div></figcaption></figure></div>");
 }
-if ( item instanceof models.TwitterItem	 )
+if ( false && item instanceof models.TwitterItem	 )
 {
 tags = _.map(item.get('entities').hashtags, function(h){ return h.text; })
-buf.push("<div class=\"element\"><figure><div><div class=\"tweet\">" + (jade.escape(null == (jade_interp = item.get('text')) ? "" : jade_interp)) + "</div></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\">" + (null == (jade_interp = moment(item.get('created_at')).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && tags.length < 7 ? tags.join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : tags.join(' ')) ) ? "" : jade_interp) + "</h3><span>" + (jade.escape((jade_interp = item.get('user').screen_name) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\">Take a Look<!-- .created= moment(item.get('created_at')).format(\"dddd, MMMM Do YYYY, h:mm:ss a\") --></a></div></figcaption></figure></div>");
+buf.push("<div class=\"element\"><figure><div>");
+if ( item.get('entities').media && item.get('entities').media[0] && item.get('entities').media[0].sizes.medium)
+{
+buf.push("<img" + (jade.attr("src", item.get('entities').media[0].media_url, true, false)) + "/>");
+}
+buf.push("<div class=\"tweet\">" + (jade.escape(null == (jade_interp = item.get('text')) ? "" : jade_interp)) + "</div></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\" class=\"twit\">" + (null == (jade_interp = moment(item.get('created_at')).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && tags.length < 7 ? tags.join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : tags.join(' ')) ) ? "" : jade_interp) + "</h3><span class=\"byline-twit\">@" + (jade.escape((jade_interp = item.get('user').screen_name) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\">Take a Look<!-- .created= moment(item.get('created_at')).format(\"dddd, MMMM Do YYYY, h:mm:ss a\") --></a></div></figcaption></figure></div>");
 }
     }
 
@@ -295,20 +537,25 @@ buf.push("<div class=\"element\"><figure><div><div class=\"tweet\">" + (jade.esc
 buf.push("<div class=\"grid-sizer\"></div>");
 if ( item instanceof models.InstagramItem	 )
 {
-buf.push("<div class=\"element\"><figure><div><img" + (jade.attr("src", item.get('images').low_resolution.url, true, false)) + "/></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\">" + (null == (jade_interp = moment.unix(parseInt(item.get('created_time'))).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && item.get('tags').length < 7 ? item.get('tags').join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : item.get('tags').join(' ')) ) ? "" : jade_interp) + "</h3><span>" + (jade.escape((jade_interp = item.get('user').username) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\">Take a Look</a></div></figcaption></figure></div>");
+buf.push("<div" + (jade.attr("data-created", item.get('created_time'), true, false)) + (jade.attr("data-uid", item.get('id'), true, false)) + " class=\"element\"><figure><div><img" + (jade.attr("src", item.get('images').low_resolution.url, true, false)) + "/></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\" class=\"insta\">" + (null == (jade_interp = moment.unix(parseInt(item.get('created_time'))).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && item.get('tags').length < 7 ? item.get('tags').join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : item.get('tags').join(' ')) ) ? "" : jade_interp) + "</h3><span>" + (jade.escape((jade_interp = item.get('user').username) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username, true, false)) + " target=\"_blank\">Take a Look</a></div></figcaption></figure></div>");
 }
-if ( item instanceof models.TwitterItem	 )
+if ( false && item instanceof models.TwitterItem	 )
 {
 tags = _.map(item.get('entities').hashtags, function(h){ return h.text; })
-buf.push("<div class=\"element\"><figure><div><div class=\"tweet\">" + (jade.escape(null == (jade_interp = item.get('text')) ? "" : jade_interp)) + "</div></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\">" + (null == (jade_interp = moment(item.get('created_at')).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && tags.length < 7 ? tags.join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : tags.join(' ')) ) ? "" : jade_interp) + "</h3><span>" + (jade.escape((jade_interp = item.get('user').screen_name) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\">Take a Look<!-- .created= moment(item.get('created_at')).format(\"dddd, MMMM Do YYYY, h:mm:ss a\") --></a></div></figcaption></figure></div>");
+buf.push("<div class=\"element\"><figure><div>");
+if ( item.get('entities').media && item.get('entities').media[0] && item.get('entities').media[0].sizes.medium)
+{
+buf.push("<img" + (jade.attr("src", item.get('entities').media[0].media_url, true, false)) + "/>");
+}
+buf.push("<div class=\"tweet\">" + (jade.escape(null == (jade_interp = item.get('text')) ? "" : jade_interp)) + "</div></div><figcaption class=\"item-time\"><h4><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\" class=\"twit\">" + (null == (jade_interp = moment(item.get('created_at')).fromNoww()) ? "" : jade_interp) + "</a></h4></figcaption><figcaption class=\"item-meta\"><h3>" + (null == (jade_interp = (item.get('caption')!=null && tags.length < 7 ? tags.join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : tags.join(' ')) ) ? "" : jade_interp) + "</h3><span class=\"byline-twit\">@" + (jade.escape((jade_interp = item.get('user').screen_name) == null ? '' : jade_interp)) + "</span><div><a" + (jade.attr("href", (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'), true, false)) + (jade.attr("title", (item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name, true, false)) + " target=\"_blank\">Take a Look<!-- .created= moment(item.get('created_at')).format(\"dddd, MMMM Do YYYY, h:mm:ss a\") --></a></div></figcaption></figure></div>");
 }
     }
 
   }
 }).call(this);
-}("hashtags" in locals_for_with?locals_for_with.hashtags:typeof hashtags!=="undefined"?hashtags:undefined,"models" in locals_for_with?locals_for_with.models:typeof models!=="undefined"?models:undefined,"ua" in locals_for_with?locals_for_with.ua:typeof ua!=="undefined"?ua:undefined,"moment" in locals_for_with?locals_for_with.moment:typeof moment!=="undefined"?moment:undefined,"parseInt" in locals_for_with?locals_for_with.parseInt:typeof parseInt!=="undefined"?parseInt:undefined,"tags" in locals_for_with?locals_for_with.tags:typeof tags!=="undefined"?tags:undefined,"_" in locals_for_with?locals_for_with._:typeof _!=="undefined"?_:undefined));;return buf.join("");
+}.call(this,"hashtags" in locals_for_with?locals_for_with.hashtags:typeof hashtags!=="undefined"?hashtags:undefined,"models" in locals_for_with?locals_for_with.models:typeof models!=="undefined"?models:undefined,"ua" in locals_for_with?locals_for_with.ua:typeof ua!=="undefined"?ua:undefined,"moment" in locals_for_with?locals_for_with.moment:typeof moment!=="undefined"?moment:undefined,"parseInt" in locals_for_with?locals_for_with.parseInt:typeof parseInt!=="undefined"?parseInt:undefined,"tags" in locals_for_with?locals_for_with.tags:typeof tags!=="undefined"?tags:undefined,"_" in locals_for_with?locals_for_with._:typeof _!=="undefined"?_:undefined));;return buf.join("");
 };
-},{"jade/runtime":11}],5:[function(require,module,exports){
+},{"jade/runtime":25}],5:[function(require,module,exports){
 //
 // The javscript asset package for the "hashtags" app.
 //
@@ -317,12 +564,13 @@ buf.push("<div class=\"element\"><figure><div><div class=\"tweet\">" + (jade.esc
 // small, often just a line of initialize code like this.
 //
 
+// require('jquery')(require('../apps/hashtags/templates/lib/imagesloaded.js'))
 require('jquery')(require('../apps/hashtags/templates/lib/visualsedimentation.js'))
 require('jquery')(require('../apps/hashtags/client.js').init)
 
 
 
-},{"../apps/hashtags/client.js":1,"../apps/hashtags/templates/lib/visualsedimentation.js":3,"jquery":12}],6:[function(require,module,exports){
+},{"../apps/hashtags/client.js":1,"../apps/hashtags/templates/lib/visualsedimentation.js":3,"jquery":27}],6:[function(require,module,exports){
 // 
 // Collection for hashtag items.
 // 
@@ -390,7 +638,7 @@ module.exports = HashtagItems = Backbone.Collection.extend({
 
 });
 
-},{"../models/hashtag_item":7,"backbone":8,"sharify":14,"underscore":16}],7:[function(require,module,exports){
+},{"../models/hashtag_item":7,"backbone":8,"sharify":29,"underscore":31}],7:[function(require,module,exports){
 // 
 // Model for hashtag_item.
 // 
@@ -430,7 +678,7 @@ models.InstagramItem = HashtagItem.extend({
 });
 
 module.exports = models;
-},{"backbone":8,"sharify":14}],8:[function(require,module,exports){
+},{"backbone":8,"sharify":29}],8:[function(require,module,exports){
 //     Backbone.js 1.1.2
 
 //     (c) 2010-2014 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
@@ -2040,1356 +2288,3921 @@ module.exports = models;
 
 }));
 
-},{"underscore":9}],9:[function(require,module,exports){
-//     Underscore.js 1.6.0
-//     http://underscorejs.org
-//     (c) 2009-2014 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
-//     Underscore may be freely distributed under the MIT license.
+},{"underscore":31}],9:[function(require,module,exports){
+/*!
+ * Isotope v2.1.0
+ * Filter & sort magical layouts
+ * http://isotope.metafizzy.co
+ */
 
-(function() {
+( function( window ) {
 
-  // Baseline setup
-  // --------------
+'use strict';
 
-  // Establish the root object, `window` in the browser, or `exports` on the server.
-  var root = this;
+// -------------------------- vars -------------------------- //
 
-  // Save the previous value of the `_` variable.
-  var previousUnderscore = root._;
+var jQuery = window.jQuery;
 
-  // Establish the object that gets returned to break out of a loop iteration.
-  var breaker = {};
+// -------------------------- helpers -------------------------- //
 
-  // Save bytes in the minified (but not gzipped) version:
-  var ArrayProto = Array.prototype, ObjProto = Object.prototype, FuncProto = Function.prototype;
+// extend objects
+function extend( a, b ) {
+  for ( var prop in b ) {
+    a[ prop ] = b[ prop ];
+  }
+  return a;
+}
 
-  // Create quick reference variables for speed access to core prototypes.
-  var
-    push             = ArrayProto.push,
-    slice            = ArrayProto.slice,
-    concat           = ArrayProto.concat,
-    toString         = ObjProto.toString,
-    hasOwnProperty   = ObjProto.hasOwnProperty;
-
-  // All **ECMAScript 5** native function implementations that we hope to use
-  // are declared here.
-  var
-    nativeForEach      = ArrayProto.forEach,
-    nativeMap          = ArrayProto.map,
-    nativeReduce       = ArrayProto.reduce,
-    nativeReduceRight  = ArrayProto.reduceRight,
-    nativeFilter       = ArrayProto.filter,
-    nativeEvery        = ArrayProto.every,
-    nativeSome         = ArrayProto.some,
-    nativeIndexOf      = ArrayProto.indexOf,
-    nativeLastIndexOf  = ArrayProto.lastIndexOf,
-    nativeIsArray      = Array.isArray,
-    nativeKeys         = Object.keys,
-    nativeBind         = FuncProto.bind;
-
-  // Create a safe reference to the Underscore object for use below.
-  var _ = function(obj) {
-    if (obj instanceof _) return obj;
-    if (!(this instanceof _)) return new _(obj);
-    this._wrapped = obj;
+var trim = String.prototype.trim ?
+  function( str ) {
+    return str.trim();
+  } :
+  function( str ) {
+    return str.replace( /^\s+|\s+$/g, '' );
   };
 
-  // Export the Underscore object for **Node.js**, with
-  // backwards-compatibility for the old `require()` API. If we're in
-  // the browser, add `_` as a global object via a string identifier,
-  // for Closure Compiler "advanced" mode.
-  if (typeof exports !== 'undefined') {
-    if (typeof module !== 'undefined' && module.exports) {
-      exports = module.exports = _;
+var docElem = document.documentElement;
+
+var getText = docElem.textContent ?
+  function( elem ) {
+    return elem.textContent;
+  } :
+  function( elem ) {
+    return elem.innerText;
+  };
+
+var objToString = Object.prototype.toString;
+function isArray( obj ) {
+  return objToString.call( obj ) === '[object Array]';
+}
+
+// index of helper cause IE8
+var indexOf = Array.prototype.indexOf ? function( ary, obj ) {
+    return ary.indexOf( obj );
+  } : function( ary, obj ) {
+    for ( var i=0, len = ary.length; i < len; i++ ) {
+      if ( ary[i] === obj ) {
+        return i;
+      }
     }
-    exports._ = _;
+    return -1;
+  };
+
+// turn element or nodeList into an array
+function makeArray( obj ) {
+  var ary = [];
+  if ( isArray( obj ) ) {
+    // use object if already an array
+    ary = obj;
+  } else if ( obj && typeof obj.length === 'number' ) {
+    // convert nodeList to array
+    for ( var i=0, len = obj.length; i < len; i++ ) {
+      ary.push( obj[i] );
+    }
   } else {
-    root._ = _;
+    // array of single index
+    ary.push( obj );
+  }
+  return ary;
+}
+
+function removeFrom( obj, ary ) {
+  var index = indexOf( ary, obj );
+  if ( index !== -1 ) {
+    ary.splice( index, 1 );
+  }
+}
+
+// -------------------------- isotopeDefinition -------------------------- //
+
+// used for AMD definition and requires
+function isotopeDefinition( Outlayer, getSize, matchesSelector, Item, LayoutMode ) {
+  // create an Outlayer layout class
+  var Isotope = Outlayer.create( 'isotope', {
+    layoutMode: "masonry",
+    isJQueryFiltering: true,
+    sortAscending: true
+  });
+
+  Isotope.Item = Item;
+  Isotope.LayoutMode = LayoutMode;
+
+  Isotope.prototype._create = function() {
+    this.itemGUID = 0;
+    // functions that sort items
+    this._sorters = {};
+    this._getSorters();
+    // call super
+    Outlayer.prototype._create.call( this );
+
+    // create layout modes
+    this.modes = {};
+    // start filteredItems with all items
+    this.filteredItems = this.items;
+    // keep of track of sortBys
+    this.sortHistory = [ 'original-order' ];
+    // create from registered layout modes
+    for ( var name in LayoutMode.modes ) {
+      this._initLayoutMode( name );
+    }
+  };
+
+  Isotope.prototype.reloadItems = function() {
+    // reset item ID counter
+    this.itemGUID = 0;
+    // call super
+    Outlayer.prototype.reloadItems.call( this );
+  };
+
+  Isotope.prototype._itemize = function() {
+    var items = Outlayer.prototype._itemize.apply( this, arguments );
+    // assign ID for original-order
+    for ( var i=0, len = items.length; i < len; i++ ) {
+      var item = items[i];
+      item.id = this.itemGUID++;
+    }
+    this._updateItemsSortData( items );
+    return items;
+  };
+
+
+  // -------------------------- layout -------------------------- //
+
+  Isotope.prototype._initLayoutMode = function( name ) {
+    var Mode = LayoutMode.modes[ name ];
+    // set mode options
+    // HACK extend initial options, back-fill in default options
+    var initialOpts = this.options[ name ] || {};
+    this.options[ name ] = Mode.options ?
+      extend( Mode.options, initialOpts ) : initialOpts;
+    // init layout mode instance
+    this.modes[ name ] = new Mode( this );
+  };
+
+
+  Isotope.prototype.layout = function() {
+    // if first time doing layout, do all magic
+    if ( !this._isLayoutInited && this.options.isInitLayout ) {
+      this.arrange();
+      return;
+    }
+    this._layout();
+  };
+
+  // private method to be used in layout() & magic()
+  Isotope.prototype._layout = function() {
+    // don't animate first layout
+    var isInstant = this._getIsInstant();
+    // layout flow
+    this._resetLayout();
+    this._manageStamps();
+    this.layoutItems( this.filteredItems, isInstant );
+
+    // flag for initalized
+    this._isLayoutInited = true;
+  };
+
+  // filter + sort + layout
+  Isotope.prototype.arrange = function( opts ) {
+    // set any options pass
+    this.option( opts );
+    this._getIsInstant();
+    // filter, sort, and layout
+    this.filteredItems = this._filter( this.items );
+    this._sort();
+    this._layout();
+  };
+  // alias to _init for main plugin method
+  Isotope.prototype._init = Isotope.prototype.arrange;
+
+  // HACK
+  // Don't animate/transition first layout
+  // Or don't animate/transition other layouts
+  Isotope.prototype._getIsInstant = function() {
+    var isInstant = this.options.isLayoutInstant !== undefined ?
+      this.options.isLayoutInstant : !this._isLayoutInited;
+    this._isInstant = isInstant;
+    return isInstant;
+  };
+
+  // -------------------------- filter -------------------------- //
+
+  Isotope.prototype._filter = function( items ) {
+    var filter = this.options.filter;
+    filter = filter || '*';
+    var matches = [];
+    var hiddenMatched = [];
+    var visibleUnmatched = [];
+
+    var test = this._getFilterTest( filter );
+
+    // test each item
+    for ( var i=0, len = items.length; i < len; i++ ) {
+      var item = items[i];
+      if ( item.isIgnored ) {
+        continue;
+      }
+      // add item to either matched or unmatched group
+      var isMatched = test( item );
+      // item.isFilterMatched = isMatched;
+      // add to matches if its a match
+      if ( isMatched ) {
+        matches.push( item );
+      }
+      // add to additional group if item needs to be hidden or revealed
+      if ( isMatched && item.isHidden ) {
+        hiddenMatched.push( item );
+      } else if ( !isMatched && !item.isHidden ) {
+        visibleUnmatched.push( item );
+      }
+    }
+
+    var _this = this;
+    function hideReveal() {
+      _this.reveal( hiddenMatched );
+      _this.hide( visibleUnmatched );
+    }
+
+    if ( this._isInstant ) {
+      this._noTransition( hideReveal );
+    } else {
+      hideReveal();
+    }
+
+    return matches;
+  };
+
+  // get a jQuery, function, or a matchesSelector test given the filter
+  Isotope.prototype._getFilterTest = function( filter ) {
+    if ( jQuery && this.options.isJQueryFiltering ) {
+      // use jQuery
+      return function( item ) {
+        return jQuery( item.element ).is( filter );
+      };
+    }
+    if ( typeof filter === 'function' ) {
+      // use filter as function
+      return function( item ) {
+        return filter( item.element );
+      };
+    }
+    // default, use filter as selector string
+    return function( item ) {
+      return matchesSelector( item.element, filter );
+    };
+  };
+
+  // -------------------------- sorting -------------------------- //
+
+  /**
+   * @params {Array} elems
+   * @public
+   */
+  Isotope.prototype.updateSortData = function( elems ) {
+    // get items
+    var items;
+    if ( elems ) {
+      elems = makeArray( elems );
+      items = this.getItems( elems );
+    } else {
+      // update all items if no elems provided
+      items = this.items;
+    }
+
+    this._getSorters();
+    this._updateItemsSortData( items );
+  };
+
+  Isotope.prototype._getSorters = function() {
+    var getSortData = this.options.getSortData;
+    for ( var key in getSortData ) {
+      var sorter = getSortData[ key ];
+      this._sorters[ key ] = mungeSorter( sorter );
+    }
+  };
+
+  /**
+   * @params {Array} items - of Isotope.Items
+   * @private
+   */
+  Isotope.prototype._updateItemsSortData = function( items ) {
+    // do not update if no items
+    var len = items && items.length;
+
+    for ( var i=0; len && i < len; i++ ) {
+      var item = items[i];
+      item.updateSortData();
+    }
+  };
+
+  // ----- munge sorter ----- //
+
+  // encapsulate this, as we just need mungeSorter
+  // other functions in here are just for munging
+  var mungeSorter = ( function() {
+    // add a magic layer to sorters for convienent shorthands
+    // `.foo-bar` will use the text of .foo-bar querySelector
+    // `[foo-bar]` will use attribute
+    // you can also add parser
+    // `.foo-bar parseInt` will parse that as a number
+    function mungeSorter( sorter ) {
+      // if not a string, return function or whatever it is
+      if ( typeof sorter !== 'string' ) {
+        return sorter;
+      }
+      // parse the sorter string
+      var args = trim( sorter ).split(' ');
+      var query = args[0];
+      // check if query looks like [an-attribute]
+      var attrMatch = query.match( /^\[(.+)\]$/ );
+      var attr = attrMatch && attrMatch[1];
+      var getValue = getValueGetter( attr, query );
+      // use second argument as a parser
+      var parser = Isotope.sortDataParsers[ args[1] ];
+      // parse the value, if there was a parser
+      sorter = parser ? function( elem ) {
+        return elem && parser( getValue( elem ) );
+      } :
+      // otherwise just return value
+      function( elem ) {
+        return elem && getValue( elem );
+      };
+
+      return sorter;
+    }
+
+    // get an attribute getter, or get text of the querySelector
+    function getValueGetter( attr, query ) {
+      var getValue;
+      // if query looks like [foo-bar], get attribute
+      if ( attr ) {
+        getValue = function( elem ) {
+          return elem.getAttribute( attr );
+        };
+      } else {
+        // otherwise, assume its a querySelector, and get its text
+        getValue = function( elem ) {
+          var child = elem.querySelector( query );
+          return child && getText( child );
+        };
+      }
+      return getValue;
+    }
+
+    return mungeSorter;
+  })();
+
+  // parsers used in getSortData shortcut strings
+  Isotope.sortDataParsers = {
+    'parseInt': function( val ) {
+      return parseInt( val, 10 );
+    },
+    'parseFloat': function( val ) {
+      return parseFloat( val );
+    }
+  };
+
+  // ----- sort method ----- //
+
+  // sort filteredItem order
+  Isotope.prototype._sort = function() {
+    var sortByOpt = this.options.sortBy;
+    if ( !sortByOpt ) {
+      return;
+    }
+    // concat all sortBy and sortHistory
+    var sortBys = [].concat.apply( sortByOpt, this.sortHistory );
+    // sort magic
+    var itemSorter = getItemSorter( sortBys, this.options.sortAscending );
+    this.filteredItems.sort( itemSorter );
+    // keep track of sortBy History
+    if ( sortByOpt !== this.sortHistory[0] ) {
+      // add to front, oldest goes in last
+      this.sortHistory.unshift( sortByOpt );
+    }
+  };
+
+  // returns a function used for sorting
+  function getItemSorter( sortBys, sortAsc ) {
+    return function sorter( itemA, itemB ) {
+      // cycle through all sortKeys
+      for ( var i = 0, len = sortBys.length; i < len; i++ ) {
+        var sortBy = sortBys[i];
+        var a = itemA.sortData[ sortBy ];
+        var b = itemB.sortData[ sortBy ];
+        if ( a > b || a < b ) {
+          // if sortAsc is an object, use the value given the sortBy key
+          var isAscending = sortAsc[ sortBy ] !== undefined ? sortAsc[ sortBy ] : sortAsc;
+          var direction = isAscending ? 1 : -1;
+          return ( a > b ? 1 : -1 ) * direction;
+        }
+      }
+      return 0;
+    };
   }
 
-  // Current version.
-  _.VERSION = '1.6.0';
+  // -------------------------- methods -------------------------- //
 
-  // Collection Functions
-  // --------------------
-
-  // The cornerstone, an `each` implementation, aka `forEach`.
-  // Handles objects with the built-in `forEach`, arrays, and raw objects.
-  // Delegates to **ECMAScript 5**'s native `forEach` if available.
-  var each = _.each = _.forEach = function(obj, iterator, context) {
-    if (obj == null) return obj;
-    if (nativeForEach && obj.forEach === nativeForEach) {
-      obj.forEach(iterator, context);
-    } else if (obj.length === +obj.length) {
-      for (var i = 0, length = obj.length; i < length; i++) {
-        if (iterator.call(context, obj[i], i, obj) === breaker) return;
-      }
-    } else {
-      var keys = _.keys(obj);
-      for (var i = 0, length = keys.length; i < length; i++) {
-        if (iterator.call(context, obj[keys[i]], keys[i], obj) === breaker) return;
-      }
+  // get layout mode
+  Isotope.prototype._mode = function() {
+    var layoutMode = this.options.layoutMode;
+    var mode = this.modes[ layoutMode ];
+    if ( !mode ) {
+      // TODO console.error
+      throw new Error( 'No layout mode: ' + layoutMode );
     }
-    return obj;
+    // HACK sync mode's options
+    // any options set after init for layout mode need to be synced
+    mode.options = this.options[ layoutMode ];
+    return mode;
   };
 
-  // Return the results of applying the iterator to each element.
-  // Delegates to **ECMAScript 5**'s native `map` if available.
-  _.map = _.collect = function(obj, iterator, context) {
-    var results = [];
-    if (obj == null) return results;
-    if (nativeMap && obj.map === nativeMap) return obj.map(iterator, context);
-    each(obj, function(value, index, list) {
-      results.push(iterator.call(context, value, index, list));
+  Isotope.prototype._resetLayout = function() {
+    // trigger original reset layout
+    Outlayer.prototype._resetLayout.call( this );
+    this._mode()._resetLayout();
+  };
+
+  Isotope.prototype._getItemLayoutPosition = function( item  ) {
+    return this._mode()._getItemLayoutPosition( item );
+  };
+
+  Isotope.prototype._manageStamp = function( stamp ) {
+    this._mode()._manageStamp( stamp );
+  };
+
+  Isotope.prototype._getContainerSize = function() {
+    return this._mode()._getContainerSize();
+  };
+
+  Isotope.prototype.needsResizeLayout = function() {
+    return this._mode().needsResizeLayout();
+  };
+
+  // -------------------------- adding & removing -------------------------- //
+
+  // HEADS UP overwrites default Outlayer appended
+  Isotope.prototype.appended = function( elems ) {
+    var items = this.addItems( elems );
+    if ( !items.length ) {
+      return;
+    }
+    var filteredItems = this._filterRevealAdded( items );
+    // add to filteredItems
+    this.filteredItems = this.filteredItems.concat( filteredItems );
+  };
+
+  // HEADS UP overwrites default Outlayer prepended
+  Isotope.prototype.prepended = function( elems ) {
+    var items = this._itemize( elems );
+    if ( !items.length ) {
+      return;
+    }
+    // add items to beginning of collection
+    var previousItems = this.items.slice(0);
+    this.items = items.concat( previousItems );
+    // start new layout
+    this._resetLayout();
+    this._manageStamps();
+    // layout new stuff without transition
+    var filteredItems = this._filterRevealAdded( items );
+    // layout previous items
+    this.layoutItems( previousItems );
+    // add to filteredItems
+    this.filteredItems = filteredItems.concat( this.filteredItems );
+  };
+
+  Isotope.prototype._filterRevealAdded = function( items ) {
+    var filteredItems = this._noTransition( function() {
+      return this._filter( items );
     });
-    return results;
+    // layout and reveal just the new items
+    this.layoutItems( filteredItems, true );
+    this.reveal( filteredItems );
+    return items;
   };
 
-  var reduceError = 'Reduce of empty array with no initial value';
-
-  // **Reduce** builds up a single result from a list of values, aka `inject`,
-  // or `foldl`. Delegates to **ECMAScript 5**'s native `reduce` if available.
-  _.reduce = _.foldl = _.inject = function(obj, iterator, memo, context) {
-    var initial = arguments.length > 2;
-    if (obj == null) obj = [];
-    if (nativeReduce && obj.reduce === nativeReduce) {
-      if (context) iterator = _.bind(iterator, context);
-      return initial ? obj.reduce(iterator, memo) : obj.reduce(iterator);
+  /**
+   * Filter, sort, and layout newly-appended item elements
+   * @param {Array or NodeList or Element} elems
+   */
+  Isotope.prototype.insert = function( elems ) {
+    var items = this.addItems( elems );
+    if ( !items.length ) {
+      return;
     }
-    each(obj, function(value, index, list) {
-      if (!initial) {
-        memo = value;
-        initial = true;
-      } else {
-        memo = iterator.call(context, memo, value, index, list);
-      }
+    // append item elements
+    var i, item;
+    var len = items.length;
+    for ( i=0; i < len; i++ ) {
+      item = items[i];
+      this.element.appendChild( item.element );
+    }
+    // filter new stuff
+    /*
+    // this way adds hides new filtered items with NO transition
+    // so user can't see if new hidden items have been inserted
+    var filteredInsertItems;
+    this._noTransition( function() {
+      filteredInsertItems = this._filter( items );
+      // hide all new items
+      this.hide( filteredInsertItems );
     });
-    if (!initial) throw new TypeError(reduceError);
-    return memo;
-  };
-
-  // The right-associative version of reduce, also known as `foldr`.
-  // Delegates to **ECMAScript 5**'s native `reduceRight` if available.
-  _.reduceRight = _.foldr = function(obj, iterator, memo, context) {
-    var initial = arguments.length > 2;
-    if (obj == null) obj = [];
-    if (nativeReduceRight && obj.reduceRight === nativeReduceRight) {
-      if (context) iterator = _.bind(iterator, context);
-      return initial ? obj.reduceRight(iterator, memo) : obj.reduceRight(iterator);
-    }
-    var length = obj.length;
-    if (length !== +length) {
-      var keys = _.keys(obj);
-      length = keys.length;
-    }
-    each(obj, function(value, index, list) {
-      index = keys ? keys[--length] : --length;
-      if (!initial) {
-        memo = obj[index];
-        initial = true;
-      } else {
-        memo = iterator.call(context, memo, obj[index], index, list);
-      }
+    // */
+    // this way hides new filtered items with transition
+    // so user at least sees that something has been added
+    var filteredInsertItems = this._filter( items );
+    // hide all newitems
+    this._noTransition( function() {
+      this.hide( filteredInsertItems );
     });
-    if (!initial) throw new TypeError(reduceError);
-    return memo;
+    // */
+    // set flag
+    for ( i=0; i < len; i++ ) {
+      items[i].isLayoutInstant = true;
+    }
+    this.arrange();
+    // reset flag
+    for ( i=0; i < len; i++ ) {
+      delete items[i].isLayoutInstant;
+    }
+    this.reveal( filteredInsertItems );
   };
 
-  // Return the first value which passes a truth test. Aliased as `detect`.
-  _.find = _.detect = function(obj, predicate, context) {
-    var result;
-    any(obj, function(value, index, list) {
-      if (predicate.call(context, value, index, list)) {
-        result = value;
+  var _remove = Isotope.prototype.remove;
+  Isotope.prototype.remove = function( elems ) {
+    elems = makeArray( elems );
+    var removeItems = this.getItems( elems );
+    // do regular thing
+    _remove.call( this, elems );
+    // bail if no items to remove
+    if ( !removeItems || !removeItems.length ) {
+      return;
+    }
+    // remove elems from filteredItems
+    for ( var i=0, len = removeItems.length; i < len; i++ ) {
+      var item = removeItems[i];
+      // remove item from collection
+      removeFrom( item, this.filteredItems );
+    }
+  };
+
+  Isotope.prototype.shuffle = function() {
+    // update random sortData
+    for ( var i=0, len = this.items.length; i < len; i++ ) {
+      var item = this.items[i];
+      item.sortData.random = Math.random();
+    }
+    this.options.sortBy = 'random';
+    this._sort();
+    this._layout();
+  };
+
+  /**
+   * trigger fn without transition
+   * kind of hacky to have this in the first place
+   * @param {Function} fn
+   * @returns ret
+   * @private
+   */
+  Isotope.prototype._noTransition = function( fn ) {
+    // save transitionDuration before disabling
+    var transitionDuration = this.options.transitionDuration;
+    // disable transition
+    this.options.transitionDuration = 0;
+    // do it
+    var returnValue = fn.call( this );
+    // re-enable transition for reveal
+    this.options.transitionDuration = transitionDuration;
+    return returnValue;
+  };
+
+  // ----- helper methods ----- //
+
+  /**
+   * getter method for getting filtered item elements
+   * @returns {Array} elems - collection of item elements
+   */
+  Isotope.prototype.getFilteredItemElements = function() {
+    var elems = [];
+    for ( var i=0, len = this.filteredItems.length; i < len; i++ ) {
+      elems.push( this.filteredItems[i].element );
+    }
+    return elems;
+  };
+
+  // -----  ----- //
+
+  return Isotope;
+}
+
+// -------------------------- transport -------------------------- //
+
+if ( typeof define === 'function' && define.amd ) {
+  // AMD
+  define( [
+      'outlayer/outlayer',
+      'get-size/get-size',
+      'matches-selector/matches-selector',
+      './item',
+      './layout-mode',
+      // include default layout modes
+      './layout-modes/masonry',
+      './layout-modes/fit-rows',
+      './layout-modes/vertical'
+    ],
+    isotopeDefinition );
+} else if ( typeof exports === 'object' ) {
+  // CommonJS
+  module.exports = isotopeDefinition(
+    require('outlayer'),
+    require('get-size'),
+    require('desandro-matches-selector'),
+    require('./item'),
+    require('./layout-mode'),
+    // include default layout modes
+    require('./layout-modes/masonry'),
+    require('./layout-modes/fit-rows'),
+    require('./layout-modes/vertical')
+  );
+} else {
+  // browser global
+  window.Isotope = isotopeDefinition(
+    window.Outlayer,
+    window.getSize,
+    window.matchesSelector,
+    window.Isotope.Item,
+    window.Isotope.LayoutMode
+  );
+}
+
+})( window );
+
+},{"./item":10,"./layout-mode":11,"./layout-modes/fit-rows":12,"./layout-modes/masonry":13,"./layout-modes/vertical":14,"desandro-matches-selector":15,"get-size":16,"outlayer":24}],10:[function(require,module,exports){
+/**
+ * Isotope Item
+**/
+
+( function( window ) {
+
+'use strict';
+
+// -------------------------- Item -------------------------- //
+
+function itemDefinition( Outlayer ) {
+
+// sub-class Outlayer Item
+function Item() {
+  Outlayer.Item.apply( this, arguments );
+}
+
+Item.prototype = new Outlayer.Item();
+
+Item.prototype._create = function() {
+  // assign id, used for original-order sorting
+  this.id = this.layout.itemGUID++;
+  Outlayer.Item.prototype._create.call( this );
+  this.sortData = {};
+};
+
+Item.prototype.updateSortData = function() {
+  if ( this.isIgnored ) {
+    return;
+  }
+  // default sorters
+  this.sortData.id = this.id;
+  // for backward compatibility
+  this.sortData['original-order'] = this.id;
+  this.sortData.random = Math.random();
+  // go thru getSortData obj and apply the sorters
+  var getSortData = this.layout.options.getSortData;
+  var sorters = this.layout._sorters;
+  for ( var key in getSortData ) {
+    var sorter = sorters[ key ];
+    this.sortData[ key ] = sorter( this.element, this );
+  }
+};
+
+var _destroy = Item.prototype.destroy;
+Item.prototype.destroy = function() {
+  // call super
+  _destroy.apply( this, arguments );
+  // reset display, #741
+  this.css({
+    display: ''
+  });
+};
+
+return Item;
+
+}
+
+// -------------------------- transport -------------------------- //
+
+if ( typeof define === 'function' && define.amd ) {
+  // AMD
+  define( [
+      'outlayer/outlayer'
+    ],
+    itemDefinition );
+} else if ( typeof exports === 'object' ) {
+  // CommonJS
+  module.exports = itemDefinition(
+    require('outlayer')
+  );
+} else {
+  // browser global
+  window.Isotope = window.Isotope || {};
+  window.Isotope.Item = itemDefinition(
+    window.Outlayer
+  );
+}
+
+})( window );
+
+},{"outlayer":24}],11:[function(require,module,exports){
+( function( window ) {
+
+'use strict';
+
+// --------------------------  -------------------------- //
+
+function layoutModeDefinition( getSize, Outlayer ) {
+
+  // layout mode class
+  function LayoutMode( isotope ) {
+    this.isotope = isotope;
+    // link properties
+    if ( isotope ) {
+      this.options = isotope.options[ this.namespace ];
+      this.element = isotope.element;
+      this.items = isotope.filteredItems;
+      this.size = isotope.size;
+    }
+  }
+
+  /**
+   * some methods should just defer to default Outlayer method
+   * and reference the Isotope instance as `this`
+  **/
+  ( function() {
+    var facadeMethods = [
+      '_resetLayout',
+      '_getItemLayoutPosition',
+      '_manageStamp',
+      '_getContainerSize',
+      '_getElementOffset',
+      'needsResizeLayout'
+    ];
+
+    for ( var i=0, len = facadeMethods.length; i < len; i++ ) {
+      var methodName = facadeMethods[i];
+      LayoutMode.prototype[ methodName ] = getOutlayerMethod( methodName );
+    }
+
+    function getOutlayerMethod( methodName ) {
+      return function() {
+        return Outlayer.prototype[ methodName ].apply( this.isotope, arguments );
+      };
+    }
+  })();
+
+  // -----  ----- //
+
+  // for horizontal layout modes, check vertical size
+  LayoutMode.prototype.needsVerticalResizeLayout = function() {
+    // don't trigger if size did not change
+    var size = getSize( this.isotope.element );
+    // check that this.size and size are there
+    // IE8 triggers resize on body size change, so they might not be
+    var hasSizes = this.isotope.size && size;
+    return hasSizes && size.innerHeight !== this.isotope.size.innerHeight;
+  };
+
+  // ----- measurements ----- //
+
+  LayoutMode.prototype._getMeasurement = function() {
+    this.isotope._getMeasurement.apply( this, arguments );
+  };
+
+  LayoutMode.prototype.getColumnWidth = function() {
+    this.getSegmentSize( 'column', 'Width' );
+  };
+
+  LayoutMode.prototype.getRowHeight = function() {
+    this.getSegmentSize( 'row', 'Height' );
+  };
+
+  /**
+   * get columnWidth or rowHeight
+   * segment: 'column' or 'row'
+   * size 'Width' or 'Height'
+  **/
+  LayoutMode.prototype.getSegmentSize = function( segment, size ) {
+    var segmentName = segment + size;
+    var outerSize = 'outer' + size;
+    // columnWidth / outerWidth // rowHeight / outerHeight
+    this._getMeasurement( segmentName, outerSize );
+    // got rowHeight or columnWidth, we can chill
+    if ( this[ segmentName ] ) {
+      return;
+    }
+    // fall back to item of first element
+    var firstItemSize = this.getFirstItemSize();
+    this[ segmentName ] = firstItemSize && firstItemSize[ outerSize ] ||
+      // or size of container
+      this.isotope.size[ 'inner' + size ];
+  };
+
+  LayoutMode.prototype.getFirstItemSize = function() {
+    var firstItem = this.isotope.filteredItems[0];
+    return firstItem && firstItem.element && getSize( firstItem.element );
+  };
+
+  // ----- methods that should reference isotope ----- //
+
+  LayoutMode.prototype.layout = function() {
+    this.isotope.layout.apply( this.isotope, arguments );
+  };
+
+  LayoutMode.prototype.getSize = function() {
+    this.isotope.getSize();
+    this.size = this.isotope.size;
+  };
+
+  // -------------------------- create -------------------------- //
+
+  LayoutMode.modes = {};
+
+  LayoutMode.create = function( namespace, options ) {
+
+    function Mode() {
+      LayoutMode.apply( this, arguments );
+    }
+
+    Mode.prototype = new LayoutMode();
+
+    // default options
+    if ( options ) {
+      Mode.options = options;
+    }
+
+    Mode.prototype.namespace = namespace;
+    // register in Isotope
+    LayoutMode.modes[ namespace ] = Mode;
+
+    return Mode;
+  };
+
+
+  return LayoutMode;
+
+}
+
+if ( typeof define === 'function' && define.amd ) {
+  // AMD
+  define( [
+      'get-size/get-size',
+      'outlayer/outlayer'
+    ],
+    layoutModeDefinition );
+} else if ( typeof exports === 'object' ) {
+  // CommonJS
+  module.exports = layoutModeDefinition(
+    require('get-size'),
+    require('outlayer')
+  );
+} else {
+  // browser global
+  window.Isotope = window.Isotope || {};
+  window.Isotope.LayoutMode = layoutModeDefinition(
+    window.getSize,
+    window.Outlayer
+  );
+}
+
+
+})( window );
+
+},{"get-size":16,"outlayer":24}],12:[function(require,module,exports){
+( function( window ) {
+
+'use strict';
+
+function fitRowsDefinition( LayoutMode ) {
+
+var FitRows = LayoutMode.create('fitRows');
+
+FitRows.prototype._resetLayout = function() {
+  this.x = 0;
+  this.y = 0;
+  this.maxY = 0;
+  this._getMeasurement( 'gutter', 'outerWidth' );
+};
+
+FitRows.prototype._getItemLayoutPosition = function( item ) {
+  item.getSize();
+
+  var itemWidth = item.size.outerWidth + this.gutter;
+  // if this element cannot fit in the current row
+  var containerWidth = this.isotope.size.innerWidth + this.gutter;
+  if ( this.x !== 0 && itemWidth + this.x > containerWidth ) {
+    this.x = 0;
+    this.y = this.maxY;
+  }
+
+  var position = {
+    x: this.x,
+    y: this.y
+  };
+
+  this.maxY = Math.max( this.maxY, this.y + item.size.outerHeight );
+  this.x += itemWidth;
+
+  return position;
+};
+
+FitRows.prototype._getContainerSize = function() {
+  return { height: this.maxY };
+};
+
+return FitRows;
+
+}
+
+if ( typeof define === 'function' && define.amd ) {
+  // AMD
+  define( [
+      '../layout-mode'
+    ],
+    fitRowsDefinition );
+} else if ( typeof exports === 'object' ) {
+  // CommonJS
+  module.exports = fitRowsDefinition(
+    require('../layout-mode')
+  );
+} else {
+  // browser global
+  fitRowsDefinition(
+    window.Isotope.LayoutMode
+  );
+}
+
+})( window );
+
+},{"../layout-mode":11}],13:[function(require,module,exports){
+/*!
+ * Masonry layout mode
+ * sub-classes Masonry
+ * http://masonry.desandro.com
+ */
+
+( function( window ) {
+
+'use strict';
+
+// -------------------------- helpers -------------------------- //
+
+// extend objects
+function extend( a, b ) {
+  for ( var prop in b ) {
+    a[ prop ] = b[ prop ];
+  }
+  return a;
+}
+
+// -------------------------- masonryDefinition -------------------------- //
+
+// used for AMD definition and requires
+function masonryDefinition( LayoutMode, Masonry ) {
+  // create an Outlayer layout class
+  var MasonryMode = LayoutMode.create('masonry');
+
+  // save on to these methods
+  var _getElementOffset = MasonryMode.prototype._getElementOffset;
+  var layout = MasonryMode.prototype.layout;
+  var _getMeasurement = MasonryMode.prototype._getMeasurement;
+
+  // sub-class Masonry
+  extend( MasonryMode.prototype, Masonry.prototype );
+
+  // set back, as it was overwritten by Masonry
+  MasonryMode.prototype._getElementOffset = _getElementOffset;
+  MasonryMode.prototype.layout = layout;
+  MasonryMode.prototype._getMeasurement = _getMeasurement;
+
+  var measureColumns = MasonryMode.prototype.measureColumns;
+  MasonryMode.prototype.measureColumns = function() {
+    // set items, used if measuring first item
+    this.items = this.isotope.filteredItems;
+    measureColumns.call( this );
+  };
+
+  // HACK copy over isOriginLeft/Top options
+  var _manageStamp = MasonryMode.prototype._manageStamp;
+  MasonryMode.prototype._manageStamp = function() {
+    this.options.isOriginLeft = this.isotope.options.isOriginLeft;
+    this.options.isOriginTop = this.isotope.options.isOriginTop;
+    _manageStamp.apply( this, arguments );
+  };
+
+  return MasonryMode;
+}
+
+// -------------------------- transport -------------------------- //
+
+if ( typeof define === 'function' && define.amd ) {
+  // AMD
+  define( [
+      '../layout-mode',
+      'masonry/masonry'
+    ],
+    masonryDefinition );
+} else if ( typeof exports === 'object' ) {
+  // CommonJS
+  module.exports = masonryDefinition(
+    require('../layout-mode'),
+    require('masonry-layout')
+  );
+} else {
+  // browser global
+  masonryDefinition(
+    window.Isotope.LayoutMode,
+    window.Masonry
+  );
+}
+
+})( window );
+
+},{"../layout-mode":11,"masonry-layout":18}],14:[function(require,module,exports){
+( function( window ) {
+
+'use strict';
+
+function verticalDefinition( LayoutMode ) {
+
+var Vertical = LayoutMode.create( 'vertical', {
+  horizontalAlignment: 0
+});
+
+Vertical.prototype._resetLayout = function() {
+  this.y = 0;
+};
+
+Vertical.prototype._getItemLayoutPosition = function( item ) {
+  item.getSize();
+  var x = ( this.isotope.size.innerWidth - item.size.outerWidth ) *
+    this.options.horizontalAlignment;
+  var y = this.y;
+  this.y += item.size.outerHeight;
+  return { x: x, y: y };
+};
+
+Vertical.prototype._getContainerSize = function() {
+  return { height: this.y };
+};
+
+return Vertical;
+
+}
+
+if ( typeof define === 'function' && define.amd ) {
+  // AMD
+  define( [
+      '../layout-mode'
+    ],
+    verticalDefinition );
+} else if ( typeof exports === 'object' ) {
+  // CommonJS
+  module.exports = verticalDefinition(
+    require('../layout-mode')
+  );
+} else {
+  // browser global
+  verticalDefinition(
+    window.Isotope.LayoutMode
+  );
+}
+
+})( window );
+
+},{"../layout-mode":11}],15:[function(require,module,exports){
+/**
+ * matchesSelector v1.0.2
+ * matchesSelector( element, '.selector' )
+ * MIT license
+ */
+
+/*jshint browser: true, strict: true, undef: true, unused: true */
+/*global define: false, module: false */
+
+( function( ElemProto ) {
+
+  'use strict';
+
+  var matchesMethod = ( function() {
+    // check un-prefixed
+    if ( ElemProto.matchesSelector ) {
+      return 'matchesSelector';
+    }
+    // check vendor prefixes
+    var prefixes = [ 'webkit', 'moz', 'ms', 'o' ];
+
+    for ( var i=0, len = prefixes.length; i < len; i++ ) {
+      var prefix = prefixes[i];
+      var method = prefix + 'MatchesSelector';
+      if ( ElemProto[ method ] ) {
+        return method;
+      }
+    }
+  })();
+
+  // ----- match ----- //
+
+  function match( elem, selector ) {
+    return elem[ matchesMethod ]( selector );
+  }
+
+  // ----- appendToFragment ----- //
+
+  function checkParent( elem ) {
+    // not needed if already has parent
+    if ( elem.parentNode ) {
+      return;
+    }
+    var fragment = document.createDocumentFragment();
+    fragment.appendChild( elem );
+  }
+
+  // ----- query ----- //
+
+  // fall back to using QSA
+  // thx @jonathantneal https://gist.github.com/3062955
+  function query( elem, selector ) {
+    // append to fragment if no parent
+    checkParent( elem );
+
+    // match elem with all selected elems of parent
+    var elems = elem.parentNode.querySelectorAll( selector );
+    for ( var i=0, len = elems.length; i < len; i++ ) {
+      // return true if match
+      if ( elems[i] === elem ) {
         return true;
       }
-    });
-    return result;
-  };
-
-  // Return all the elements that pass a truth test.
-  // Delegates to **ECMAScript 5**'s native `filter` if available.
-  // Aliased as `select`.
-  _.filter = _.select = function(obj, predicate, context) {
-    var results = [];
-    if (obj == null) return results;
-    if (nativeFilter && obj.filter === nativeFilter) return obj.filter(predicate, context);
-    each(obj, function(value, index, list) {
-      if (predicate.call(context, value, index, list)) results.push(value);
-    });
-    return results;
-  };
-
-  // Return all the elements for which a truth test fails.
-  _.reject = function(obj, predicate, context) {
-    return _.filter(obj, function(value, index, list) {
-      return !predicate.call(context, value, index, list);
-    }, context);
-  };
-
-  // Determine whether all of the elements match a truth test.
-  // Delegates to **ECMAScript 5**'s native `every` if available.
-  // Aliased as `all`.
-  _.every = _.all = function(obj, predicate, context) {
-    predicate || (predicate = _.identity);
-    var result = true;
-    if (obj == null) return result;
-    if (nativeEvery && obj.every === nativeEvery) return obj.every(predicate, context);
-    each(obj, function(value, index, list) {
-      if (!(result = result && predicate.call(context, value, index, list))) return breaker;
-    });
-    return !!result;
-  };
-
-  // Determine if at least one element in the object matches a truth test.
-  // Delegates to **ECMAScript 5**'s native `some` if available.
-  // Aliased as `any`.
-  var any = _.some = _.any = function(obj, predicate, context) {
-    predicate || (predicate = _.identity);
-    var result = false;
-    if (obj == null) return result;
-    if (nativeSome && obj.some === nativeSome) return obj.some(predicate, context);
-    each(obj, function(value, index, list) {
-      if (result || (result = predicate.call(context, value, index, list))) return breaker;
-    });
-    return !!result;
-  };
-
-  // Determine if the array or object contains a given value (using `===`).
-  // Aliased as `include`.
-  _.contains = _.include = function(obj, target) {
-    if (obj == null) return false;
-    if (nativeIndexOf && obj.indexOf === nativeIndexOf) return obj.indexOf(target) != -1;
-    return any(obj, function(value) {
-      return value === target;
-    });
-  };
-
-  // Invoke a method (with arguments) on every item in a collection.
-  _.invoke = function(obj, method) {
-    var args = slice.call(arguments, 2);
-    var isFunc = _.isFunction(method);
-    return _.map(obj, function(value) {
-      return (isFunc ? method : value[method]).apply(value, args);
-    });
-  };
-
-  // Convenience version of a common use case of `map`: fetching a property.
-  _.pluck = function(obj, key) {
-    return _.map(obj, _.property(key));
-  };
-
-  // Convenience version of a common use case of `filter`: selecting only objects
-  // containing specific `key:value` pairs.
-  _.where = function(obj, attrs) {
-    return _.filter(obj, _.matches(attrs));
-  };
-
-  // Convenience version of a common use case of `find`: getting the first object
-  // containing specific `key:value` pairs.
-  _.findWhere = function(obj, attrs) {
-    return _.find(obj, _.matches(attrs));
-  };
-
-  // Return the maximum element or (element-based computation).
-  // Can't optimize arrays of integers longer than 65,535 elements.
-  // See [WebKit Bug 80797](https://bugs.webkit.org/show_bug.cgi?id=80797)
-  _.max = function(obj, iterator, context) {
-    if (!iterator && _.isArray(obj) && obj[0] === +obj[0] && obj.length < 65535) {
-      return Math.max.apply(Math, obj);
     }
-    var result = -Infinity, lastComputed = -Infinity;
-    each(obj, function(value, index, list) {
-      var computed = iterator ? iterator.call(context, value, index, list) : value;
-      if (computed > lastComputed) {
-        result = value;
-        lastComputed = computed;
-      }
+    // otherwise return false
+    return false;
+  }
+
+  // ----- matchChild ----- //
+
+  function matchChild( elem, selector ) {
+    checkParent( elem );
+    return match( elem, selector );
+  }
+
+  // ----- matchesSelector ----- //
+
+  var matchesSelector;
+
+  if ( matchesMethod ) {
+    // IE9 supports matchesSelector, but doesn't work on orphaned elems
+    // check for that
+    var div = document.createElement('div');
+    var supportsOrphans = match( div, 'div' );
+    matchesSelector = supportsOrphans ? match : matchChild;
+  } else {
+    matchesSelector = query;
+  }
+
+  // transport
+  if ( typeof define === 'function' && define.amd ) {
+    // AMD
+    define( function() {
+      return matchesSelector;
     });
-    return result;
+  } else if ( typeof exports === 'object' ) {
+    module.exports = matchesSelector;
+  }
+  else {
+    // browser global
+    window.matchesSelector = matchesSelector;
+  }
+
+})( Element.prototype );
+
+},{}],16:[function(require,module,exports){
+/*!
+ * getSize v1.2.2
+ * measure size of elements
+ * MIT license
+ */
+
+/*jshint browser: true, strict: true, undef: true, unused: true */
+/*global define: false, exports: false, require: false, module: false, console: false */
+
+( function( window, undefined ) {
+
+'use strict';
+
+// -------------------------- helpers -------------------------- //
+
+// get a number from a string, not a percentage
+function getStyleSize( value ) {
+  var num = parseFloat( value );
+  // not a percent like '100%', and a number
+  var isValid = value.indexOf('%') === -1 && !isNaN( num );
+  return isValid && num;
+}
+
+function noop() {}
+
+var logError = typeof console === 'undefined' ? noop :
+  function( message ) {
+    console.error( message );
   };
 
-  // Return the minimum element (or element-based computation).
-  _.min = function(obj, iterator, context) {
-    if (!iterator && _.isArray(obj) && obj[0] === +obj[0] && obj.length < 65535) {
-      return Math.min.apply(Math, obj);
-    }
-    var result = Infinity, lastComputed = Infinity;
-    each(obj, function(value, index, list) {
-      var computed = iterator ? iterator.call(context, value, index, list) : value;
-      if (computed < lastComputed) {
-        result = value;
-        lastComputed = computed;
-      }
-    });
-    return result;
-  };
+// -------------------------- measurements -------------------------- //
 
-  // Shuffle an array, using the modern version of the
-  // [Fisher-Yates shuffle](http://en.wikipedia.org/wiki/Fisher–Yates_shuffle).
-  _.shuffle = function(obj) {
-    var rand;
-    var index = 0;
-    var shuffled = [];
-    each(obj, function(value) {
-      rand = _.random(index++);
-      shuffled[index - 1] = shuffled[rand];
-      shuffled[rand] = value;
-    });
-    return shuffled;
-  };
+var measurements = [
+  'paddingLeft',
+  'paddingRight',
+  'paddingTop',
+  'paddingBottom',
+  'marginLeft',
+  'marginRight',
+  'marginTop',
+  'marginBottom',
+  'borderLeftWidth',
+  'borderRightWidth',
+  'borderTopWidth',
+  'borderBottomWidth'
+];
 
-  // Sample **n** random values from a collection.
-  // If **n** is not specified, returns a single random element.
-  // The internal `guard` argument allows it to work with `map`.
-  _.sample = function(obj, n, guard) {
-    if (n == null || guard) {
-      if (obj.length !== +obj.length) obj = _.values(obj);
-      return obj[_.random(obj.length - 1)];
-    }
-    return _.shuffle(obj).slice(0, Math.max(0, n));
+function getZeroSize() {
+  var size = {
+    width: 0,
+    height: 0,
+    innerWidth: 0,
+    innerHeight: 0,
+    outerWidth: 0,
+    outerHeight: 0
   };
+  for ( var i=0, len = measurements.length; i < len; i++ ) {
+    var measurement = measurements[i];
+    size[ measurement ] = 0;
+  }
+  return size;
+}
 
-  // An internal function to generate lookup iterators.
-  var lookupIterator = function(value) {
-    if (value == null) return _.identity;
-    if (_.isFunction(value)) return value;
-    return _.property(value);
-  };
 
-  // Sort the object's values by a criterion produced by an iterator.
-  _.sortBy = function(obj, iterator, context) {
-    iterator = lookupIterator(iterator);
-    return _.pluck(_.map(obj, function(value, index, list) {
-      return {
-        value: value,
-        index: index,
-        criteria: iterator.call(context, value, index, list)
+
+function defineGetSize( getStyleProperty ) {
+
+// -------------------------- setup -------------------------- //
+
+var isSetup = false;
+
+var getStyle, boxSizingProp, isBoxSizeOuter;
+
+/**
+ * setup vars and functions
+ * do it on initial getSize(), rather than on script load
+ * For Firefox bug https://bugzilla.mozilla.org/show_bug.cgi?id=548397
+ */
+function setup() {
+  // setup once
+  if ( isSetup ) {
+    return;
+  }
+  isSetup = true;
+
+  var getComputedStyle = window.getComputedStyle;
+  getStyle = ( function() {
+    var getStyleFn = getComputedStyle ?
+      function( elem ) {
+        return getComputedStyle( elem, null );
+      } :
+      function( elem ) {
+        return elem.currentStyle;
       };
-    }).sort(function(left, right) {
-      var a = left.criteria;
-      var b = right.criteria;
-      if (a !== b) {
-        if (a > b || a === void 0) return 1;
-        if (a < b || b === void 0) return -1;
-      }
-      return left.index - right.index;
-    }), 'value');
-  };
 
-  // An internal function used for aggregate "group by" operations.
-  var group = function(behavior) {
-    return function(obj, iterator, context) {
-      var result = {};
-      iterator = lookupIterator(iterator);
-      each(obj, function(value, index) {
-        var key = iterator.call(context, value, index, obj);
-        behavior(result, key, value);
-      });
-      return result;
-    };
-  };
+      return function getStyle( elem ) {
+        var style = getStyleFn( elem );
+        if ( !style ) {
+          logError( 'Style returned ' + style +
+            '. Are you running this code in a hidden iframe on Firefox? ' +
+            'See http://bit.ly/getsizebug1' );
+        }
+        return style;
+      };
+  })();
 
-  // Groups the object's values by a criterion. Pass either a string attribute
-  // to group by, or a function that returns the criterion.
-  _.groupBy = group(function(result, key, value) {
-    _.has(result, key) ? result[key].push(value) : result[key] = [value];
+  // -------------------------- box sizing -------------------------- //
+
+  boxSizingProp = getStyleProperty('boxSizing');
+
+  /**
+   * WebKit measures the outer-width on style.width on border-box elems
+   * IE & Firefox measures the inner-width
+   */
+  if ( boxSizingProp ) {
+    var div = document.createElement('div');
+    div.style.width = '200px';
+    div.style.padding = '1px 2px 3px 4px';
+    div.style.borderStyle = 'solid';
+    div.style.borderWidth = '1px 2px 3px 4px';
+    div.style[ boxSizingProp ] = 'border-box';
+
+    var body = document.body || document.documentElement;
+    body.appendChild( div );
+    var style = getStyle( div );
+
+    isBoxSizeOuter = getStyleSize( style.width ) === 200;
+    body.removeChild( div );
+  }
+
+}
+
+// -------------------------- getSize -------------------------- //
+
+function getSize( elem ) {
+  setup();
+
+  // use querySeletor if elem is string
+  if ( typeof elem === 'string' ) {
+    elem = document.querySelector( elem );
+  }
+
+  // do not proceed on non-objects
+  if ( !elem || typeof elem !== 'object' || !elem.nodeType ) {
+    return;
+  }
+
+  var style = getStyle( elem );
+
+  // if hidden, everything is 0
+  if ( style.display === 'none' ) {
+    return getZeroSize();
+  }
+
+  var size = {};
+  size.width = elem.offsetWidth;
+  size.height = elem.offsetHeight;
+
+  var isBorderBox = size.isBorderBox = !!( boxSizingProp &&
+    style[ boxSizingProp ] && style[ boxSizingProp ] === 'border-box' );
+
+  // get all measurements
+  for ( var i=0, len = measurements.length; i < len; i++ ) {
+    var measurement = measurements[i];
+    var value = style[ measurement ];
+    value = mungeNonPixel( elem, value );
+    var num = parseFloat( value );
+    // any 'auto', 'medium' value will be 0
+    size[ measurement ] = !isNaN( num ) ? num : 0;
+  }
+
+  var paddingWidth = size.paddingLeft + size.paddingRight;
+  var paddingHeight = size.paddingTop + size.paddingBottom;
+  var marginWidth = size.marginLeft + size.marginRight;
+  var marginHeight = size.marginTop + size.marginBottom;
+  var borderWidth = size.borderLeftWidth + size.borderRightWidth;
+  var borderHeight = size.borderTopWidth + size.borderBottomWidth;
+
+  var isBorderBoxSizeOuter = isBorderBox && isBoxSizeOuter;
+
+  // overwrite width and height if we can get it from style
+  var styleWidth = getStyleSize( style.width );
+  if ( styleWidth !== false ) {
+    size.width = styleWidth +
+      // add padding and border unless it's already including it
+      ( isBorderBoxSizeOuter ? 0 : paddingWidth + borderWidth );
+  }
+
+  var styleHeight = getStyleSize( style.height );
+  if ( styleHeight !== false ) {
+    size.height = styleHeight +
+      // add padding and border unless it's already including it
+      ( isBorderBoxSizeOuter ? 0 : paddingHeight + borderHeight );
+  }
+
+  size.innerWidth = size.width - ( paddingWidth + borderWidth );
+  size.innerHeight = size.height - ( paddingHeight + borderHeight );
+
+  size.outerWidth = size.width + marginWidth;
+  size.outerHeight = size.height + marginHeight;
+
+  return size;
+}
+
+// IE8 returns percent values, not pixels
+// taken from jQuery's curCSS
+function mungeNonPixel( elem, value ) {
+  // IE8 and has percent value
+  if ( window.getComputedStyle || value.indexOf('%') === -1 ) {
+    return value;
+  }
+  var style = elem.style;
+  // Remember the original values
+  var left = style.left;
+  var rs = elem.runtimeStyle;
+  var rsLeft = rs && rs.left;
+
+  // Put in the new values to get a computed value out
+  if ( rsLeft ) {
+    rs.left = elem.currentStyle.left;
+  }
+  style.left = value;
+  value = style.pixelLeft;
+
+  // Revert the changed values
+  style.left = left;
+  if ( rsLeft ) {
+    rs.left = rsLeft;
+  }
+
+  return value;
+}
+
+return getSize;
+
+}
+
+// transport
+if ( typeof define === 'function' && define.amd ) {
+  // AMD for RequireJS
+  define( [ 'get-style-property/get-style-property' ], defineGetSize );
+} else if ( typeof exports === 'object' ) {
+  // CommonJS for Component
+  module.exports = defineGetSize( require('desandro-get-style-property') );
+} else {
+  // browser global
+  window.getSize = defineGetSize( window.getStyleProperty );
+}
+
+})( window );
+
+},{"desandro-get-style-property":17}],17:[function(require,module,exports){
+/*!
+ * getStyleProperty v1.0.4
+ * original by kangax
+ * http://perfectionkills.com/feature-testing-css-properties/
+ * MIT license
+ */
+
+/*jshint browser: true, strict: true, undef: true */
+/*global define: false, exports: false, module: false */
+
+( function( window ) {
+
+'use strict';
+
+var prefixes = 'Webkit Moz ms Ms O'.split(' ');
+var docElemStyle = document.documentElement.style;
+
+function getStyleProperty( propName ) {
+  if ( !propName ) {
+    return;
+  }
+
+  // test standard property first
+  if ( typeof docElemStyle[ propName ] === 'string' ) {
+    return propName;
+  }
+
+  // capitalize
+  propName = propName.charAt(0).toUpperCase() + propName.slice(1);
+
+  // test vendor specific properties
+  var prefixed;
+  for ( var i=0, len = prefixes.length; i < len; i++ ) {
+    prefixed = prefixes[i] + propName;
+    if ( typeof docElemStyle[ prefixed ] === 'string' ) {
+      return prefixed;
+    }
+  }
+}
+
+// transport
+if ( typeof define === 'function' && define.amd ) {
+  // AMD
+  define( function() {
+    return getStyleProperty;
   });
+} else if ( typeof exports === 'object' ) {
+  // CommonJS for Component
+  module.exports = getStyleProperty;
+} else {
+  // browser global
+  window.getStyleProperty = getStyleProperty;
+}
 
-  // Indexes the object's values by a criterion, similar to `groupBy`, but for
-  // when you know that your index values will be unique.
-  _.indexBy = group(function(result, key, value) {
-    result[key] = value;
-  });
+})( window );
 
-  // Counts instances of an object that group by a certain criterion. Pass
-  // either a string attribute to count by, or a function that returns the
-  // criterion.
-  _.countBy = group(function(result, key) {
-    _.has(result, key) ? result[key]++ : result[key] = 1;
-  });
+},{}],18:[function(require,module,exports){
+/*!
+ * Masonry v3.2.1
+ * Cascading grid layout library
+ * http://masonry.desandro.com
+ * MIT License
+ * by David DeSandro
+ */
 
-  // Use a comparator function to figure out the smallest index at which
-  // an object should be inserted so as to maintain order. Uses binary search.
-  _.sortedIndex = function(array, obj, iterator, context) {
-    iterator = lookupIterator(iterator);
-    var value = iterator.call(context, obj);
-    var low = 0, high = array.length;
-    while (low < high) {
-      var mid = (low + high) >>> 1;
-      iterator.call(context, array[mid]) < value ? low = mid + 1 : high = mid;
-    }
-    return low;
-  };
+( function( window ) {
 
-  // Safely create a real, live array from anything iterable.
-  _.toArray = function(obj) {
-    if (!obj) return [];
-    if (_.isArray(obj)) return slice.call(obj);
-    if (obj.length === +obj.length) return _.map(obj, _.identity);
-    return _.values(obj);
-  };
+'use strict';
 
-  // Return the number of elements in an object.
-  _.size = function(obj) {
-    if (obj == null) return 0;
-    return (obj.length === +obj.length) ? obj.length : _.keys(obj).length;
-  };
+// -------------------------- helpers -------------------------- //
 
-  // Array Functions
-  // ---------------
-
-  // Get the first element of an array. Passing **n** will return the first N
-  // values in the array. Aliased as `head` and `take`. The **guard** check
-  // allows it to work with `_.map`.
-  _.first = _.head = _.take = function(array, n, guard) {
-    if (array == null) return void 0;
-    if ((n == null) || guard) return array[0];
-    if (n < 0) return [];
-    return slice.call(array, 0, n);
-  };
-
-  // Returns everything but the last entry of the array. Especially useful on
-  // the arguments object. Passing **n** will return all the values in
-  // the array, excluding the last N. The **guard** check allows it to work with
-  // `_.map`.
-  _.initial = function(array, n, guard) {
-    return slice.call(array, 0, array.length - ((n == null) || guard ? 1 : n));
-  };
-
-  // Get the last element of an array. Passing **n** will return the last N
-  // values in the array. The **guard** check allows it to work with `_.map`.
-  _.last = function(array, n, guard) {
-    if (array == null) return void 0;
-    if ((n == null) || guard) return array[array.length - 1];
-    return slice.call(array, Math.max(array.length - n, 0));
-  };
-
-  // Returns everything but the first entry of the array. Aliased as `tail` and `drop`.
-  // Especially useful on the arguments object. Passing an **n** will return
-  // the rest N values in the array. The **guard**
-  // check allows it to work with `_.map`.
-  _.rest = _.tail = _.drop = function(array, n, guard) {
-    return slice.call(array, (n == null) || guard ? 1 : n);
-  };
-
-  // Trim out all falsy values from an array.
-  _.compact = function(array) {
-    return _.filter(array, _.identity);
-  };
-
-  // Internal implementation of a recursive `flatten` function.
-  var flatten = function(input, shallow, output) {
-    if (shallow && _.every(input, _.isArray)) {
-      return concat.apply(output, input);
-    }
-    each(input, function(value) {
-      if (_.isArray(value) || _.isArguments(value)) {
-        shallow ? push.apply(output, value) : flatten(value, shallow, output);
-      } else {
-        output.push(value);
-      }
-    });
-    return output;
-  };
-
-  // Flatten out an array, either recursively (by default), or just one level.
-  _.flatten = function(array, shallow) {
-    return flatten(array, shallow, []);
-  };
-
-  // Return a version of the array that does not contain the specified value(s).
-  _.without = function(array) {
-    return _.difference(array, slice.call(arguments, 1));
-  };
-
-  // Split an array into two arrays: one whose elements all satisfy the given
-  // predicate, and one whose elements all do not satisfy the predicate.
-  _.partition = function(array, predicate) {
-    var pass = [], fail = [];
-    each(array, function(elem) {
-      (predicate(elem) ? pass : fail).push(elem);
-    });
-    return [pass, fail];
-  };
-
-  // Produce a duplicate-free version of the array. If the array has already
-  // been sorted, you have the option of using a faster algorithm.
-  // Aliased as `unique`.
-  _.uniq = _.unique = function(array, isSorted, iterator, context) {
-    if (_.isFunction(isSorted)) {
-      context = iterator;
-      iterator = isSorted;
-      isSorted = false;
-    }
-    var initial = iterator ? _.map(array, iterator, context) : array;
-    var results = [];
-    var seen = [];
-    each(initial, function(value, index) {
-      if (isSorted ? (!index || seen[seen.length - 1] !== value) : !_.contains(seen, value)) {
-        seen.push(value);
-        results.push(array[index]);
-      }
-    });
-    return results;
-  };
-
-  // Produce an array that contains the union: each distinct element from all of
-  // the passed-in arrays.
-  _.union = function() {
-    return _.uniq(_.flatten(arguments, true));
-  };
-
-  // Produce an array that contains every item shared between all the
-  // passed-in arrays.
-  _.intersection = function(array) {
-    var rest = slice.call(arguments, 1);
-    return _.filter(_.uniq(array), function(item) {
-      return _.every(rest, function(other) {
-        return _.contains(other, item);
-      });
-    });
-  };
-
-  // Take the difference between one array and a number of other arrays.
-  // Only the elements present in just the first array will remain.
-  _.difference = function(array) {
-    var rest = concat.apply(ArrayProto, slice.call(arguments, 1));
-    return _.filter(array, function(value){ return !_.contains(rest, value); });
-  };
-
-  // Zip together multiple lists into a single array -- elements that share
-  // an index go together.
-  _.zip = function() {
-    var length = _.max(_.pluck(arguments, 'length').concat(0));
-    var results = new Array(length);
-    for (var i = 0; i < length; i++) {
-      results[i] = _.pluck(arguments, '' + i);
-    }
-    return results;
-  };
-
-  // Converts lists into objects. Pass either a single array of `[key, value]`
-  // pairs, or two parallel arrays of the same length -- one of keys, and one of
-  // the corresponding values.
-  _.object = function(list, values) {
-    if (list == null) return {};
-    var result = {};
-    for (var i = 0, length = list.length; i < length; i++) {
-      if (values) {
-        result[list[i]] = values[i];
-      } else {
-        result[list[i][0]] = list[i][1];
+var indexOf = Array.prototype.indexOf ?
+  function( items, value ) {
+    return items.indexOf( value );
+  } :
+  function ( items, value ) {
+    for ( var i=0, len = items.length; i < len; i++ ) {
+      var item = items[i];
+      if ( item === value ) {
+        return i;
       }
     }
-    return result;
-  };
-
-  // If the browser doesn't supply us with indexOf (I'm looking at you, **MSIE**),
-  // we need this function. Return the position of the first occurrence of an
-  // item in an array, or -1 if the item is not included in the array.
-  // Delegates to **ECMAScript 5**'s native `indexOf` if available.
-  // If the array is large and already in sort order, pass `true`
-  // for **isSorted** to use binary search.
-  _.indexOf = function(array, item, isSorted) {
-    if (array == null) return -1;
-    var i = 0, length = array.length;
-    if (isSorted) {
-      if (typeof isSorted == 'number') {
-        i = (isSorted < 0 ? Math.max(0, length + isSorted) : isSorted);
-      } else {
-        i = _.sortedIndex(array, item);
-        return array[i] === item ? i : -1;
-      }
-    }
-    if (nativeIndexOf && array.indexOf === nativeIndexOf) return array.indexOf(item, isSorted);
-    for (; i < length; i++) if (array[i] === item) return i;
     return -1;
   };
 
-  // Delegates to **ECMAScript 5**'s native `lastIndexOf` if available.
-  _.lastIndexOf = function(array, item, from) {
-    if (array == null) return -1;
-    var hasIndex = from != null;
-    if (nativeLastIndexOf && array.lastIndexOf === nativeLastIndexOf) {
-      return hasIndex ? array.lastIndexOf(item, from) : array.lastIndexOf(item);
+// -------------------------- masonryDefinition -------------------------- //
+
+// used for AMD definition and requires
+function masonryDefinition( Outlayer, getSize ) {
+  // create an Outlayer layout class
+  var Masonry = Outlayer.create('masonry');
+
+  Masonry.prototype._resetLayout = function() {
+    this.getSize();
+    this._getMeasurement( 'columnWidth', 'outerWidth' );
+    this._getMeasurement( 'gutter', 'outerWidth' );
+    this.measureColumns();
+
+    // reset column Y
+    var i = this.cols;
+    this.colYs = [];
+    while (i--) {
+      this.colYs.push( 0 );
     }
-    var i = (hasIndex ? from : array.length);
-    while (i--) if (array[i] === item) return i;
+
+    this.maxY = 0;
+  };
+
+  Masonry.prototype.measureColumns = function() {
+    this.getContainerWidth();
+    // if columnWidth is 0, default to outerWidth of first item
+    if ( !this.columnWidth ) {
+      var firstItem = this.items[0];
+      var firstItemElem = firstItem && firstItem.element;
+      // columnWidth fall back to item of first element
+      this.columnWidth = firstItemElem && getSize( firstItemElem ).outerWidth ||
+        // if first elem has no width, default to size of container
+        this.containerWidth;
+    }
+
+    this.columnWidth += this.gutter;
+
+    this.cols = Math.floor( ( this.containerWidth + this.gutter ) / this.columnWidth );
+    this.cols = Math.max( this.cols, 1 );
+  };
+
+  Masonry.prototype.getContainerWidth = function() {
+    // container is parent if fit width
+    var container = this.options.isFitWidth ? this.element.parentNode : this.element;
+    // check that this.size and size are there
+    // IE8 triggers resize on body size change, so they might not be
+    var size = getSize( container );
+    this.containerWidth = size && size.innerWidth;
+  };
+
+  Masonry.prototype._getItemLayoutPosition = function( item ) {
+    item.getSize();
+    // how many columns does this brick span
+    var remainder = item.size.outerWidth % this.columnWidth;
+    var mathMethod = remainder && remainder < 1 ? 'round' : 'ceil';
+    // round if off by 1 pixel, otherwise use ceil
+    var colSpan = Math[ mathMethod ]( item.size.outerWidth / this.columnWidth );
+    colSpan = Math.min( colSpan, this.cols );
+
+    var colGroup = this._getColGroup( colSpan );
+    // get the minimum Y value from the columns
+    var minimumY = Math.min.apply( Math, colGroup );
+    var shortColIndex = indexOf( colGroup, minimumY );
+
+    // position the brick
+    var position = {
+      x: this.columnWidth * shortColIndex,
+      y: minimumY
+    };
+
+    // apply setHeight to necessary columns
+    var setHeight = minimumY + item.size.outerHeight;
+    var setSpan = this.cols + 1 - colGroup.length;
+    for ( var i = 0; i < setSpan; i++ ) {
+      this.colYs[ shortColIndex + i ] = setHeight;
+    }
+
+    return position;
+  };
+
+  /**
+   * @param {Number} colSpan - number of columns the element spans
+   * @returns {Array} colGroup
+   */
+  Masonry.prototype._getColGroup = function( colSpan ) {
+    if ( colSpan < 2 ) {
+      // if brick spans only one column, use all the column Ys
+      return this.colYs;
+    }
+
+    var colGroup = [];
+    // how many different places could this brick fit horizontally
+    var groupCount = this.cols + 1 - colSpan;
+    // for each group potential horizontal position
+    for ( var i = 0; i < groupCount; i++ ) {
+      // make an array of colY values for that one group
+      var groupColYs = this.colYs.slice( i, i + colSpan );
+      // and get the max value of the array
+      colGroup[i] = Math.max.apply( Math, groupColYs );
+    }
+    return colGroup;
+  };
+
+  Masonry.prototype._manageStamp = function( stamp ) {
+    var stampSize = getSize( stamp );
+    var offset = this._getElementOffset( stamp );
+    // get the columns that this stamp affects
+    var firstX = this.options.isOriginLeft ? offset.left : offset.right;
+    var lastX = firstX + stampSize.outerWidth;
+    var firstCol = Math.floor( firstX / this.columnWidth );
+    firstCol = Math.max( 0, firstCol );
+    var lastCol = Math.floor( lastX / this.columnWidth );
+    // lastCol should not go over if multiple of columnWidth #425
+    lastCol -= lastX % this.columnWidth ? 0 : 1;
+    lastCol = Math.min( this.cols - 1, lastCol );
+    // set colYs to bottom of the stamp
+    var stampMaxY = ( this.options.isOriginTop ? offset.top : offset.bottom ) +
+      stampSize.outerHeight;
+    for ( var i = firstCol; i <= lastCol; i++ ) {
+      this.colYs[i] = Math.max( stampMaxY, this.colYs[i] );
+    }
+  };
+
+  Masonry.prototype._getContainerSize = function() {
+    this.maxY = Math.max.apply( Math, this.colYs );
+    var size = {
+      height: this.maxY
+    };
+
+    if ( this.options.isFitWidth ) {
+      size.width = this._getContainerFitWidth();
+    }
+
+    return size;
+  };
+
+  Masonry.prototype._getContainerFitWidth = function() {
+    var unusedCols = 0;
+    // count unused columns
+    var i = this.cols;
+    while ( --i ) {
+      if ( this.colYs[i] !== 0 ) {
+        break;
+      }
+      unusedCols++;
+    }
+    // fit container to columns that have been used
+    return ( this.cols - unusedCols ) * this.columnWidth - this.gutter;
+  };
+
+  Masonry.prototype.needsResizeLayout = function() {
+    var previousWidth = this.containerWidth;
+    this.getContainerWidth();
+    return previousWidth !== this.containerWidth;
+  };
+
+  return Masonry;
+}
+
+// -------------------------- transport -------------------------- //
+
+if ( typeof define === 'function' && define.amd ) {
+  // AMD
+  define( [
+      'outlayer/outlayer',
+      'get-size/get-size'
+    ],
+    masonryDefinition );
+} else if (typeof exports === 'object') {
+  module.exports = masonryDefinition(
+    require('outlayer'),
+    require('get-size')
+  );
+} else {
+  // browser global
+  window.Masonry = masonryDefinition(
+    window.Outlayer,
+    window.getSize
+  );
+}
+
+})( window );
+
+},{"get-size":16,"outlayer":24}],19:[function(require,module,exports){
+/**
+ * Outlayer Item
+ */
+
+( function( window ) {
+
+'use strict';
+
+// ----- get style ----- //
+
+var getComputedStyle = window.getComputedStyle;
+var getStyle = getComputedStyle ?
+  function( elem ) {
+    return getComputedStyle( elem, null );
+  } :
+  function( elem ) {
+    return elem.currentStyle;
+  };
+
+
+// extend objects
+function extend( a, b ) {
+  for ( var prop in b ) {
+    a[ prop ] = b[ prop ];
+  }
+  return a;
+}
+
+function isEmptyObj( obj ) {
+  for ( var prop in obj ) {
+    return false;
+  }
+  prop = null;
+  return true;
+}
+
+// http://jamesroberts.name/blog/2010/02/22/string-functions-for-javascript-trim-to-camel-case-to-dashed-and-to-underscore/
+function toDash( str ) {
+  return str.replace( /([A-Z])/g, function( $1 ){
+    return '-' + $1.toLowerCase();
+  });
+}
+
+// -------------------------- Outlayer definition -------------------------- //
+
+function outlayerItemDefinition( EventEmitter, getSize, getStyleProperty ) {
+
+// -------------------------- CSS3 support -------------------------- //
+
+var transitionProperty = getStyleProperty('transition');
+var transformProperty = getStyleProperty('transform');
+var supportsCSS3 = transitionProperty && transformProperty;
+var is3d = !!getStyleProperty('perspective');
+
+var transitionEndEvent = {
+  WebkitTransition: 'webkitTransitionEnd',
+  MozTransition: 'transitionend',
+  OTransition: 'otransitionend',
+  transition: 'transitionend'
+}[ transitionProperty ];
+
+// properties that could have vendor prefix
+var prefixableProperties = [
+  'transform',
+  'transition',
+  'transitionDuration',
+  'transitionProperty'
+];
+
+// cache all vendor properties
+var vendorProperties = ( function() {
+  var cache = {};
+  for ( var i=0, len = prefixableProperties.length; i < len; i++ ) {
+    var prop = prefixableProperties[i];
+    var supportedProp = getStyleProperty( prop );
+    if ( supportedProp && supportedProp !== prop ) {
+      cache[ prop ] = supportedProp;
+    }
+  }
+  return cache;
+})();
+
+// -------------------------- Item -------------------------- //
+
+function Item( element, layout ) {
+  if ( !element ) {
+    return;
+  }
+
+  this.element = element;
+  // parent layout class, i.e. Masonry, Isotope, or Packery
+  this.layout = layout;
+  this.position = {
+    x: 0,
+    y: 0
+  };
+
+  this._create();
+}
+
+// inherit EventEmitter
+extend( Item.prototype, EventEmitter.prototype );
+
+Item.prototype._create = function() {
+  // transition objects
+  this._transn = {
+    ingProperties: {},
+    clean: {},
+    onEnd: {}
+  };
+
+  this.css({
+    position: 'absolute'
+  });
+};
+
+// trigger specified handler for event type
+Item.prototype.handleEvent = function( event ) {
+  var method = 'on' + event.type;
+  if ( this[ method ] ) {
+    this[ method ]( event );
+  }
+};
+
+Item.prototype.getSize = function() {
+  this.size = getSize( this.element );
+};
+
+/**
+ * apply CSS styles to element
+ * @param {Object} style
+ */
+Item.prototype.css = function( style ) {
+  var elemStyle = this.element.style;
+
+  for ( var prop in style ) {
+    // use vendor property if available
+    var supportedProp = vendorProperties[ prop ] || prop;
+    elemStyle[ supportedProp ] = style[ prop ];
+  }
+};
+
+ // measure position, and sets it
+Item.prototype.getPosition = function() {
+  var style = getStyle( this.element );
+  var layoutOptions = this.layout.options;
+  var isOriginLeft = layoutOptions.isOriginLeft;
+  var isOriginTop = layoutOptions.isOriginTop;
+  var x = parseInt( style[ isOriginLeft ? 'left' : 'right' ], 10 );
+  var y = parseInt( style[ isOriginTop ? 'top' : 'bottom' ], 10 );
+
+  // clean up 'auto' or other non-integer values
+  x = isNaN( x ) ? 0 : x;
+  y = isNaN( y ) ? 0 : y;
+  // remove padding from measurement
+  var layoutSize = this.layout.size;
+  x -= isOriginLeft ? layoutSize.paddingLeft : layoutSize.paddingRight;
+  y -= isOriginTop ? layoutSize.paddingTop : layoutSize.paddingBottom;
+
+  this.position.x = x;
+  this.position.y = y;
+};
+
+// set settled position, apply padding
+Item.prototype.layoutPosition = function() {
+  var layoutSize = this.layout.size;
+  var layoutOptions = this.layout.options;
+  var style = {};
+
+  if ( layoutOptions.isOriginLeft ) {
+    style.left = ( this.position.x + layoutSize.paddingLeft ) + 'px';
+    // reset other property
+    style.right = '';
+  } else {
+    style.right = ( this.position.x + layoutSize.paddingRight ) + 'px';
+    style.left = '';
+  }
+
+  if ( layoutOptions.isOriginTop ) {
+    style.top = ( this.position.y + layoutSize.paddingTop ) + 'px';
+    style.bottom = '';
+  } else {
+    style.bottom = ( this.position.y + layoutSize.paddingBottom ) + 'px';
+    style.top = '';
+  }
+
+  this.css( style );
+  this.emitEvent( 'layout', [ this ] );
+};
+
+
+// transform translate function
+var translate = is3d ?
+  function( x, y ) {
+    return 'translate3d(' + x + 'px, ' + y + 'px, 0)';
+  } :
+  function( x, y ) {
+    return 'translate(' + x + 'px, ' + y + 'px)';
+  };
+
+
+Item.prototype._transitionTo = function( x, y ) {
+  this.getPosition();
+  // get current x & y from top/left
+  var curX = this.position.x;
+  var curY = this.position.y;
+
+  var compareX = parseInt( x, 10 );
+  var compareY = parseInt( y, 10 );
+  var didNotMove = compareX === this.position.x && compareY === this.position.y;
+
+  // save end position
+  this.setPosition( x, y );
+
+  // if did not move and not transitioning, just go to layout
+  if ( didNotMove && !this.isTransitioning ) {
+    this.layoutPosition();
+    return;
+  }
+
+  var transX = x - curX;
+  var transY = y - curY;
+  var transitionStyle = {};
+  // flip cooridinates if origin on right or bottom
+  var layoutOptions = this.layout.options;
+  transX = layoutOptions.isOriginLeft ? transX : -transX;
+  transY = layoutOptions.isOriginTop ? transY : -transY;
+  transitionStyle.transform = translate( transX, transY );
+
+  this.transition({
+    to: transitionStyle,
+    onTransitionEnd: {
+      transform: this.layoutPosition
+    },
+    isCleaning: true
+  });
+};
+
+// non transition + transform support
+Item.prototype.goTo = function( x, y ) {
+  this.setPosition( x, y );
+  this.layoutPosition();
+};
+
+// use transition and transforms if supported
+Item.prototype.moveTo = supportsCSS3 ?
+  Item.prototype._transitionTo : Item.prototype.goTo;
+
+Item.prototype.setPosition = function( x, y ) {
+  this.position.x = parseInt( x, 10 );
+  this.position.y = parseInt( y, 10 );
+};
+
+// ----- transition ----- //
+
+/**
+ * @param {Object} style - CSS
+ * @param {Function} onTransitionEnd
+ */
+
+// non transition, just trigger callback
+Item.prototype._nonTransition = function( args ) {
+  this.css( args.to );
+  if ( args.isCleaning ) {
+    this._removeStyles( args.to );
+  }
+  for ( var prop in args.onTransitionEnd ) {
+    args.onTransitionEnd[ prop ].call( this );
+  }
+};
+
+/**
+ * proper transition
+ * @param {Object} args - arguments
+ *   @param {Object} to - style to transition to
+ *   @param {Object} from - style to start transition from
+ *   @param {Boolean} isCleaning - removes transition styles after transition
+ *   @param {Function} onTransitionEnd - callback
+ */
+Item.prototype._transition = function( args ) {
+  // redirect to nonTransition if no transition duration
+  if ( !parseFloat( this.layout.options.transitionDuration ) ) {
+    this._nonTransition( args );
+    return;
+  }
+
+  var _transition = this._transn;
+  // keep track of onTransitionEnd callback by css property
+  for ( var prop in args.onTransitionEnd ) {
+    _transition.onEnd[ prop ] = args.onTransitionEnd[ prop ];
+  }
+  // keep track of properties that are transitioning
+  for ( prop in args.to ) {
+    _transition.ingProperties[ prop ] = true;
+    // keep track of properties to clean up when transition is done
+    if ( args.isCleaning ) {
+      _transition.clean[ prop ] = true;
+    }
+  }
+
+  // set from styles
+  if ( args.from ) {
+    this.css( args.from );
+    // force redraw. http://blog.alexmaccaw.com/css-transitions
+    var h = this.element.offsetHeight;
+    // hack for JSHint to hush about unused var
+    h = null;
+  }
+  // enable transition
+  this.enableTransition( args.to );
+  // set styles that are transitioning
+  this.css( args.to );
+
+  this.isTransitioning = true;
+
+};
+
+var itemTransitionProperties = transformProperty && ( toDash( transformProperty ) +
+  ',opacity' );
+
+Item.prototype.enableTransition = function(/* style */) {
+  // only enable if not already transitioning
+  // bug in IE10 were re-setting transition style will prevent
+  // transitionend event from triggering
+  if ( this.isTransitioning ) {
+    return;
+  }
+
+  // make transition: foo, bar, baz from style object
+  // TODO uncomment this bit when IE10 bug is resolved
+  // var transitionValue = [];
+  // for ( var prop in style ) {
+  //   // dash-ify camelCased properties like WebkitTransition
+  //   transitionValue.push( toDash( prop ) );
+  // }
+  // enable transition styles
+  // HACK always enable transform,opacity for IE10
+  this.css({
+    transitionProperty: itemTransitionProperties,
+    transitionDuration: this.layout.options.transitionDuration
+  });
+  // listen for transition end event
+  this.element.addEventListener( transitionEndEvent, this, false );
+};
+
+Item.prototype.transition = Item.prototype[ transitionProperty ? '_transition' : '_nonTransition' ];
+
+// ----- events ----- //
+
+Item.prototype.onwebkitTransitionEnd = function( event ) {
+  this.ontransitionend( event );
+};
+
+Item.prototype.onotransitionend = function( event ) {
+  this.ontransitionend( event );
+};
+
+// properties that I munge to make my life easier
+var dashedVendorProperties = {
+  '-webkit-transform': 'transform',
+  '-moz-transform': 'transform',
+  '-o-transform': 'transform'
+};
+
+Item.prototype.ontransitionend = function( event ) {
+  // disregard bubbled events from children
+  if ( event.target !== this.element ) {
+    return;
+  }
+  var _transition = this._transn;
+  // get property name of transitioned property, convert to prefix-free
+  var propertyName = dashedVendorProperties[ event.propertyName ] || event.propertyName;
+
+  // remove property that has completed transitioning
+  delete _transition.ingProperties[ propertyName ];
+  // check if any properties are still transitioning
+  if ( isEmptyObj( _transition.ingProperties ) ) {
+    // all properties have completed transitioning
+    this.disableTransition();
+  }
+  // clean style
+  if ( propertyName in _transition.clean ) {
+    // clean up style
+    this.element.style[ event.propertyName ] = '';
+    delete _transition.clean[ propertyName ];
+  }
+  // trigger onTransitionEnd callback
+  if ( propertyName in _transition.onEnd ) {
+    var onTransitionEnd = _transition.onEnd[ propertyName ];
+    onTransitionEnd.call( this );
+    delete _transition.onEnd[ propertyName ];
+  }
+
+  this.emitEvent( 'transitionEnd', [ this ] );
+};
+
+Item.prototype.disableTransition = function() {
+  this.removeTransitionStyles();
+  this.element.removeEventListener( transitionEndEvent, this, false );
+  this.isTransitioning = false;
+};
+
+/**
+ * removes style property from element
+ * @param {Object} style
+**/
+Item.prototype._removeStyles = function( style ) {
+  // clean up transition styles
+  var cleanStyle = {};
+  for ( var prop in style ) {
+    cleanStyle[ prop ] = '';
+  }
+  this.css( cleanStyle );
+};
+
+var cleanTransitionStyle = {
+  transitionProperty: '',
+  transitionDuration: ''
+};
+
+Item.prototype.removeTransitionStyles = function() {
+  // remove transition
+  this.css( cleanTransitionStyle );
+};
+
+// ----- show/hide/remove ----- //
+
+// remove element from DOM
+Item.prototype.removeElem = function() {
+  this.element.parentNode.removeChild( this.element );
+  this.emitEvent( 'remove', [ this ] );
+};
+
+Item.prototype.remove = function() {
+  // just remove element if no transition support or no transition
+  if ( !transitionProperty || !parseFloat( this.layout.options.transitionDuration ) ) {
+    this.removeElem();
+    return;
+  }
+
+  // start transition
+  var _this = this;
+  this.on( 'transitionEnd', function() {
+    _this.removeElem();
+    return true; // bind once
+  });
+  this.hide();
+};
+
+Item.prototype.reveal = function() {
+  delete this.isHidden;
+  // remove display: none
+  this.css({ display: '' });
+
+  var options = this.layout.options;
+  this.transition({
+    from: options.hiddenStyle,
+    to: options.visibleStyle,
+    isCleaning: true
+  });
+};
+
+Item.prototype.hide = function() {
+  // set flag
+  this.isHidden = true;
+  // remove display: none
+  this.css({ display: '' });
+
+  var options = this.layout.options;
+  this.transition({
+    from: options.visibleStyle,
+    to: options.hiddenStyle,
+    // keep hidden stuff hidden
+    isCleaning: true,
+    onTransitionEnd: {
+      opacity: function() {
+        // check if still hidden
+        // during transition, item may have been un-hidden
+        if ( this.isHidden ) {
+          this.css({ display: 'none' });
+        }
+      }
+    }
+  });
+};
+
+Item.prototype.destroy = function() {
+  this.css({
+    position: '',
+    left: '',
+    right: '',
+    top: '',
+    bottom: '',
+    transition: '',
+    transform: ''
+  });
+};
+
+return Item;
+
+}
+
+// -------------------------- transport -------------------------- //
+
+if ( typeof define === 'function' && define.amd ) {
+  // AMD
+  define( [
+      'eventEmitter/EventEmitter',
+      'get-size/get-size',
+      'get-style-property/get-style-property'
+    ],
+    outlayerItemDefinition );
+} else if (typeof exports === 'object') {
+  // CommonJS
+  module.exports = outlayerItemDefinition(
+    require('wolfy87-eventemitter'),
+    require('get-size'),
+    require('desandro-get-style-property')
+  );
+} else {
+  // browser global
+  window.Outlayer = {};
+  window.Outlayer.Item = outlayerItemDefinition(
+    window.EventEmitter,
+    window.getSize,
+    window.getStyleProperty
+  );
+}
+
+})( window );
+
+},{"desandro-get-style-property":20,"get-size":16,"wolfy87-eventemitter":23}],20:[function(require,module,exports){
+module.exports=require(17)
+},{}],21:[function(require,module,exports){
+/*!
+ * docReady v1.0.3
+ * Cross browser DOMContentLoaded event emitter
+ * MIT license
+ */
+
+/*jshint browser: true, strict: true, undef: true, unused: true*/
+/*global define: false, require: false, module: false */
+
+( function( window ) {
+
+'use strict';
+
+var document = window.document;
+// collection of functions to be triggered on ready
+var queue = [];
+
+function docReady( fn ) {
+  // throw out non-functions
+  if ( typeof fn !== 'function' ) {
+    return;
+  }
+
+  if ( docReady.isReady ) {
+    // ready now, hit it
+    fn();
+  } else {
+    // queue function when ready
+    queue.push( fn );
+  }
+}
+
+docReady.isReady = false;
+
+// triggered on various doc ready events
+function init( event ) {
+  // bail if IE8 document is not ready just yet
+  var isIE8NotReady = event.type === 'readystatechange' && document.readyState !== 'complete';
+  if ( docReady.isReady || isIE8NotReady ) {
+    return;
+  }
+  docReady.isReady = true;
+
+  // process queue
+  for ( var i=0, len = queue.length; i < len; i++ ) {
+    var fn = queue[i];
+    fn();
+  }
+}
+
+function defineDocReady( eventie ) {
+  eventie.bind( document, 'DOMContentLoaded', init );
+  eventie.bind( document, 'readystatechange', init );
+  eventie.bind( window, 'load', init );
+
+  return docReady;
+}
+
+// transport
+if ( typeof define === 'function' && define.amd ) {
+  // AMD
+  // if RequireJS, then doc is already ready
+  docReady.isReady = typeof requirejs === 'function';
+  define( [ 'eventie/eventie' ], defineDocReady );
+} else if ( typeof exports === 'object' ) {
+  module.exports = defineDocReady( require('eventie') );
+} else {
+  // browser global
+  window.docReady = defineDocReady( window.eventie );
+}
+
+})( window );
+
+},{"eventie":22}],22:[function(require,module,exports){
+/*!
+ * eventie v1.0.6
+ * event binding helper
+ *   eventie.bind( elem, 'click', myFn )
+ *   eventie.unbind( elem, 'click', myFn )
+ * MIT license
+ */
+
+/*jshint browser: true, undef: true, unused: true */
+/*global define: false, module: false */
+
+( function( window ) {
+
+'use strict';
+
+var docElem = document.documentElement;
+
+var bind = function() {};
+
+function getIEEvent( obj ) {
+  var event = window.event;
+  // add event.target
+  event.target = event.target || event.srcElement || obj;
+  return event;
+}
+
+if ( docElem.addEventListener ) {
+  bind = function( obj, type, fn ) {
+    obj.addEventListener( type, fn, false );
+  };
+} else if ( docElem.attachEvent ) {
+  bind = function( obj, type, fn ) {
+    obj[ type + fn ] = fn.handleEvent ?
+      function() {
+        var event = getIEEvent( obj );
+        fn.handleEvent.call( fn, event );
+      } :
+      function() {
+        var event = getIEEvent( obj );
+        fn.call( obj, event );
+      };
+    obj.attachEvent( "on" + type, obj[ type + fn ] );
+  };
+}
+
+var unbind = function() {};
+
+if ( docElem.removeEventListener ) {
+  unbind = function( obj, type, fn ) {
+    obj.removeEventListener( type, fn, false );
+  };
+} else if ( docElem.detachEvent ) {
+  unbind = function( obj, type, fn ) {
+    obj.detachEvent( "on" + type, obj[ type + fn ] );
+    try {
+      delete obj[ type + fn ];
+    } catch ( err ) {
+      // can't delete window object properties
+      obj[ type + fn ] = undefined;
+    }
+  };
+}
+
+var eventie = {
+  bind: bind,
+  unbind: unbind
+};
+
+// ----- module definition ----- //
+
+if ( typeof define === 'function' && define.amd ) {
+  // AMD
+  define( eventie );
+} else if ( typeof exports === 'object' ) {
+  // CommonJS
+  module.exports = eventie;
+} else {
+  // browser global
+  window.eventie = eventie;
+}
+
+})( window );
+
+},{}],23:[function(require,module,exports){
+/*!
+ * EventEmitter v4.2.11 - git.io/ee
+ * Unlicense - http://unlicense.org/
+ * Oliver Caldwell - http://oli.me.uk/
+ * @preserve
+ */
+
+;(function () {
+    'use strict';
+
+    /**
+     * Class for managing events.
+     * Can be extended to provide event functionality in other classes.
+     *
+     * @class EventEmitter Manages event registering and emitting.
+     */
+    function EventEmitter() {}
+
+    // Shortcuts to improve speed and size
+    var proto = EventEmitter.prototype;
+    var exports = this;
+    var originalGlobalValue = exports.EventEmitter;
+
+    /**
+     * Finds the index of the listener for the event in its storage array.
+     *
+     * @param {Function[]} listeners Array of listeners to search through.
+     * @param {Function} listener Method to look for.
+     * @return {Number} Index of the specified listener, -1 if not found
+     * @api private
+     */
+    function indexOfListener(listeners, listener) {
+        var i = listeners.length;
+        while (i--) {
+            if (listeners[i].listener === listener) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /**
+     * Alias a method while keeping the context correct, to allow for overwriting of target method.
+     *
+     * @param {String} name The name of the target method.
+     * @return {Function} The aliased method
+     * @api private
+     */
+    function alias(name) {
+        return function aliasClosure() {
+            return this[name].apply(this, arguments);
+        };
+    }
+
+    /**
+     * Returns the listener array for the specified event.
+     * Will initialise the event object and listener arrays if required.
+     * Will return an object if you use a regex search. The object contains keys for each matched event. So /ba[rz]/ might return an object containing bar and baz. But only if you have either defined them with defineEvent or added some listeners to them.
+     * Each property in the object response is an array of listener functions.
+     *
+     * @param {String|RegExp} evt Name of the event to return the listeners from.
+     * @return {Function[]|Object} All listener functions for the event.
+     */
+    proto.getListeners = function getListeners(evt) {
+        var events = this._getEvents();
+        var response;
+        var key;
+
+        // Return a concatenated array of all matching events if
+        // the selector is a regular expression.
+        if (evt instanceof RegExp) {
+            response = {};
+            for (key in events) {
+                if (events.hasOwnProperty(key) && evt.test(key)) {
+                    response[key] = events[key];
+                }
+            }
+        }
+        else {
+            response = events[evt] || (events[evt] = []);
+        }
+
+        return response;
+    };
+
+    /**
+     * Takes a list of listener objects and flattens it into a list of listener functions.
+     *
+     * @param {Object[]} listeners Raw listener objects.
+     * @return {Function[]} Just the listener functions.
+     */
+    proto.flattenListeners = function flattenListeners(listeners) {
+        var flatListeners = [];
+        var i;
+
+        for (i = 0; i < listeners.length; i += 1) {
+            flatListeners.push(listeners[i].listener);
+        }
+
+        return flatListeners;
+    };
+
+    /**
+     * Fetches the requested listeners via getListeners but will always return the results inside an object. This is mainly for internal use but others may find it useful.
+     *
+     * @param {String|RegExp} evt Name of the event to return the listeners from.
+     * @return {Object} All listener functions for an event in an object.
+     */
+    proto.getListenersAsObject = function getListenersAsObject(evt) {
+        var listeners = this.getListeners(evt);
+        var response;
+
+        if (listeners instanceof Array) {
+            response = {};
+            response[evt] = listeners;
+        }
+
+        return response || listeners;
+    };
+
+    /**
+     * Adds a listener function to the specified event.
+     * The listener will not be added if it is a duplicate.
+     * If the listener returns true then it will be removed after it is called.
+     * If you pass a regular expression as the event name then the listener will be added to all events that match it.
+     *
+     * @param {String|RegExp} evt Name of the event to attach the listener to.
+     * @param {Function} listener Method to be called when the event is emitted. If the function returns true then it will be removed after calling.
+     * @return {Object} Current instance of EventEmitter for chaining.
+     */
+    proto.addListener = function addListener(evt, listener) {
+        var listeners = this.getListenersAsObject(evt);
+        var listenerIsWrapped = typeof listener === 'object';
+        var key;
+
+        for (key in listeners) {
+            if (listeners.hasOwnProperty(key) && indexOfListener(listeners[key], listener) === -1) {
+                listeners[key].push(listenerIsWrapped ? listener : {
+                    listener: listener,
+                    once: false
+                });
+            }
+        }
+
+        return this;
+    };
+
+    /**
+     * Alias of addListener
+     */
+    proto.on = alias('addListener');
+
+    /**
+     * Semi-alias of addListener. It will add a listener that will be
+     * automatically removed after its first execution.
+     *
+     * @param {String|RegExp} evt Name of the event to attach the listener to.
+     * @param {Function} listener Method to be called when the event is emitted. If the function returns true then it will be removed after calling.
+     * @return {Object} Current instance of EventEmitter for chaining.
+     */
+    proto.addOnceListener = function addOnceListener(evt, listener) {
+        return this.addListener(evt, {
+            listener: listener,
+            once: true
+        });
+    };
+
+    /**
+     * Alias of addOnceListener.
+     */
+    proto.once = alias('addOnceListener');
+
+    /**
+     * Defines an event name. This is required if you want to use a regex to add a listener to multiple events at once. If you don't do this then how do you expect it to know what event to add to? Should it just add to every possible match for a regex? No. That is scary and bad.
+     * You need to tell it what event names should be matched by a regex.
+     *
+     * @param {String} evt Name of the event to create.
+     * @return {Object} Current instance of EventEmitter for chaining.
+     */
+    proto.defineEvent = function defineEvent(evt) {
+        this.getListeners(evt);
+        return this;
+    };
+
+    /**
+     * Uses defineEvent to define multiple events.
+     *
+     * @param {String[]} evts An array of event names to define.
+     * @return {Object} Current instance of EventEmitter for chaining.
+     */
+    proto.defineEvents = function defineEvents(evts) {
+        for (var i = 0; i < evts.length; i += 1) {
+            this.defineEvent(evts[i]);
+        }
+        return this;
+    };
+
+    /**
+     * Removes a listener function from the specified event.
+     * When passed a regular expression as the event name, it will remove the listener from all events that match it.
+     *
+     * @param {String|RegExp} evt Name of the event to remove the listener from.
+     * @param {Function} listener Method to remove from the event.
+     * @return {Object} Current instance of EventEmitter for chaining.
+     */
+    proto.removeListener = function removeListener(evt, listener) {
+        var listeners = this.getListenersAsObject(evt);
+        var index;
+        var key;
+
+        for (key in listeners) {
+            if (listeners.hasOwnProperty(key)) {
+                index = indexOfListener(listeners[key], listener);
+
+                if (index !== -1) {
+                    listeners[key].splice(index, 1);
+                }
+            }
+        }
+
+        return this;
+    };
+
+    /**
+     * Alias of removeListener
+     */
+    proto.off = alias('removeListener');
+
+    /**
+     * Adds listeners in bulk using the manipulateListeners method.
+     * If you pass an object as the second argument you can add to multiple events at once. The object should contain key value pairs of events and listeners or listener arrays. You can also pass it an event name and an array of listeners to be added.
+     * You can also pass it a regular expression to add the array of listeners to all events that match it.
+     * Yeah, this function does quite a bit. That's probably a bad thing.
+     *
+     * @param {String|Object|RegExp} evt An event name if you will pass an array of listeners next. An object if you wish to add to multiple events at once.
+     * @param {Function[]} [listeners] An optional array of listener functions to add.
+     * @return {Object} Current instance of EventEmitter for chaining.
+     */
+    proto.addListeners = function addListeners(evt, listeners) {
+        // Pass through to manipulateListeners
+        return this.manipulateListeners(false, evt, listeners);
+    };
+
+    /**
+     * Removes listeners in bulk using the manipulateListeners method.
+     * If you pass an object as the second argument you can remove from multiple events at once. The object should contain key value pairs of events and listeners or listener arrays.
+     * You can also pass it an event name and an array of listeners to be removed.
+     * You can also pass it a regular expression to remove the listeners from all events that match it.
+     *
+     * @param {String|Object|RegExp} evt An event name if you will pass an array of listeners next. An object if you wish to remove from multiple events at once.
+     * @param {Function[]} [listeners] An optional array of listener functions to remove.
+     * @return {Object} Current instance of EventEmitter for chaining.
+     */
+    proto.removeListeners = function removeListeners(evt, listeners) {
+        // Pass through to manipulateListeners
+        return this.manipulateListeners(true, evt, listeners);
+    };
+
+    /**
+     * Edits listeners in bulk. The addListeners and removeListeners methods both use this to do their job. You should really use those instead, this is a little lower level.
+     * The first argument will determine if the listeners are removed (true) or added (false).
+     * If you pass an object as the second argument you can add/remove from multiple events at once. The object should contain key value pairs of events and listeners or listener arrays.
+     * You can also pass it an event name and an array of listeners to be added/removed.
+     * You can also pass it a regular expression to manipulate the listeners of all events that match it.
+     *
+     * @param {Boolean} remove True if you want to remove listeners, false if you want to add.
+     * @param {String|Object|RegExp} evt An event name if you will pass an array of listeners next. An object if you wish to add/remove from multiple events at once.
+     * @param {Function[]} [listeners] An optional array of listener functions to add/remove.
+     * @return {Object} Current instance of EventEmitter for chaining.
+     */
+    proto.manipulateListeners = function manipulateListeners(remove, evt, listeners) {
+        var i;
+        var value;
+        var single = remove ? this.removeListener : this.addListener;
+        var multiple = remove ? this.removeListeners : this.addListeners;
+
+        // If evt is an object then pass each of its properties to this method
+        if (typeof evt === 'object' && !(evt instanceof RegExp)) {
+            for (i in evt) {
+                if (evt.hasOwnProperty(i) && (value = evt[i])) {
+                    // Pass the single listener straight through to the singular method
+                    if (typeof value === 'function') {
+                        single.call(this, i, value);
+                    }
+                    else {
+                        // Otherwise pass back to the multiple function
+                        multiple.call(this, i, value);
+                    }
+                }
+            }
+        }
+        else {
+            // So evt must be a string
+            // And listeners must be an array of listeners
+            // Loop over it and pass each one to the multiple method
+            i = listeners.length;
+            while (i--) {
+                single.call(this, evt, listeners[i]);
+            }
+        }
+
+        return this;
+    };
+
+    /**
+     * Removes all listeners from a specified event.
+     * If you do not specify an event then all listeners will be removed.
+     * That means every event will be emptied.
+     * You can also pass a regex to remove all events that match it.
+     *
+     * @param {String|RegExp} [evt] Optional name of the event to remove all listeners for. Will remove from every event if not passed.
+     * @return {Object} Current instance of EventEmitter for chaining.
+     */
+    proto.removeEvent = function removeEvent(evt) {
+        var type = typeof evt;
+        var events = this._getEvents();
+        var key;
+
+        // Remove different things depending on the state of evt
+        if (type === 'string') {
+            // Remove all listeners for the specified event
+            delete events[evt];
+        }
+        else if (evt instanceof RegExp) {
+            // Remove all events matching the regex.
+            for (key in events) {
+                if (events.hasOwnProperty(key) && evt.test(key)) {
+                    delete events[key];
+                }
+            }
+        }
+        else {
+            // Remove all listeners in all events
+            delete this._events;
+        }
+
+        return this;
+    };
+
+    /**
+     * Alias of removeEvent.
+     *
+     * Added to mirror the node API.
+     */
+    proto.removeAllListeners = alias('removeEvent');
+
+    /**
+     * Emits an event of your choice.
+     * When emitted, every listener attached to that event will be executed.
+     * If you pass the optional argument array then those arguments will be passed to every listener upon execution.
+     * Because it uses `apply`, your array of arguments will be passed as if you wrote them out separately.
+     * So they will not arrive within the array on the other side, they will be separate.
+     * You can also pass a regular expression to emit to all events that match it.
+     *
+     * @param {String|RegExp} evt Name of the event to emit and execute listeners for.
+     * @param {Array} [args] Optional array of arguments to be passed to each listener.
+     * @return {Object} Current instance of EventEmitter for chaining.
+     */
+    proto.emitEvent = function emitEvent(evt, args) {
+        var listeners = this.getListenersAsObject(evt);
+        var listener;
+        var i;
+        var key;
+        var response;
+
+        for (key in listeners) {
+            if (listeners.hasOwnProperty(key)) {
+                i = listeners[key].length;
+
+                while (i--) {
+                    // If the listener returns true then it shall be removed from the event
+                    // The function is executed either with a basic call or an apply if there is an args array
+                    listener = listeners[key][i];
+
+                    if (listener.once === true) {
+                        this.removeListener(evt, listener.listener);
+                    }
+
+                    response = listener.listener.apply(this, args || []);
+
+                    if (response === this._getOnceReturnValue()) {
+                        this.removeListener(evt, listener.listener);
+                    }
+                }
+            }
+        }
+
+        return this;
+    };
+
+    /**
+     * Alias of emitEvent
+     */
+    proto.trigger = alias('emitEvent');
+
+    /**
+     * Subtly different from emitEvent in that it will pass its arguments on to the listeners, as opposed to taking a single array of arguments to pass on.
+     * As with emitEvent, you can pass a regex in place of the event name to emit to all events that match it.
+     *
+     * @param {String|RegExp} evt Name of the event to emit and execute listeners for.
+     * @param {...*} Optional additional arguments to be passed to each listener.
+     * @return {Object} Current instance of EventEmitter for chaining.
+     */
+    proto.emit = function emit(evt) {
+        var args = Array.prototype.slice.call(arguments, 1);
+        return this.emitEvent(evt, args);
+    };
+
+    /**
+     * Sets the current value to check against when executing listeners. If a
+     * listeners return value matches the one set here then it will be removed
+     * after execution. This value defaults to true.
+     *
+     * @param {*} value The new value to check for when executing listeners.
+     * @return {Object} Current instance of EventEmitter for chaining.
+     */
+    proto.setOnceReturnValue = function setOnceReturnValue(value) {
+        this._onceReturnValue = value;
+        return this;
+    };
+
+    /**
+     * Fetches the current value to check against when executing listeners. If
+     * the listeners return value matches this one then it should be removed
+     * automatically. It will return true by default.
+     *
+     * @return {*|Boolean} The current value to check for or the default, true.
+     * @api private
+     */
+    proto._getOnceReturnValue = function _getOnceReturnValue() {
+        if (this.hasOwnProperty('_onceReturnValue')) {
+            return this._onceReturnValue;
+        }
+        else {
+            return true;
+        }
+    };
+
+    /**
+     * Fetches the events object and creates one if required.
+     *
+     * @return {Object} The events storage object.
+     * @api private
+     */
+    proto._getEvents = function _getEvents() {
+        return this._events || (this._events = {});
+    };
+
+    /**
+     * Reverts the global {@link EventEmitter} to its previous value and returns a reference to this version.
+     *
+     * @return {Function} Non conflicting EventEmitter class.
+     */
+    EventEmitter.noConflict = function noConflict() {
+        exports.EventEmitter = originalGlobalValue;
+        return EventEmitter;
+    };
+
+    // Expose the class either via AMD, CommonJS or the global object
+    if (typeof define === 'function' && define.amd) {
+        define(function () {
+            return EventEmitter;
+        });
+    }
+    else if (typeof module === 'object' && module.exports){
+        module.exports = EventEmitter;
+    }
+    else {
+        exports.EventEmitter = EventEmitter;
+    }
+}.call(this));
+
+},{}],24:[function(require,module,exports){
+/*!
+ * Outlayer v1.3.0
+ * the brains and guts of a layout library
+ * MIT license
+ */
+
+( function( window ) {
+
+'use strict';
+
+// ----- vars ----- //
+
+var document = window.document;
+var console = window.console;
+var jQuery = window.jQuery;
+var noop = function() {};
+
+// -------------------------- helpers -------------------------- //
+
+// extend objects
+function extend( a, b ) {
+  for ( var prop in b ) {
+    a[ prop ] = b[ prop ];
+  }
+  return a;
+}
+
+
+var objToString = Object.prototype.toString;
+function isArray( obj ) {
+  return objToString.call( obj ) === '[object Array]';
+}
+
+// turn element or nodeList into an array
+function makeArray( obj ) {
+  var ary = [];
+  if ( isArray( obj ) ) {
+    // use object if already an array
+    ary = obj;
+  } else if ( obj && typeof obj.length === 'number' ) {
+    // convert nodeList to array
+    for ( var i=0, len = obj.length; i < len; i++ ) {
+      ary.push( obj[i] );
+    }
+  } else {
+    // array of single index
+    ary.push( obj );
+  }
+  return ary;
+}
+
+// http://stackoverflow.com/a/384380/182183
+var isElement = ( typeof HTMLElement === 'function' || typeof HTMLElement === 'object' ) ?
+  function isElementDOM2( obj ) {
+    return obj instanceof HTMLElement;
+  } :
+  function isElementQuirky( obj ) {
+    return obj && typeof obj === 'object' &&
+      obj.nodeType === 1 && typeof obj.nodeName === 'string';
+  };
+
+// index of helper cause IE8
+var indexOf = Array.prototype.indexOf ? function( ary, obj ) {
+    return ary.indexOf( obj );
+  } : function( ary, obj ) {
+    for ( var i=0, len = ary.length; i < len; i++ ) {
+      if ( ary[i] === obj ) {
+        return i;
+      }
+    }
     return -1;
   };
 
-  // Generate an integer Array containing an arithmetic progression. A port of
-  // the native Python `range()` function. See
-  // [the Python documentation](http://docs.python.org/library/functions.html#range).
-  _.range = function(start, stop, step) {
-    if (arguments.length <= 1) {
-      stop = start || 0;
-      start = 0;
+function removeFrom( obj, ary ) {
+  var index = indexOf( ary, obj );
+  if ( index !== -1 ) {
+    ary.splice( index, 1 );
+  }
+}
+
+// http://jamesroberts.name/blog/2010/02/22/string-functions-for-javascript-trim-to-camel-case-to-dashed-and-to-underscore/
+function toDashed( str ) {
+  return str.replace( /(.)([A-Z])/g, function( match, $1, $2 ) {
+    return $1 + '-' + $2;
+  }).toLowerCase();
+}
+
+
+function outlayerDefinition( eventie, docReady, EventEmitter, getSize, matchesSelector, Item ) {
+
+// -------------------------- Outlayer -------------------------- //
+
+// globally unique identifiers
+var GUID = 0;
+// internal store of all Outlayer intances
+var instances = {};
+
+
+/**
+ * @param {Element, String} element
+ * @param {Object} options
+ * @constructor
+ */
+function Outlayer( element, options ) {
+  // use element as selector string
+  if ( typeof element === 'string' ) {
+    element = document.querySelector( element );
+  }
+
+  // bail out if not proper element
+  if ( !element || !isElement( element ) ) {
+    if ( console ) {
+      console.error( 'Bad ' + this.constructor.namespace + ' element: ' + element );
     }
-    step = arguments[2] || 1;
+    return;
+  }
 
-    var length = Math.max(Math.ceil((stop - start) / step), 0);
-    var idx = 0;
-    var range = new Array(length);
+  this.element = element;
 
-    while(idx < length) {
-      range[idx++] = start;
-      start += step;
+  // options
+  this.options = extend( {}, this.constructor.defaults );
+  this.option( options );
+
+  // add id for Outlayer.getFromElement
+  var id = ++GUID;
+  this.element.outlayerGUID = id; // expando
+  instances[ id ] = this; // associate via id
+
+  // kick it off
+  this._create();
+
+  if ( this.options.isInitLayout ) {
+    this.layout();
+  }
+}
+
+// settings are for internal use only
+Outlayer.namespace = 'outlayer';
+Outlayer.Item = Item;
+
+// default options
+Outlayer.defaults = {
+  containerStyle: {
+    position: 'relative'
+  },
+  isInitLayout: true,
+  isOriginLeft: true,
+  isOriginTop: true,
+  isResizeBound: true,
+  isResizingContainer: true,
+  // item options
+  transitionDuration: '0.4s',
+  hiddenStyle: {
+    opacity: 0,
+    transform: 'scale(0.001)'
+  },
+  visibleStyle: {
+    opacity: 1,
+    transform: 'scale(1)'
+  }
+};
+
+// inherit EventEmitter
+extend( Outlayer.prototype, EventEmitter.prototype );
+
+/**
+ * set options
+ * @param {Object} opts
+ */
+Outlayer.prototype.option = function( opts ) {
+  extend( this.options, opts );
+};
+
+Outlayer.prototype._create = function() {
+  // get items from children
+  this.reloadItems();
+  // elements that affect layout, but are not laid out
+  this.stamps = [];
+  this.stamp( this.options.stamp );
+  // set container style
+  extend( this.element.style, this.options.containerStyle );
+
+  // bind resize method
+  if ( this.options.isResizeBound ) {
+    this.bindResize();
+  }
+};
+
+// goes through all children again and gets bricks in proper order
+Outlayer.prototype.reloadItems = function() {
+  // collection of item elements
+  this.items = this._itemize( this.element.children );
+};
+
+
+/**
+ * turn elements into Outlayer.Items to be used in layout
+ * @param {Array or NodeList or HTMLElement} elems
+ * @returns {Array} items - collection of new Outlayer Items
+ */
+Outlayer.prototype._itemize = function( elems ) {
+
+  var itemElems = this._filterFindItemElements( elems );
+  var Item = this.constructor.Item;
+
+  // create new Outlayer Items for collection
+  var items = [];
+  for ( var i=0, len = itemElems.length; i < len; i++ ) {
+    var elem = itemElems[i];
+    var item = new Item( elem, this );
+    items.push( item );
+  }
+
+  return items;
+};
+
+/**
+ * get item elements to be used in layout
+ * @param {Array or NodeList or HTMLElement} elems
+ * @returns {Array} items - item elements
+ */
+Outlayer.prototype._filterFindItemElements = function( elems ) {
+  // make array of elems
+  elems = makeArray( elems );
+  var itemSelector = this.options.itemSelector;
+  var itemElems = [];
+
+  for ( var i=0, len = elems.length; i < len; i++ ) {
+    var elem = elems[i];
+    // check that elem is an actual element
+    if ( !isElement( elem ) ) {
+      continue;
     }
-
-    return range;
-  };
-
-  // Function (ahem) Functions
-  // ------------------
-
-  // Reusable constructor function for prototype setting.
-  var ctor = function(){};
-
-  // Create a function bound to a given object (assigning `this`, and arguments,
-  // optionally). Delegates to **ECMAScript 5**'s native `Function.bind` if
-  // available.
-  _.bind = function(func, context) {
-    var args, bound;
-    if (nativeBind && func.bind === nativeBind) return nativeBind.apply(func, slice.call(arguments, 1));
-    if (!_.isFunction(func)) throw new TypeError;
-    args = slice.call(arguments, 2);
-    return bound = function() {
-      if (!(this instanceof bound)) return func.apply(context, args.concat(slice.call(arguments)));
-      ctor.prototype = func.prototype;
-      var self = new ctor;
-      ctor.prototype = null;
-      var result = func.apply(self, args.concat(slice.call(arguments)));
-      if (Object(result) === result) return result;
-      return self;
-    };
-  };
-
-  // Partially apply a function by creating a version that has had some of its
-  // arguments pre-filled, without changing its dynamic `this` context. _ acts
-  // as a placeholder, allowing any combination of arguments to be pre-filled.
-  _.partial = function(func) {
-    var boundArgs = slice.call(arguments, 1);
-    return function() {
-      var position = 0;
-      var args = boundArgs.slice();
-      for (var i = 0, length = args.length; i < length; i++) {
-        if (args[i] === _) args[i] = arguments[position++];
+    // filter & find items if we have an item selector
+    if ( itemSelector ) {
+      // filter siblings
+      if ( matchesSelector( elem, itemSelector ) ) {
+        itemElems.push( elem );
       }
-      while (position < arguments.length) args.push(arguments[position++]);
-      return func.apply(this, args);
-    };
-  };
-
-  // Bind a number of an object's methods to that object. Remaining arguments
-  // are the method names to be bound. Useful for ensuring that all callbacks
-  // defined on an object belong to it.
-  _.bindAll = function(obj) {
-    var funcs = slice.call(arguments, 1);
-    if (funcs.length === 0) throw new Error('bindAll must be passed function names');
-    each(funcs, function(f) { obj[f] = _.bind(obj[f], obj); });
-    return obj;
-  };
-
-  // Memoize an expensive function by storing its results.
-  _.memoize = function(func, hasher) {
-    var memo = {};
-    hasher || (hasher = _.identity);
-    return function() {
-      var key = hasher.apply(this, arguments);
-      return _.has(memo, key) ? memo[key] : (memo[key] = func.apply(this, arguments));
-    };
-  };
-
-  // Delays a function for the given number of milliseconds, and then calls
-  // it with the arguments supplied.
-  _.delay = function(func, wait) {
-    var args = slice.call(arguments, 2);
-    return setTimeout(function(){ return func.apply(null, args); }, wait);
-  };
-
-  // Defers a function, scheduling it to run after the current call stack has
-  // cleared.
-  _.defer = function(func) {
-    return _.delay.apply(_, [func, 1].concat(slice.call(arguments, 1)));
-  };
-
-  // Returns a function, that, when invoked, will only be triggered at most once
-  // during a given window of time. Normally, the throttled function will run
-  // as much as it can, without ever going more than once per `wait` duration;
-  // but if you'd like to disable the execution on the leading edge, pass
-  // `{leading: false}`. To disable execution on the trailing edge, ditto.
-  _.throttle = function(func, wait, options) {
-    var context, args, result;
-    var timeout = null;
-    var previous = 0;
-    options || (options = {});
-    var later = function() {
-      previous = options.leading === false ? 0 : _.now();
-      timeout = null;
-      result = func.apply(context, args);
-      context = args = null;
-    };
-    return function() {
-      var now = _.now();
-      if (!previous && options.leading === false) previous = now;
-      var remaining = wait - (now - previous);
-      context = this;
-      args = arguments;
-      if (remaining <= 0) {
-        clearTimeout(timeout);
-        timeout = null;
-        previous = now;
-        result = func.apply(context, args);
-        context = args = null;
-      } else if (!timeout && options.trailing !== false) {
-        timeout = setTimeout(later, remaining);
-      }
-      return result;
-    };
-  };
-
-  // Returns a function, that, as long as it continues to be invoked, will not
-  // be triggered. The function will be called after it stops being called for
-  // N milliseconds. If `immediate` is passed, trigger the function on the
-  // leading edge, instead of the trailing.
-  _.debounce = function(func, wait, immediate) {
-    var timeout, args, context, timestamp, result;
-
-    var later = function() {
-      var last = _.now() - timestamp;
-      if (last < wait) {
-        timeout = setTimeout(later, wait - last);
-      } else {
-        timeout = null;
-        if (!immediate) {
-          result = func.apply(context, args);
-          context = args = null;
-        }
-      }
-    };
-
-    return function() {
-      context = this;
-      args = arguments;
-      timestamp = _.now();
-      var callNow = immediate && !timeout;
-      if (!timeout) {
-        timeout = setTimeout(later, wait);
-      }
-      if (callNow) {
-        result = func.apply(context, args);
-        context = args = null;
-      }
-
-      return result;
-    };
-  };
-
-  // Returns a function that will be executed at most one time, no matter how
-  // often you call it. Useful for lazy initialization.
-  _.once = function(func) {
-    var ran = false, memo;
-    return function() {
-      if (ran) return memo;
-      ran = true;
-      memo = func.apply(this, arguments);
-      func = null;
-      return memo;
-    };
-  };
-
-  // Returns the first function passed as an argument to the second,
-  // allowing you to adjust arguments, run code before and after, and
-  // conditionally execute the original function.
-  _.wrap = function(func, wrapper) {
-    return _.partial(wrapper, func);
-  };
-
-  // Returns a function that is the composition of a list of functions, each
-  // consuming the return value of the function that follows.
-  _.compose = function() {
-    var funcs = arguments;
-    return function() {
-      var args = arguments;
-      for (var i = funcs.length - 1; i >= 0; i--) {
-        args = [funcs[i].apply(this, args)];
-      }
-      return args[0];
-    };
-  };
-
-  // Returns a function that will only be executed after being called N times.
-  _.after = function(times, func) {
-    return function() {
-      if (--times < 1) {
-        return func.apply(this, arguments);
-      }
-    };
-  };
-
-  // Object Functions
-  // ----------------
-
-  // Retrieve the names of an object's properties.
-  // Delegates to **ECMAScript 5**'s native `Object.keys`
-  _.keys = function(obj) {
-    if (!_.isObject(obj)) return [];
-    if (nativeKeys) return nativeKeys(obj);
-    var keys = [];
-    for (var key in obj) if (_.has(obj, key)) keys.push(key);
-    return keys;
-  };
-
-  // Retrieve the values of an object's properties.
-  _.values = function(obj) {
-    var keys = _.keys(obj);
-    var length = keys.length;
-    var values = new Array(length);
-    for (var i = 0; i < length; i++) {
-      values[i] = obj[keys[i]];
-    }
-    return values;
-  };
-
-  // Convert an object into a list of `[key, value]` pairs.
-  _.pairs = function(obj) {
-    var keys = _.keys(obj);
-    var length = keys.length;
-    var pairs = new Array(length);
-    for (var i = 0; i < length; i++) {
-      pairs[i] = [keys[i], obj[keys[i]]];
-    }
-    return pairs;
-  };
-
-  // Invert the keys and values of an object. The values must be serializable.
-  _.invert = function(obj) {
-    var result = {};
-    var keys = _.keys(obj);
-    for (var i = 0, length = keys.length; i < length; i++) {
-      result[obj[keys[i]]] = keys[i];
-    }
-    return result;
-  };
-
-  // Return a sorted list of the function names available on the object.
-  // Aliased as `methods`
-  _.functions = _.methods = function(obj) {
-    var names = [];
-    for (var key in obj) {
-      if (_.isFunction(obj[key])) names.push(key);
-    }
-    return names.sort();
-  };
-
-  // Extend a given object with all the properties in passed-in object(s).
-  _.extend = function(obj) {
-    each(slice.call(arguments, 1), function(source) {
-      if (source) {
-        for (var prop in source) {
-          obj[prop] = source[prop];
-        }
-      }
-    });
-    return obj;
-  };
-
-  // Return a copy of the object only containing the whitelisted properties.
-  _.pick = function(obj) {
-    var copy = {};
-    var keys = concat.apply(ArrayProto, slice.call(arguments, 1));
-    each(keys, function(key) {
-      if (key in obj) copy[key] = obj[key];
-    });
-    return copy;
-  };
-
-   // Return a copy of the object without the blacklisted properties.
-  _.omit = function(obj) {
-    var copy = {};
-    var keys = concat.apply(ArrayProto, slice.call(arguments, 1));
-    for (var key in obj) {
-      if (!_.contains(keys, key)) copy[key] = obj[key];
-    }
-    return copy;
-  };
-
-  // Fill in a given object with default properties.
-  _.defaults = function(obj) {
-    each(slice.call(arguments, 1), function(source) {
-      if (source) {
-        for (var prop in source) {
-          if (obj[prop] === void 0) obj[prop] = source[prop];
-        }
-      }
-    });
-    return obj;
-  };
-
-  // Create a (shallow-cloned) duplicate of an object.
-  _.clone = function(obj) {
-    if (!_.isObject(obj)) return obj;
-    return _.isArray(obj) ? obj.slice() : _.extend({}, obj);
-  };
-
-  // Invokes interceptor with the obj, and then returns obj.
-  // The primary purpose of this method is to "tap into" a method chain, in
-  // order to perform operations on intermediate results within the chain.
-  _.tap = function(obj, interceptor) {
-    interceptor(obj);
-    return obj;
-  };
-
-  // Internal recursive comparison function for `isEqual`.
-  var eq = function(a, b, aStack, bStack) {
-    // Identical objects are equal. `0 === -0`, but they aren't identical.
-    // See the [Harmony `egal` proposal](http://wiki.ecmascript.org/doku.php?id=harmony:egal).
-    if (a === b) return a !== 0 || 1 / a == 1 / b;
-    // A strict comparison is necessary because `null == undefined`.
-    if (a == null || b == null) return a === b;
-    // Unwrap any wrapped objects.
-    if (a instanceof _) a = a._wrapped;
-    if (b instanceof _) b = b._wrapped;
-    // Compare `[[Class]]` names.
-    var className = toString.call(a);
-    if (className != toString.call(b)) return false;
-    switch (className) {
-      // Strings, numbers, dates, and booleans are compared by value.
-      case '[object String]':
-        // Primitives and their corresponding object wrappers are equivalent; thus, `"5"` is
-        // equivalent to `new String("5")`.
-        return a == String(b);
-      case '[object Number]':
-        // `NaN`s are equivalent, but non-reflexive. An `egal` comparison is performed for
-        // other numeric values.
-        return a != +a ? b != +b : (a == 0 ? 1 / a == 1 / b : a == +b);
-      case '[object Date]':
-      case '[object Boolean]':
-        // Coerce dates and booleans to numeric primitive values. Dates are compared by their
-        // millisecond representations. Note that invalid dates with millisecond representations
-        // of `NaN` are not equivalent.
-        return +a == +b;
-      // RegExps are compared by their source patterns and flags.
-      case '[object RegExp]':
-        return a.source == b.source &&
-               a.global == b.global &&
-               a.multiline == b.multiline &&
-               a.ignoreCase == b.ignoreCase;
-    }
-    if (typeof a != 'object' || typeof b != 'object') return false;
-    // Assume equality for cyclic structures. The algorithm for detecting cyclic
-    // structures is adapted from ES 5.1 section 15.12.3, abstract operation `JO`.
-    var length = aStack.length;
-    while (length--) {
-      // Linear search. Performance is inversely proportional to the number of
-      // unique nested structures.
-      if (aStack[length] == a) return bStack[length] == b;
-    }
-    // Objects with different constructors are not equivalent, but `Object`s
-    // from different frames are.
-    var aCtor = a.constructor, bCtor = b.constructor;
-    if (aCtor !== bCtor && !(_.isFunction(aCtor) && (aCtor instanceof aCtor) &&
-                             _.isFunction(bCtor) && (bCtor instanceof bCtor))
-                        && ('constructor' in a && 'constructor' in b)) {
-      return false;
-    }
-    // Add the first object to the stack of traversed objects.
-    aStack.push(a);
-    bStack.push(b);
-    var size = 0, result = true;
-    // Recursively compare objects and arrays.
-    if (className == '[object Array]') {
-      // Compare array lengths to determine if a deep comparison is necessary.
-      size = a.length;
-      result = size == b.length;
-      if (result) {
-        // Deep compare the contents, ignoring non-numeric properties.
-        while (size--) {
-          if (!(result = eq(a[size], b[size], aStack, bStack))) break;
-        }
+      // find children
+      var childElems = elem.querySelectorAll( itemSelector );
+      // concat childElems to filterFound array
+      for ( var j=0, jLen = childElems.length; j < jLen; j++ ) {
+        itemElems.push( childElems[j] );
       }
     } else {
-      // Deep compare objects.
-      for (var key in a) {
-        if (_.has(a, key)) {
-          // Count the expected number of properties.
-          size++;
-          // Deep compare each member.
-          if (!(result = _.has(b, key) && eq(a[key], b[key], aStack, bStack))) break;
+      itemElems.push( elem );
+    }
+  }
+
+  return itemElems;
+};
+
+/**
+ * getter method for getting item elements
+ * @returns {Array} elems - collection of item elements
+ */
+Outlayer.prototype.getItemElements = function() {
+  var elems = [];
+  for ( var i=0, len = this.items.length; i < len; i++ ) {
+    elems.push( this.items[i].element );
+  }
+  return elems;
+};
+
+// ----- init & layout ----- //
+
+/**
+ * lays out all items
+ */
+Outlayer.prototype.layout = function() {
+  this._resetLayout();
+  this._manageStamps();
+
+  // don't animate first layout
+  var isInstant = this.options.isLayoutInstant !== undefined ?
+    this.options.isLayoutInstant : !this._isLayoutInited;
+  this.layoutItems( this.items, isInstant );
+
+  // flag for initalized
+  this._isLayoutInited = true;
+};
+
+// _init is alias for layout
+Outlayer.prototype._init = Outlayer.prototype.layout;
+
+/**
+ * logic before any new layout
+ */
+Outlayer.prototype._resetLayout = function() {
+  this.getSize();
+};
+
+
+Outlayer.prototype.getSize = function() {
+  this.size = getSize( this.element );
+};
+
+/**
+ * get measurement from option, for columnWidth, rowHeight, gutter
+ * if option is String -> get element from selector string, & get size of element
+ * if option is Element -> get size of element
+ * else use option as a number
+ *
+ * @param {String} measurement
+ * @param {String} size - width or height
+ * @private
+ */
+Outlayer.prototype._getMeasurement = function( measurement, size ) {
+  var option = this.options[ measurement ];
+  var elem;
+  if ( !option ) {
+    // default to 0
+    this[ measurement ] = 0;
+  } else {
+    // use option as an element
+    if ( typeof option === 'string' ) {
+      elem = this.element.querySelector( option );
+    } else if ( isElement( option ) ) {
+      elem = option;
+    }
+    // use size of element, if element
+    this[ measurement ] = elem ? getSize( elem )[ size ] : option;
+  }
+};
+
+/**
+ * layout a collection of item elements
+ * @api public
+ */
+Outlayer.prototype.layoutItems = function( items, isInstant ) {
+  items = this._getItemsForLayout( items );
+
+  this._layoutItems( items, isInstant );
+
+  this._postLayout();
+};
+
+/**
+ * get the items to be laid out
+ * you may want to skip over some items
+ * @param {Array} items
+ * @returns {Array} items
+ */
+Outlayer.prototype._getItemsForLayout = function( items ) {
+  var layoutItems = [];
+  for ( var i=0, len = items.length; i < len; i++ ) {
+    var item = items[i];
+    if ( !item.isIgnored ) {
+      layoutItems.push( item );
+    }
+  }
+  return layoutItems;
+};
+
+/**
+ * layout items
+ * @param {Array} items
+ * @param {Boolean} isInstant
+ */
+Outlayer.prototype._layoutItems = function( items, isInstant ) {
+  var _this = this;
+  function onItemsLayout() {
+    _this.emitEvent( 'layoutComplete', [ _this, items ] );
+  }
+
+  if ( !items || !items.length ) {
+    // no items, emit event with empty array
+    onItemsLayout();
+    return;
+  }
+
+  // emit layoutComplete when done
+  this._itemsOn( items, 'layout', onItemsLayout );
+
+  var queue = [];
+
+  for ( var i=0, len = items.length; i < len; i++ ) {
+    var item = items[i];
+    // get x/y object from method
+    var position = this._getItemLayoutPosition( item );
+    // enqueue
+    position.item = item;
+    position.isInstant = isInstant || item.isLayoutInstant;
+    queue.push( position );
+  }
+
+  this._processLayoutQueue( queue );
+};
+
+/**
+ * get item layout position
+ * @param {Outlayer.Item} item
+ * @returns {Object} x and y position
+ */
+Outlayer.prototype._getItemLayoutPosition = function( /* item */ ) {
+  return {
+    x: 0,
+    y: 0
+  };
+};
+
+/**
+ * iterate over array and position each item
+ * Reason being - separating this logic prevents 'layout invalidation'
+ * thx @paul_irish
+ * @param {Array} queue
+ */
+Outlayer.prototype._processLayoutQueue = function( queue ) {
+  for ( var i=0, len = queue.length; i < len; i++ ) {
+    var obj = queue[i];
+    this._positionItem( obj.item, obj.x, obj.y, obj.isInstant );
+  }
+};
+
+/**
+ * Sets position of item in DOM
+ * @param {Outlayer.Item} item
+ * @param {Number} x - horizontal position
+ * @param {Number} y - vertical position
+ * @param {Boolean} isInstant - disables transitions
+ */
+Outlayer.prototype._positionItem = function( item, x, y, isInstant ) {
+  if ( isInstant ) {
+    // if not transition, just set CSS
+    item.goTo( x, y );
+  } else {
+    item.moveTo( x, y );
+  }
+};
+
+/**
+ * Any logic you want to do after each layout,
+ * i.e. size the container
+ */
+Outlayer.prototype._postLayout = function() {
+  this.resizeContainer();
+};
+
+Outlayer.prototype.resizeContainer = function() {
+  if ( !this.options.isResizingContainer ) {
+    return;
+  }
+  var size = this._getContainerSize();
+  if ( size ) {
+    this._setContainerMeasure( size.width, true );
+    this._setContainerMeasure( size.height, false );
+  }
+};
+
+/**
+ * Sets width or height of container if returned
+ * @returns {Object} size
+ *   @param {Number} width
+ *   @param {Number} height
+ */
+Outlayer.prototype._getContainerSize = noop;
+
+/**
+ * @param {Number} measure - size of width or height
+ * @param {Boolean} isWidth
+ */
+Outlayer.prototype._setContainerMeasure = function( measure, isWidth ) {
+  if ( measure === undefined ) {
+    return;
+  }
+
+  var elemSize = this.size;
+  // add padding and border width if border box
+  if ( elemSize.isBorderBox ) {
+    measure += isWidth ? elemSize.paddingLeft + elemSize.paddingRight +
+      elemSize.borderLeftWidth + elemSize.borderRightWidth :
+      elemSize.paddingBottom + elemSize.paddingTop +
+      elemSize.borderTopWidth + elemSize.borderBottomWidth;
+  }
+
+  measure = Math.max( measure, 0 );
+  this.element.style[ isWidth ? 'width' : 'height' ] = measure + 'px';
+};
+
+/**
+ * trigger a callback for a collection of items events
+ * @param {Array} items - Outlayer.Items
+ * @param {String} eventName
+ * @param {Function} callback
+ */
+Outlayer.prototype._itemsOn = function( items, eventName, callback ) {
+  var doneCount = 0;
+  var count = items.length;
+  // event callback
+  var _this = this;
+  function tick() {
+    doneCount++;
+    if ( doneCount === count ) {
+      callback.call( _this );
+    }
+    return true; // bind once
+  }
+  // bind callback
+  for ( var i=0, len = items.length; i < len; i++ ) {
+    var item = items[i];
+    item.on( eventName, tick );
+  }
+};
+
+// -------------------------- ignore & stamps -------------------------- //
+
+
+/**
+ * keep item in collection, but do not lay it out
+ * ignored items do not get skipped in layout
+ * @param {Element} elem
+ */
+Outlayer.prototype.ignore = function( elem ) {
+  var item = this.getItem( elem );
+  if ( item ) {
+    item.isIgnored = true;
+  }
+};
+
+/**
+ * return item to layout collection
+ * @param {Element} elem
+ */
+Outlayer.prototype.unignore = function( elem ) {
+  var item = this.getItem( elem );
+  if ( item ) {
+    delete item.isIgnored;
+  }
+};
+
+/**
+ * adds elements to stamps
+ * @param {NodeList, Array, Element, or String} elems
+ */
+Outlayer.prototype.stamp = function( elems ) {
+  elems = this._find( elems );
+  if ( !elems ) {
+    return;
+  }
+
+  this.stamps = this.stamps.concat( elems );
+  // ignore
+  for ( var i=0, len = elems.length; i < len; i++ ) {
+    var elem = elems[i];
+    this.ignore( elem );
+  }
+};
+
+/**
+ * removes elements to stamps
+ * @param {NodeList, Array, or Element} elems
+ */
+Outlayer.prototype.unstamp = function( elems ) {
+  elems = this._find( elems );
+  if ( !elems ){
+    return;
+  }
+
+  for ( var i=0, len = elems.length; i < len; i++ ) {
+    var elem = elems[i];
+    // filter out removed stamp elements
+    removeFrom( elem, this.stamps );
+    this.unignore( elem );
+  }
+
+};
+
+/**
+ * finds child elements
+ * @param {NodeList, Array, Element, or String} elems
+ * @returns {Array} elems
+ */
+Outlayer.prototype._find = function( elems ) {
+  if ( !elems ) {
+    return;
+  }
+  // if string, use argument as selector string
+  if ( typeof elems === 'string' ) {
+    elems = this.element.querySelectorAll( elems );
+  }
+  elems = makeArray( elems );
+  return elems;
+};
+
+Outlayer.prototype._manageStamps = function() {
+  if ( !this.stamps || !this.stamps.length ) {
+    return;
+  }
+
+  this._getBoundingRect();
+
+  for ( var i=0, len = this.stamps.length; i < len; i++ ) {
+    var stamp = this.stamps[i];
+    this._manageStamp( stamp );
+  }
+};
+
+// update boundingLeft / Top
+Outlayer.prototype._getBoundingRect = function() {
+  // get bounding rect for container element
+  var boundingRect = this.element.getBoundingClientRect();
+  var size = this.size;
+  this._boundingRect = {
+    left: boundingRect.left + size.paddingLeft + size.borderLeftWidth,
+    top: boundingRect.top + size.paddingTop + size.borderTopWidth,
+    right: boundingRect.right - ( size.paddingRight + size.borderRightWidth ),
+    bottom: boundingRect.bottom - ( size.paddingBottom + size.borderBottomWidth )
+  };
+};
+
+/**
+ * @param {Element} stamp
+**/
+Outlayer.prototype._manageStamp = noop;
+
+/**
+ * get x/y position of element relative to container element
+ * @param {Element} elem
+ * @returns {Object} offset - has left, top, right, bottom
+ */
+Outlayer.prototype._getElementOffset = function( elem ) {
+  var boundingRect = elem.getBoundingClientRect();
+  var thisRect = this._boundingRect;
+  var size = getSize( elem );
+  var offset = {
+    left: boundingRect.left - thisRect.left - size.marginLeft,
+    top: boundingRect.top - thisRect.top - size.marginTop,
+    right: thisRect.right - boundingRect.right - size.marginRight,
+    bottom: thisRect.bottom - boundingRect.bottom - size.marginBottom
+  };
+  return offset;
+};
+
+// -------------------------- resize -------------------------- //
+
+// enable event handlers for listeners
+// i.e. resize -> onresize
+Outlayer.prototype.handleEvent = function( event ) {
+  var method = 'on' + event.type;
+  if ( this[ method ] ) {
+    this[ method ]( event );
+  }
+};
+
+/**
+ * Bind layout to window resizing
+ */
+Outlayer.prototype.bindResize = function() {
+  // bind just one listener
+  if ( this.isResizeBound ) {
+    return;
+  }
+  eventie.bind( window, 'resize', this );
+  this.isResizeBound = true;
+};
+
+/**
+ * Unbind layout to window resizing
+ */
+Outlayer.prototype.unbindResize = function() {
+  if ( this.isResizeBound ) {
+    eventie.unbind( window, 'resize', this );
+  }
+  this.isResizeBound = false;
+};
+
+// original debounce by John Hann
+// http://unscriptable.com/index.php/2009/03/20/debouncing-javascript-methods/
+
+// this fires every resize
+Outlayer.prototype.onresize = function() {
+  if ( this.resizeTimeout ) {
+    clearTimeout( this.resizeTimeout );
+  }
+
+  var _this = this;
+  function delayed() {
+    _this.resize();
+    delete _this.resizeTimeout;
+  }
+
+  this.resizeTimeout = setTimeout( delayed, 100 );
+};
+
+// debounced, layout on resize
+Outlayer.prototype.resize = function() {
+  // don't trigger if size did not change
+  // or if resize was unbound. See #9
+  if ( !this.isResizeBound || !this.needsResizeLayout() ) {
+    return;
+  }
+
+  this.layout();
+};
+
+/**
+ * check if layout is needed post layout
+ * @returns Boolean
+ */
+Outlayer.prototype.needsResizeLayout = function() {
+  var size = getSize( this.element );
+  // check that this.size and size are there
+  // IE8 triggers resize on body size change, so they might not be
+  var hasSizes = this.size && size;
+  return hasSizes && size.innerWidth !== this.size.innerWidth;
+};
+
+// -------------------------- methods -------------------------- //
+
+/**
+ * add items to Outlayer instance
+ * @param {Array or NodeList or Element} elems
+ * @returns {Array} items - Outlayer.Items
+**/
+Outlayer.prototype.addItems = function( elems ) {
+  var items = this._itemize( elems );
+  // add items to collection
+  if ( items.length ) {
+    this.items = this.items.concat( items );
+  }
+  return items;
+};
+
+/**
+ * Layout newly-appended item elements
+ * @param {Array or NodeList or Element} elems
+ */
+Outlayer.prototype.appended = function( elems ) {
+  var items = this.addItems( elems );
+  if ( !items.length ) {
+    return;
+  }
+  // layout and reveal just the new items
+  this.layoutItems( items, true );
+  this.reveal( items );
+};
+
+/**
+ * Layout prepended elements
+ * @param {Array or NodeList or Element} elems
+ */
+Outlayer.prototype.prepended = function( elems ) {
+  var items = this._itemize( elems );
+  if ( !items.length ) {
+    return;
+  }
+  // add items to beginning of collection
+  var previousItems = this.items.slice(0);
+  this.items = items.concat( previousItems );
+  // start new layout
+  this._resetLayout();
+  this._manageStamps();
+  // layout new stuff without transition
+  this.layoutItems( items, true );
+  this.reveal( items );
+  // layout previous items
+  this.layoutItems( previousItems );
+};
+
+/**
+ * reveal a collection of items
+ * @param {Array of Outlayer.Items} items
+ */
+Outlayer.prototype.reveal = function( items ) {
+  var len = items && items.length;
+  if ( !len ) {
+    return;
+  }
+  for ( var i=0; i < len; i++ ) {
+    var item = items[i];
+    item.reveal();
+  }
+};
+
+/**
+ * hide a collection of items
+ * @param {Array of Outlayer.Items} items
+ */
+Outlayer.prototype.hide = function( items ) {
+  var len = items && items.length;
+  if ( !len ) {
+    return;
+  }
+  for ( var i=0; i < len; i++ ) {
+    var item = items[i];
+    item.hide();
+  }
+};
+
+/**
+ * get Outlayer.Item, given an Element
+ * @param {Element} elem
+ * @param {Function} callback
+ * @returns {Outlayer.Item} item
+ */
+Outlayer.prototype.getItem = function( elem ) {
+  // loop through items to get the one that matches
+  for ( var i=0, len = this.items.length; i < len; i++ ) {
+    var item = this.items[i];
+    if ( item.element === elem ) {
+      // return item
+      return item;
+    }
+  }
+};
+
+/**
+ * get collection of Outlayer.Items, given Elements
+ * @param {Array} elems
+ * @returns {Array} items - Outlayer.Items
+ */
+Outlayer.prototype.getItems = function( elems ) {
+  if ( !elems || !elems.length ) {
+    return;
+  }
+  var items = [];
+  for ( var i=0, len = elems.length; i < len; i++ ) {
+    var elem = elems[i];
+    var item = this.getItem( elem );
+    if ( item ) {
+      items.push( item );
+    }
+  }
+
+  return items;
+};
+
+/**
+ * remove element(s) from instance and DOM
+ * @param {Array or NodeList or Element} elems
+ */
+Outlayer.prototype.remove = function( elems ) {
+  elems = makeArray( elems );
+
+  var removeItems = this.getItems( elems );
+  // bail if no items to remove
+  if ( !removeItems || !removeItems.length ) {
+    return;
+  }
+
+  this._itemsOn( removeItems, 'remove', function() {
+    this.emitEvent( 'removeComplete', [ this, removeItems ] );
+  });
+
+  for ( var i=0, len = removeItems.length; i < len; i++ ) {
+    var item = removeItems[i];
+    item.remove();
+    // remove item from collection
+    removeFrom( item, this.items );
+  }
+};
+
+// ----- destroy ----- //
+
+// remove and disable Outlayer instance
+Outlayer.prototype.destroy = function() {
+  // clean up dynamic styles
+  var style = this.element.style;
+  style.height = '';
+  style.position = '';
+  style.width = '';
+  // destroy items
+  for ( var i=0, len = this.items.length; i < len; i++ ) {
+    var item = this.items[i];
+    item.destroy();
+  }
+
+  this.unbindResize();
+
+  var id = this.element.outlayerGUID;
+  delete instances[ id ]; // remove reference to instance by id
+  delete this.element.outlayerGUID;
+  // remove data for jQuery
+  if ( jQuery ) {
+    jQuery.removeData( this.element, this.constructor.namespace );
+  }
+
+};
+
+// -------------------------- data -------------------------- //
+
+/**
+ * get Outlayer instance from element
+ * @param {Element} elem
+ * @returns {Outlayer}
+ */
+Outlayer.data = function( elem ) {
+  var id = elem && elem.outlayerGUID;
+  return id && instances[ id ];
+};
+
+
+// -------------------------- create Outlayer class -------------------------- //
+
+/**
+ * create a layout class
+ * @param {String} namespace
+ */
+Outlayer.create = function( namespace, options ) {
+  // sub-class Outlayer
+  function Layout() {
+    Outlayer.apply( this, arguments );
+  }
+  // inherit Outlayer prototype, use Object.create if there
+  if ( Object.create ) {
+    Layout.prototype = Object.create( Outlayer.prototype );
+  } else {
+    extend( Layout.prototype, Outlayer.prototype );
+  }
+  // set contructor, used for namespace and Item
+  Layout.prototype.constructor = Layout;
+
+  Layout.defaults = extend( {}, Outlayer.defaults );
+  // apply new options
+  extend( Layout.defaults, options );
+  // keep prototype.settings for backwards compatibility (Packery v1.2.0)
+  Layout.prototype.settings = {};
+
+  Layout.namespace = namespace;
+
+  Layout.data = Outlayer.data;
+
+  // sub-class Item
+  Layout.Item = function LayoutItem() {
+    Item.apply( this, arguments );
+  };
+
+  Layout.Item.prototype = new Item();
+
+  // -------------------------- declarative -------------------------- //
+
+  /**
+   * allow user to initialize Outlayer via .js-namespace class
+   * options are parsed from data-namespace-option attribute
+   */
+  docReady( function() {
+    var dashedNamespace = toDashed( namespace );
+    var elems = document.querySelectorAll( '.js-' + dashedNamespace );
+    var dataAttr = 'data-' + dashedNamespace + '-options';
+
+    for ( var i=0, len = elems.length; i < len; i++ ) {
+      var elem = elems[i];
+      var attr = elem.getAttribute( dataAttr );
+      var options;
+      try {
+        options = attr && JSON.parse( attr );
+      } catch ( error ) {
+        // log error, do not initialize
+        if ( console ) {
+          console.error( 'Error parsing ' + dataAttr + ' on ' +
+            elem.nodeName.toLowerCase() + ( elem.id ? '#' + elem.id : '' ) + ': ' +
+            error );
         }
+        continue;
       }
-      // Ensure that both objects contain the same number of properties.
-      if (result) {
-        for (key in b) {
-          if (_.has(b, key) && !(size--)) break;
-        }
-        result = !size;
+      // initialize
+      var instance = new Layout( elem, options );
+      // make available via $().data('layoutname')
+      if ( jQuery ) {
+        jQuery.data( elem, namespace, instance );
       }
     }
-    // Remove the first object from the stack of traversed objects.
-    aStack.pop();
-    bStack.pop();
-    return result;
-  };
-
-  // Perform a deep comparison to check if two objects are equal.
-  _.isEqual = function(a, b) {
-    return eq(a, b, [], []);
-  };
-
-  // Is a given array, string, or object empty?
-  // An "empty" object has no enumerable own-properties.
-  _.isEmpty = function(obj) {
-    if (obj == null) return true;
-    if (_.isArray(obj) || _.isString(obj)) return obj.length === 0;
-    for (var key in obj) if (_.has(obj, key)) return false;
-    return true;
-  };
-
-  // Is a given value a DOM element?
-  _.isElement = function(obj) {
-    return !!(obj && obj.nodeType === 1);
-  };
-
-  // Is a given value an array?
-  // Delegates to ECMA5's native Array.isArray
-  _.isArray = nativeIsArray || function(obj) {
-    return toString.call(obj) == '[object Array]';
-  };
-
-  // Is a given variable an object?
-  _.isObject = function(obj) {
-    return obj === Object(obj);
-  };
-
-  // Add some isType methods: isArguments, isFunction, isString, isNumber, isDate, isRegExp.
-  each(['Arguments', 'Function', 'String', 'Number', 'Date', 'RegExp'], function(name) {
-    _['is' + name] = function(obj) {
-      return toString.call(obj) == '[object ' + name + ']';
-    };
   });
 
-  // Define a fallback version of the method in browsers (ahem, IE), where
-  // there isn't any inspectable "Arguments" type.
-  if (!_.isArguments(arguments)) {
-    _.isArguments = function(obj) {
-      return !!(obj && _.has(obj, 'callee'));
-    };
+  // -------------------------- jQuery bridge -------------------------- //
+
+  // make into jQuery plugin
+  if ( jQuery && jQuery.bridget ) {
+    jQuery.bridget( namespace, Layout );
   }
 
-  // Optimize `isFunction` if appropriate.
-  if (typeof (/./) !== 'function') {
-    _.isFunction = function(obj) {
-      return typeof obj === 'function';
-    };
-  }
+  return Layout;
+};
 
-  // Is a given object a finite number?
-  _.isFinite = function(obj) {
-    return isFinite(obj) && !isNaN(parseFloat(obj));
-  };
+// ----- fin ----- //
 
-  // Is the given value `NaN`? (NaN is the only number which does not equal itself).
-  _.isNaN = function(obj) {
-    return _.isNumber(obj) && obj != +obj;
-  };
+// back in global
+Outlayer.Item = Item;
 
-  // Is a given value a boolean?
-  _.isBoolean = function(obj) {
-    return obj === true || obj === false || toString.call(obj) == '[object Boolean]';
-  };
+return Outlayer;
 
-  // Is a given value equal to null?
-  _.isNull = function(obj) {
-    return obj === null;
-  };
+}
 
-  // Is a given variable undefined?
-  _.isUndefined = function(obj) {
-    return obj === void 0;
-  };
+// -------------------------- transport -------------------------- //
 
-  // Shortcut function for checking if an object has a given property directly
-  // on itself (in other words, not on a prototype).
-  _.has = function(obj, key) {
-    return hasOwnProperty.call(obj, key);
-  };
+if ( typeof define === 'function' && define.amd ) {
+  // AMD
+  define( [
+      'eventie/eventie',
+      'doc-ready/doc-ready',
+      'eventEmitter/EventEmitter',
+      'get-size/get-size',
+      'matches-selector/matches-selector',
+      './item'
+    ],
+    outlayerDefinition );
+} else if ( typeof exports === 'object' ) {
+  // CommonJS
+  module.exports = outlayerDefinition(
+    require('eventie'),
+    require('doc-ready'),
+    require('wolfy87-eventemitter'),
+    require('get-size'),
+    require('desandro-matches-selector'),
+    require('./item')
+  );
+} else {
+  // browser global
+  window.Outlayer = outlayerDefinition(
+    window.eventie,
+    window.docReady,
+    window.EventEmitter,
+    window.getSize,
+    window.matchesSelector,
+    window.Outlayer.Item
+  );
+}
 
-  // Utility Functions
-  // -----------------
+})( window );
 
-  // Run Underscore.js in *noConflict* mode, returning the `_` variable to its
-  // previous owner. Returns a reference to the Underscore object.
-  _.noConflict = function() {
-    root._ = previousUnderscore;
-    return this;
-  };
-
-  // Keep the identity function around for default iterators.
-  _.identity = function(value) {
-    return value;
-  };
-
-  _.constant = function(value) {
-    return function () {
-      return value;
-    };
-  };
-
-  _.property = function(key) {
-    return function(obj) {
-      return obj[key];
-    };
-  };
-
-  // Returns a predicate for checking whether an object has a given set of `key:value` pairs.
-  _.matches = function(attrs) {
-    return function(obj) {
-      if (obj === attrs) return true; //avoid comparing an object to itself.
-      for (var key in attrs) {
-        if (attrs[key] !== obj[key])
-          return false;
-      }
-      return true;
-    }
-  };
-
-  // Run a function **n** times.
-  _.times = function(n, iterator, context) {
-    var accum = Array(Math.max(0, n));
-    for (var i = 0; i < n; i++) accum[i] = iterator.call(context, i);
-    return accum;
-  };
-
-  // Return a random integer between min and max (inclusive).
-  _.random = function(min, max) {
-    if (max == null) {
-      max = min;
-      min = 0;
-    }
-    return min + Math.floor(Math.random() * (max - min + 1));
-  };
-
-  // A (possibly faster) way to get the current timestamp as an integer.
-  _.now = Date.now || function() { return new Date().getTime(); };
-
-  // List of HTML entities for escaping.
-  var entityMap = {
-    escape: {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#x27;'
-    }
-  };
-  entityMap.unescape = _.invert(entityMap.escape);
-
-  // Regexes containing the keys and values listed immediately above.
-  var entityRegexes = {
-    escape:   new RegExp('[' + _.keys(entityMap.escape).join('') + ']', 'g'),
-    unescape: new RegExp('(' + _.keys(entityMap.unescape).join('|') + ')', 'g')
-  };
-
-  // Functions for escaping and unescaping strings to/from HTML interpolation.
-  _.each(['escape', 'unescape'], function(method) {
-    _[method] = function(string) {
-      if (string == null) return '';
-      return ('' + string).replace(entityRegexes[method], function(match) {
-        return entityMap[method][match];
-      });
-    };
-  });
-
-  // If the value of the named `property` is a function then invoke it with the
-  // `object` as context; otherwise, return it.
-  _.result = function(object, property) {
-    if (object == null) return void 0;
-    var value = object[property];
-    return _.isFunction(value) ? value.call(object) : value;
-  };
-
-  // Add your own custom functions to the Underscore object.
-  _.mixin = function(obj) {
-    each(_.functions(obj), function(name) {
-      var func = _[name] = obj[name];
-      _.prototype[name] = function() {
-        var args = [this._wrapped];
-        push.apply(args, arguments);
-        return result.call(this, func.apply(_, args));
-      };
-    });
-  };
-
-  // Generate a unique integer id (unique within the entire client session).
-  // Useful for temporary DOM ids.
-  var idCounter = 0;
-  _.uniqueId = function(prefix) {
-    var id = ++idCounter + '';
-    return prefix ? prefix + id : id;
-  };
-
-  // By default, Underscore uses ERB-style template delimiters, change the
-  // following template settings to use alternative delimiters.
-  _.templateSettings = {
-    evaluate    : /<%([\s\S]+?)%>/g,
-    interpolate : /<%=([\s\S]+?)%>/g,
-    escape      : /<%-([\s\S]+?)%>/g
-  };
-
-  // When customizing `templateSettings`, if you don't want to define an
-  // interpolation, evaluation or escaping regex, we need one that is
-  // guaranteed not to match.
-  var noMatch = /(.)^/;
-
-  // Certain characters need to be escaped so that they can be put into a
-  // string literal.
-  var escapes = {
-    "'":      "'",
-    '\\':     '\\',
-    '\r':     'r',
-    '\n':     'n',
-    '\t':     't',
-    '\u2028': 'u2028',
-    '\u2029': 'u2029'
-  };
-
-  var escaper = /\\|'|\r|\n|\t|\u2028|\u2029/g;
-
-  // JavaScript micro-templating, similar to John Resig's implementation.
-  // Underscore templating handles arbitrary delimiters, preserves whitespace,
-  // and correctly escapes quotes within interpolated code.
-  _.template = function(text, data, settings) {
-    var render;
-    settings = _.defaults({}, settings, _.templateSettings);
-
-    // Combine delimiters into one regular expression via alternation.
-    var matcher = new RegExp([
-      (settings.escape || noMatch).source,
-      (settings.interpolate || noMatch).source,
-      (settings.evaluate || noMatch).source
-    ].join('|') + '|$', 'g');
-
-    // Compile the template source, escaping string literals appropriately.
-    var index = 0;
-    var source = "__p+='";
-    text.replace(matcher, function(match, escape, interpolate, evaluate, offset) {
-      source += text.slice(index, offset)
-        .replace(escaper, function(match) { return '\\' + escapes[match]; });
-
-      if (escape) {
-        source += "'+\n((__t=(" + escape + "))==null?'':_.escape(__t))+\n'";
-      }
-      if (interpolate) {
-        source += "'+\n((__t=(" + interpolate + "))==null?'':__t)+\n'";
-      }
-      if (evaluate) {
-        source += "';\n" + evaluate + "\n__p+='";
-      }
-      index = offset + match.length;
-      return match;
-    });
-    source += "';\n";
-
-    // If a variable is not specified, place data values in local scope.
-    if (!settings.variable) source = 'with(obj||{}){\n' + source + '}\n';
-
-    source = "var __t,__p='',__j=Array.prototype.join," +
-      "print=function(){__p+=__j.call(arguments,'');};\n" +
-      source + "return __p;\n";
-
-    try {
-      render = new Function(settings.variable || 'obj', '_', source);
-    } catch (e) {
-      e.source = source;
-      throw e;
-    }
-
-    if (data) return render(data, _);
-    var template = function(data) {
-      return render.call(this, data, _);
-    };
-
-    // Provide the compiled function source as a convenience for precompilation.
-    template.source = 'function(' + (settings.variable || 'obj') + '){\n' + source + '}';
-
-    return template;
-  };
-
-  // Add a "chain" function, which will delegate to the wrapper.
-  _.chain = function(obj) {
-    return _(obj).chain();
-  };
-
-  // OOP
-  // ---------------
-  // If Underscore is called as a function, it returns a wrapped object that
-  // can be used OO-style. This wrapper holds altered versions of all the
-  // underscore functions. Wrapped objects may be chained.
-
-  // Helper function to continue chaining intermediate results.
-  var result = function(obj) {
-    return this._chain ? _(obj).chain() : obj;
-  };
-
-  // Add all of the Underscore functions to the wrapper object.
-  _.mixin(_);
-
-  // Add all mutator Array functions to the wrapper.
-  each(['pop', 'push', 'reverse', 'shift', 'sort', 'splice', 'unshift'], function(name) {
-    var method = ArrayProto[name];
-    _.prototype[name] = function() {
-      var obj = this._wrapped;
-      method.apply(obj, arguments);
-      if ((name == 'shift' || name == 'splice') && obj.length === 0) delete obj[0];
-      return result.call(this, obj);
-    };
-  });
-
-  // Add all accessor Array functions to the wrapper.
-  each(['concat', 'join', 'slice'], function(name) {
-    var method = ArrayProto[name];
-    _.prototype[name] = function() {
-      return result.call(this, method.apply(this._wrapped, arguments));
-    };
-  });
-
-  _.extend(_.prototype, {
-
-    // Start chaining a wrapped Underscore object.
-    chain: function() {
-      this._chain = true;
-      return this;
-    },
-
-    // Extracts the result from a wrapped and chained object.
-    value: function() {
-      return this._wrapped;
-    }
-
-  });
-
-  // AMD registration happens at the end for compatibility with AMD loaders
-  // that may not enforce next-turn semantics on modules. Even though general
-  // practice for AMD registration is to be anonymous, underscore registers
-  // as a named module because, like jQuery, it is a base library that is
-  // popular enough to be bundled in a third party lib, but not be part of
-  // an AMD load request. Those cases could generate an error when an
-  // anonymous define() is called outside of a loader request.
-  if (typeof define === 'function' && define.amd) {
-    define('underscore', [], function() {
-      return _;
-    });
-  }
-}).call(this);
-
-},{}],10:[function(require,module,exports){
-
-},{}],11:[function(require,module,exports){
+},{"./item":19,"desandro-matches-selector":15,"doc-ready":21,"eventie":22,"get-size":16,"wolfy87-eventemitter":23}],25:[function(require,module,exports){
 (function (global){
-!function(e){if("object"==typeof exports)module.exports=e();else if("function"==typeof define&&define.amd)define(e);else{var f;"undefined"!=typeof window?f=window:"undefined"!=typeof global?f=global:"undefined"!=typeof self&&(f=self),f.jade=e()}}(function(){var define,module,exports;return (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);throw new Error("Cannot find module '"+o+"'")}var f=n[o]={exports:{}};t[o][0].call(f.exports,function(e){var n=t[o][1][e];return s(n?n:e)},f,f.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
+!function(e){if("object"==typeof exports)module.exports=e();else if("function"==typeof define&&define.amd)define(e);else{var f;"undefined"!=typeof window?f=window:"undefined"!=typeof global?f=global:"undefined"!=typeof self&&(f=self),f.jade=e()}}(function(){var define,module,exports;return (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);throw new Error("Cannot find module '"+o+"'")}var f=n[o]={exports:{}};t[o][0].call(f.exports,function(e){var n=t[o][1][e];return s(n?n:e)},f,f.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(_dereq_,module,exports){
 'use strict';
 
 /**
@@ -3569,7 +6382,7 @@ exports.rethrow = function rethrow(err, filename, lineno, str){
     throw err;
   }
   try {
-    str =  str || require('fs').readFileSync(filename, 'utf8')
+    str =  str || _dereq_('fs').readFileSync(filename, 'utf8')
   } catch (ex) {
     rethrow(err, null, lineno)
   }
@@ -3594,15 +6407,156 @@ exports.rethrow = function rethrow(err, filename, lineno, str){
   throw err;
 };
 
-},{"fs":2}],2:[function(require,module,exports){
+},{"fs":2}],2:[function(_dereq_,module,exports){
 
 },{}]},{},[1])
 (1)
 });
 }).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"fs":10}],12:[function(require,module,exports){
+},{}],26:[function(require,module,exports){
+/**
+ * Bridget makes jQuery widgets
+ * v1.1.0
+ * MIT license
+ */
+
+( function( window ) {
+
+'use strict';
+
+// -------------------------- utils -------------------------- //
+
+var slice = Array.prototype.slice;
+
+function noop() {}
+
+// -------------------------- definition -------------------------- //
+
+function defineBridget( $ ) {
+
+// bail if no jQuery
+if ( !$ ) {
+  return;
+}
+
+// -------------------------- addOptionMethod -------------------------- //
+
+/**
+ * adds option method -> $().plugin('option', {...})
+ * @param {Function} PluginClass - constructor class
+ */
+function addOptionMethod( PluginClass ) {
+  // don't overwrite original option method
+  if ( PluginClass.prototype.option ) {
+    return;
+  }
+
+  // option setter
+  PluginClass.prototype.option = function( opts ) {
+    // bail out if not an object
+    if ( !$.isPlainObject( opts ) ){
+      return;
+    }
+    this.options = $.extend( true, this.options, opts );
+  };
+}
+
+// -------------------------- plugin bridge -------------------------- //
+
+// helper function for logging errors
+// $.error breaks jQuery chaining
+var logError = typeof console === 'undefined' ? noop :
+  function( message ) {
+    console.error( message );
+  };
+
+/**
+ * jQuery plugin bridge, access methods like $elem.plugin('method')
+ * @param {String} namespace - plugin name
+ * @param {Function} PluginClass - constructor class
+ */
+function bridge( namespace, PluginClass ) {
+  // add to jQuery fn namespace
+  $.fn[ namespace ] = function( options ) {
+    if ( typeof options === 'string' ) {
+      // call plugin method when first argument is a string
+      // get arguments for method
+      var args = slice.call( arguments, 1 );
+
+      for ( var i=0, len = this.length; i < len; i++ ) {
+        var elem = this[i];
+        var instance = $.data( elem, namespace );
+        if ( !instance ) {
+          logError( "cannot call methods on " + namespace + " prior to initialization; " +
+            "attempted to call '" + options + "'" );
+          continue;
+        }
+        if ( !$.isFunction( instance[options] ) || options.charAt(0) === '_' ) {
+          logError( "no such method '" + options + "' for " + namespace + " instance" );
+          continue;
+        }
+
+        // trigger method with arguments
+        var returnValue = instance[ options ].apply( instance, args );
+
+        // break look and return first value if provided
+        if ( returnValue !== undefined ) {
+          return returnValue;
+        }
+      }
+      // return this if no return value
+      return this;
+    } else {
+      return this.each( function() {
+        var instance = $.data( this, namespace );
+        if ( instance ) {
+          // apply options & init
+          instance.option( options );
+          instance._init();
+        } else {
+          // initialize new instance
+          instance = new PluginClass( this, options );
+          $.data( this, namespace, instance );
+        }
+      });
+    }
+  };
+
+}
+
+// -------------------------- bridget -------------------------- //
+
+/**
+ * converts a Prototypical class into a proper jQuery plugin
+ *   the class must have a ._init method
+ * @param {String} namespace - plugin name, used in $().pluginName
+ * @param {Function} PluginClass - constructor class
+ */
+$.bridget = function( namespace, PluginClass ) {
+  addOptionMethod( PluginClass );
+  bridge( namespace, PluginClass );
+};
+
+return $.bridget;
+
+}
+
+// transport
+if ( typeof define === 'function' && define.amd ) {
+  // AMD
+  define( [ 'jquery' ], defineBridget );
+} else if ( typeof exports === 'object' ) {
+  defineBridget( require('jquery') );
+} else {
+  // get jquery from browser global
+  defineBridget( window.jQuery );
+}
+
+})( window );
+
+},{"jquery":27}],27:[function(require,module,exports){
 /*!
- * jQuery JavaScript Library v2.1.0
+ * jQuery JavaScript Library v2.1.3
  * http://jquery.com/
  *
  * Includes Sizzle.js
@@ -3612,19 +6566,19 @@ exports.rethrow = function rethrow(err, filename, lineno, str){
  * Released under the MIT license
  * http://jquery.org/license
  *
- * Date: 2014-01-23T21:10Z
+ * Date: 2014-12-18T15:11Z
  */
 
 (function( global, factory ) {
 
 	if ( typeof module === "object" && typeof module.exports === "object" ) {
-		// For CommonJS and CommonJS-like environments where a proper window is present,
-		// execute the factory and get jQuery
-		// For environments that do not inherently posses a window with a document
-		// (such as Node.js), expose a jQuery-making factory as module.exports
-		// This accentuates the need for the creation of a real window
+		// For CommonJS and CommonJS-like environments where a proper `window`
+		// is present, execute the factory and get jQuery.
+		// For environments that do not have a `window` with a `document`
+		// (such as Node.js), expose a factory as module.exports.
+		// This accentuates the need for the creation of a real `window`.
 		// e.g. var jQuery = require("jquery")(window);
-		// See ticket #14549 for more info
+		// See ticket #14549 for more info.
 		module.exports = global.document ?
 			factory( global, true ) :
 			function( w ) {
@@ -3640,10 +6594,10 @@ exports.rethrow = function rethrow(err, filename, lineno, str){
 // Pass this if window is not defined yet
 }(typeof window !== "undefined" ? window : this, function( window, noGlobal ) {
 
-// Can't do this because several apps including ASP.NET trace
+// Support: Firefox 18+
+// Can't be in strict mode, several libs including ASP.NET trace
 // the stack via arguments.caller.callee and Firefox dies if
 // you try to trace through "use strict" call chains. (#13335)
-// Support: Firefox 18+
 //
 
 var arr = [];
@@ -3662,8 +6616,6 @@ var toString = class2type.toString;
 
 var hasOwn = class2type.hasOwnProperty;
 
-var trim = "".trim;
-
 var support = {};
 
 
@@ -3672,7 +6624,7 @@ var
 	// Use the correct document accordingly with window argument (sandbox)
 	document = window.document,
 
-	version = "2.1.0",
+	version = "2.1.3",
 
 	// Define a local copy of jQuery
 	jQuery = function( selector, context ) {
@@ -3680,6 +6632,10 @@ var
 		// Need init if jQuery is called (just allow error to be thrown if not included)
 		return new jQuery.fn.init( selector, context );
 	},
+
+	// Support: Android<4.1
+	// Make sure we trim BOM and NBSP
+	rtrim = /^[\s\uFEFF\xA0]+|[\s\uFEFF\xA0]+$/g,
 
 	// Matches dashed string for camelizing
 	rmsPrefix = /^-ms-/,
@@ -3711,10 +6667,10 @@ jQuery.fn = jQuery.prototype = {
 	get: function( num ) {
 		return num != null ?
 
-			// Return a 'clean' array
+			// Return just the one element from the set
 			( num < 0 ? this[ num + this.length ] : this[ num ] ) :
 
-			// Return just the object
+			// Return all the elements in a clean array
 			slice.call( this );
 	},
 
@@ -3786,7 +6742,7 @@ jQuery.extend = jQuery.fn.extend = function() {
 	if ( typeof target === "boolean" ) {
 		deep = target;
 
-		// skip the boolean and the target
+		// Skip the boolean and the target
 		target = arguments[ i ] || {};
 		i++;
 	}
@@ -3796,7 +6752,7 @@ jQuery.extend = jQuery.fn.extend = function() {
 		target = {};
 	}
 
-	// extend jQuery itself if only one argument is passed
+	// Extend jQuery itself if only one argument is passed
 	if ( i === length ) {
 		target = this;
 		i--;
@@ -3853,9 +6809,6 @@ jQuery.extend({
 
 	noop: function() {},
 
-	// See test/unit/core.js for details concerning isFunction.
-	// Since version 1.3, DOM methods and functions like alert
-	// aren't supported. They return false on IE (#2968).
 	isFunction: function( obj ) {
 		return jQuery.type(obj) === "function";
 	},
@@ -3870,7 +6823,8 @@ jQuery.extend({
 		// parseFloat NaNs numeric-cast false positives (null|true|false|"")
 		// ...but misinterprets leading-number strings, particularly hex literals ("0x...")
 		// subtraction forces infinities to NaN
-		return obj - parseFloat( obj ) >= 0;
+		// adding 1 corrects loss of precision from parseFloat (#15100)
+		return !jQuery.isArray( obj ) && (obj - parseFloat( obj ) + 1) >= 0;
 	},
 
 	isPlainObject: function( obj ) {
@@ -3882,16 +6836,8 @@ jQuery.extend({
 			return false;
 		}
 
-		// Support: Firefox <20
-		// The try/catch suppresses exceptions thrown when attempting to access
-		// the "constructor" property of certain host objects, ie. |window.location|
-		// https://bugzilla.mozilla.org/show_bug.cgi?id=814622
-		try {
-			if ( obj.constructor &&
-					!hasOwn.call( obj.constructor.prototype, "isPrototypeOf" ) ) {
-				return false;
-			}
-		} catch ( e ) {
+		if ( obj.constructor &&
+				!hasOwn.call( obj.constructor.prototype, "isPrototypeOf" ) ) {
 			return false;
 		}
 
@@ -3912,7 +6858,7 @@ jQuery.extend({
 		if ( obj == null ) {
 			return obj + "";
 		}
-		// Support: Android < 4.0, iOS < 6 (functionish RegExp)
+		// Support: Android<4.0, iOS<6 (functionish RegExp)
 		return typeof obj === "object" || typeof obj === "function" ?
 			class2type[ toString.call(obj) ] || "object" :
 			typeof obj;
@@ -3942,6 +6888,7 @@ jQuery.extend({
 	},
 
 	// Convert dashed to camelCase; used by the css and data modules
+	// Support: IE9-11+
 	// Microsoft forgot to hump their vendor prefix (#9572)
 	camelCase: function( string ) {
 		return string.replace( rmsPrefix, "ms-" ).replace( rdashAlpha, fcamelCase );
@@ -4001,8 +6948,11 @@ jQuery.extend({
 		return obj;
 	},
 
+	// Support: Android<4.1
 	trim: function( text ) {
-		return text == null ? "" : trim.call( text );
+		return text == null ?
+			"" :
+			( text + "" ).replace( rtrim, "" );
 	},
 
 	// results is for internal usage only
@@ -4154,14 +7104,14 @@ function isArraylike( obj ) {
 }
 var Sizzle =
 /*!
- * Sizzle CSS Selector Engine v1.10.16
+ * Sizzle CSS Selector Engine v2.2.0-pre
  * http://sizzlejs.com/
  *
- * Copyright 2013 jQuery Foundation, Inc. and other contributors
+ * Copyright 2008, 2014 jQuery Foundation, Inc. and other contributors
  * Released under the MIT license
  * http://jquery.org/license
  *
- * Date: 2014-01-13
+ * Date: 2014-12-16
  */
 (function( window ) {
 
@@ -4170,7 +7120,9 @@ var i,
 	Expr,
 	getText,
 	isXML,
+	tokenize,
 	compile,
+	select,
 	outermostContext,
 	sortInput,
 	hasDuplicate,
@@ -4186,7 +7138,7 @@ var i,
 	contains,
 
 	// Instance-specific data
-	expando = "sizzle" + -(new Date()),
+	expando = "sizzle" + 1 * new Date(),
 	preferredDoc = window.document,
 	dirruns = 0,
 	done = 0,
@@ -4201,7 +7153,6 @@ var i,
 	},
 
 	// General-purpose constants
-	strundefined = typeof undefined,
 	MAX_NEGATIVE = 1 << 31,
 
 	// Instance methods
@@ -4211,12 +7162,13 @@ var i,
 	push_native = arr.push,
 	push = arr.push,
 	slice = arr.slice,
-	// Use a stripped-down indexOf if we can't use a native one
-	indexOf = arr.indexOf || function( elem ) {
+	// Use a stripped-down indexOf as it's faster than native
+	// http://jsperf.com/thor-indexof-vs-for/5
+	indexOf = function( list, elem ) {
 		var i = 0,
-			len = this.length;
+			len = list.length;
 		for ( ; i < len; i++ ) {
-			if ( this[i] === elem ) {
+			if ( list[i] === elem ) {
 				return i;
 			}
 		}
@@ -4237,19 +7189,26 @@ var i,
 	// Proper syntax: http://www.w3.org/TR/CSS21/syndata.html#value-def-identifier
 	identifier = characterEncoding.replace( "w", "w#" ),
 
-	// Acceptable operators http://www.w3.org/TR/selectors/#attribute-selectors
-	attributes = "\\[" + whitespace + "*(" + characterEncoding + ")" + whitespace +
-		"*(?:([*^$|!~]?=)" + whitespace + "*(?:(['\"])((?:\\\\.|[^\\\\])*?)\\3|(" + identifier + ")|)|)" + whitespace + "*\\]",
+	// Attribute selectors: http://www.w3.org/TR/selectors/#attribute-selectors
+	attributes = "\\[" + whitespace + "*(" + characterEncoding + ")(?:" + whitespace +
+		// Operator (capture 2)
+		"*([*^$|!~]?=)" + whitespace +
+		// "Attribute values must be CSS identifiers [capture 5] or strings [capture 3 or capture 4]"
+		"*(?:'((?:\\\\.|[^\\\\'])*)'|\"((?:\\\\.|[^\\\\\"])*)\"|(" + identifier + "))|)" + whitespace +
+		"*\\]",
 
-	// Prefer arguments quoted,
-	//   then not containing pseudos/brackets,
-	//   then attribute selectors/non-parenthetical expressions,
-	//   then anything else
-	// These preferences are here to reduce the number of selectors
-	//   needing tokenize in the PSEUDO preFilter
-	pseudos = ":(" + characterEncoding + ")(?:\\(((['\"])((?:\\\\.|[^\\\\])*?)\\3|((?:\\\\.|[^\\\\()[\\]]|" + attributes.replace( 3, 8 ) + ")*)|.*)\\)|)",
+	pseudos = ":(" + characterEncoding + ")(?:\\((" +
+		// To reduce the number of selectors needing tokenize in the preFilter, prefer arguments:
+		// 1. quoted (capture 3; capture 4 or capture 5)
+		"('((?:\\\\.|[^\\\\'])*)'|\"((?:\\\\.|[^\\\\\"])*)\")|" +
+		// 2. simple (capture 6)
+		"((?:\\\\.|[^\\\\()[\\]]|" + attributes + ")*)|" +
+		// 3. anything else (capture 2)
+		".*" +
+		")\\)|)",
 
 	// Leading and non-escaped trailing whitespace, capturing some non-whitespace characters preceding the latter
+	rwhitespace = new RegExp( whitespace + "+", "g" ),
 	rtrim = new RegExp( "^" + whitespace + "+|((?:^|[^\\\\])(?:\\\\.)*)" + whitespace + "+$", "g" ),
 
 	rcomma = new RegExp( "^" + whitespace + "*," + whitespace + "*" ),
@@ -4292,7 +7251,7 @@ var i,
 	funescape = function( _, escaped, escapedWhitespace ) {
 		var high = "0x" + escaped - 0x10000;
 		// NaN means non-codepoint
-		// Support: Firefox
+		// Support: Firefox<24
 		// Workaround erroneous numeric interpretation of +"0x"
 		return high !== high || escapedWhitespace ?
 			escaped :
@@ -4301,6 +7260,14 @@ var i,
 				String.fromCharCode( high + 0x10000 ) :
 				// Supplemental Plane codepoint (surrogate pair)
 				String.fromCharCode( high >> 10 | 0xD800, high & 0x3FF | 0xDC00 );
+	},
+
+	// Used for iframes
+	// See setDocument()
+	// Removing the function wrapper causes a "Permission Denied"
+	// error in IE
+	unloadHandler = function() {
+		setDocument();
 	};
 
 // Optimize for push.apply( _, NodeList )
@@ -4343,19 +7310,18 @@ function Sizzle( selector, context, results, seed ) {
 
 	context = context || document;
 	results = results || [];
+	nodeType = context.nodeType;
 
-	if ( !selector || typeof selector !== "string" ) {
+	if ( typeof selector !== "string" || !selector ||
+		nodeType !== 1 && nodeType !== 9 && nodeType !== 11 ) {
+
 		return results;
 	}
 
-	if ( (nodeType = context.nodeType) !== 1 && nodeType !== 9 ) {
-		return [];
-	}
+	if ( !seed && documentIsHTML ) {
 
-	if ( documentIsHTML && !seed ) {
-
-		// Shortcuts
-		if ( (match = rquickExpr.exec( selector )) ) {
+		// Try to shortcut find operations when possible (e.g., not under DocumentFragment)
+		if ( nodeType !== 11 && (match = rquickExpr.exec( selector )) ) {
 			// Speed-up: Sizzle("#ID")
 			if ( (m = match[1]) ) {
 				if ( nodeType === 9 ) {
@@ -4387,7 +7353,7 @@ function Sizzle( selector, context, results, seed ) {
 				return results;
 
 			// Speed-up: Sizzle(".CLASS")
-			} else if ( (m = match[3]) && support.getElementsByClassName && context.getElementsByClassName ) {
+			} else if ( (m = match[3]) && support.getElementsByClassName ) {
 				push.apply( results, context.getElementsByClassName( m ) );
 				return results;
 			}
@@ -4397,7 +7363,7 @@ function Sizzle( selector, context, results, seed ) {
 		if ( support.qsa && (!rbuggyQSA || !rbuggyQSA.test( selector )) ) {
 			nid = old = expando;
 			newContext = context;
-			newSelector = nodeType === 9 && selector;
+			newSelector = nodeType !== 1 && selector;
 
 			// qSA works strangely on Element-rooted queries
 			// We can work around this by specifying an extra ID on the root
@@ -4584,7 +7550,7 @@ function createPositionalPseudo( fn ) {
  * @returns {Element|Object|Boolean} The input node if acceptable, otherwise a falsy value
  */
 function testContext( context ) {
-	return context && typeof context.getElementsByTagName !== strundefined && context;
+	return context && typeof context.getElementsByTagName !== "undefined" && context;
 }
 
 // Expose support vars for convenience
@@ -4608,9 +7574,8 @@ isXML = Sizzle.isXML = function( elem ) {
  * @returns {Object} Returns the current document
  */
 setDocument = Sizzle.setDocument = function( node ) {
-	var hasCompare,
-		doc = node ? node.ownerDocument || node : preferredDoc,
-		parent = doc.defaultView;
+	var hasCompare, parent,
+		doc = node ? node.ownerDocument || node : preferredDoc;
 
 	// If no document and documentElement is available, return
 	if ( doc === document || doc.nodeType !== 9 || !doc.documentElement ) {
@@ -4620,9 +7585,7 @@ setDocument = Sizzle.setDocument = function( node ) {
 	// Set our document
 	document = doc;
 	docElem = doc.documentElement;
-
-	// Support tests
-	documentIsHTML = !isXML( doc );
+	parent = doc.defaultView;
 
 	// Support: IE>8
 	// If iframe document is assigned to "document" variable and if iframe has been reloaded,
@@ -4631,21 +7594,22 @@ setDocument = Sizzle.setDocument = function( node ) {
 	if ( parent && parent !== parent.top ) {
 		// IE11 does not have attachEvent, so all must suffer
 		if ( parent.addEventListener ) {
-			parent.addEventListener( "unload", function() {
-				setDocument();
-			}, false );
+			parent.addEventListener( "unload", unloadHandler, false );
 		} else if ( parent.attachEvent ) {
-			parent.attachEvent( "onunload", function() {
-				setDocument();
-			});
+			parent.attachEvent( "onunload", unloadHandler );
 		}
 	}
+
+	/* Support tests
+	---------------------------------------------------------------------- */
+	documentIsHTML = !isXML( doc );
 
 	/* Attributes
 	---------------------------------------------------------------------- */
 
 	// Support: IE<8
-	// Verify that getAttribute really returns attributes and not properties (excepting IE8 booleans)
+	// Verify that getAttribute really returns attributes and not properties
+	// (excepting IE8 booleans)
 	support.attributes = assert(function( div ) {
 		div.className = "i";
 		return !div.getAttribute("className");
@@ -4660,17 +7624,8 @@ setDocument = Sizzle.setDocument = function( node ) {
 		return !div.getElementsByTagName("*").length;
 	});
 
-	// Check if getElementsByClassName can be trusted
-	support.getElementsByClassName = rnative.test( doc.getElementsByClassName ) && assert(function( div ) {
-		div.innerHTML = "<div class='a'></div><div class='a i'></div>";
-
-		// Support: Safari<4
-		// Catch class over-caching
-		div.firstChild.className = "i";
-		// Support: Opera<10
-		// Catch gEBCN failure to find non-leading classes
-		return div.getElementsByClassName("i").length === 2;
-	});
+	// Support: IE<9
+	support.getElementsByClassName = rnative.test( doc.getElementsByClassName );
 
 	// Support: IE<10
 	// Check if getElementById returns elements by name
@@ -4684,11 +7639,11 @@ setDocument = Sizzle.setDocument = function( node ) {
 	// ID find and filter
 	if ( support.getById ) {
 		Expr.find["ID"] = function( id, context ) {
-			if ( typeof context.getElementById !== strundefined && documentIsHTML ) {
+			if ( typeof context.getElementById !== "undefined" && documentIsHTML ) {
 				var m = context.getElementById( id );
 				// Check parentNode to catch when Blackberry 4.6 returns
 				// nodes that are no longer in the document #6963
-				return m && m.parentNode ? [m] : [];
+				return m && m.parentNode ? [ m ] : [];
 			}
 		};
 		Expr.filter["ID"] = function( id ) {
@@ -4705,7 +7660,7 @@ setDocument = Sizzle.setDocument = function( node ) {
 		Expr.filter["ID"] =  function( id ) {
 			var attrId = id.replace( runescape, funescape );
 			return function( elem ) {
-				var node = typeof elem.getAttributeNode !== strundefined && elem.getAttributeNode("id");
+				var node = typeof elem.getAttributeNode !== "undefined" && elem.getAttributeNode("id");
 				return node && node.value === attrId;
 			};
 		};
@@ -4714,14 +7669,20 @@ setDocument = Sizzle.setDocument = function( node ) {
 	// Tag
 	Expr.find["TAG"] = support.getElementsByTagName ?
 		function( tag, context ) {
-			if ( typeof context.getElementsByTagName !== strundefined ) {
+			if ( typeof context.getElementsByTagName !== "undefined" ) {
 				return context.getElementsByTagName( tag );
+
+			// DocumentFragment nodes don't have gEBTN
+			} else if ( support.qsa ) {
+				return context.querySelectorAll( tag );
 			}
 		} :
+
 		function( tag, context ) {
 			var elem,
 				tmp = [],
 				i = 0,
+				// By happy coincidence, a (broken) gEBTN appears on DocumentFragment nodes too
 				results = context.getElementsByTagName( tag );
 
 			// Filter out possible comments
@@ -4739,7 +7700,7 @@ setDocument = Sizzle.setDocument = function( node ) {
 
 	// Class
 	Expr.find["CLASS"] = support.getElementsByClassName && function( className, context ) {
-		if ( typeof context.getElementsByClassName !== strundefined && documentIsHTML ) {
+		if ( documentIsHTML ) {
 			return context.getElementsByClassName( className );
 		}
 	};
@@ -4768,11 +7729,15 @@ setDocument = Sizzle.setDocument = function( node ) {
 			// setting a boolean content attribute,
 			// since its presence should be enough
 			// http://bugs.jquery.com/ticket/12359
-			div.innerHTML = "<select t=''><option selected=''></option></select>";
+			docElem.appendChild( div ).innerHTML = "<a id='" + expando + "'></a>" +
+				"<select id='" + expando + "-\f]' msallowcapture=''>" +
+				"<option selected=''></option></select>";
 
-			// Support: IE8, Opera 10-12
+			// Support: IE8, Opera 11-12.16
 			// Nothing should be selected when empty strings follow ^= or $= or *=
-			if ( div.querySelectorAll("[t^='']").length ) {
+			// The test attribute must be unknown in Opera but "safe" for WinRT
+			// http://msdn.microsoft.com/en-us/library/ie/hh465388.aspx#attribute_section
+			if ( div.querySelectorAll("[msallowcapture^='']").length ) {
 				rbuggyQSA.push( "[*^$]=" + whitespace + "*(?:''|\"\")" );
 			}
 
@@ -4782,11 +7747,23 @@ setDocument = Sizzle.setDocument = function( node ) {
 				rbuggyQSA.push( "\\[" + whitespace + "*(?:value|" + booleans + ")" );
 			}
 
+			// Support: Chrome<29, Android<4.2+, Safari<7.0+, iOS<7.0+, PhantomJS<1.9.7+
+			if ( !div.querySelectorAll( "[id~=" + expando + "-]" ).length ) {
+				rbuggyQSA.push("~=");
+			}
+
 			// Webkit/Opera - :checked should return selected option elements
 			// http://www.w3.org/TR/2011/REC-css3-selectors-20110929/#checked
 			// IE8 throws error here and will not see later tests
 			if ( !div.querySelectorAll(":checked").length ) {
 				rbuggyQSA.push(":checked");
+			}
+
+			// Support: Safari 8+, iOS 8+
+			// https://bugs.webkit.org/show_bug.cgi?id=136851
+			// In-page `selector#id sibing-combinator selector` fails
+			if ( !div.querySelectorAll( "a#" + expando + "+*" ).length ) {
+				rbuggyQSA.push(".#.+[+~]");
 			}
 		});
 
@@ -4815,7 +7792,8 @@ setDocument = Sizzle.setDocument = function( node ) {
 		});
 	}
 
-	if ( (support.matchesSelector = rnative.test( (matches = docElem.webkitMatchesSelector ||
+	if ( (support.matchesSelector = rnative.test( (matches = docElem.matches ||
+		docElem.webkitMatchesSelector ||
 		docElem.mozMatchesSelector ||
 		docElem.oMatchesSelector ||
 		docElem.msMatchesSelector) )) ) {
@@ -4903,7 +7881,7 @@ setDocument = Sizzle.setDocument = function( node ) {
 
 			// Maintain original order
 			return sortInput ?
-				( indexOf.call( sortInput, a ) - indexOf.call( sortInput, b ) ) :
+				( indexOf( sortInput, a ) - indexOf( sortInput, b ) ) :
 				0;
 		}
 
@@ -4930,7 +7908,7 @@ setDocument = Sizzle.setDocument = function( node ) {
 				aup ? -1 :
 				bup ? 1 :
 				sortInput ?
-				( indexOf.call( sortInput, a ) - indexOf.call( sortInput, b ) ) :
+				( indexOf( sortInput, a ) - indexOf( sortInput, b ) ) :
 				0;
 
 		// If the nodes are siblings, we can do a quick check
@@ -4993,10 +7971,10 @@ Sizzle.matchesSelector = function( elem, expr ) {
 					elem.document && elem.document.nodeType !== 11 ) {
 				return ret;
 			}
-		} catch(e) {}
+		} catch (e) {}
 	}
 
-	return Sizzle( expr, document, null, [elem] ).length > 0;
+	return Sizzle( expr, document, null, [ elem ] ).length > 0;
 };
 
 Sizzle.contains = function( context, elem ) {
@@ -5125,7 +8103,7 @@ Expr = Sizzle.selectors = {
 			match[1] = match[1].replace( runescape, funescape );
 
 			// Move the given value to match[3] whether quoted or unquoted
-			match[3] = ( match[4] || match[5] || "" ).replace( runescape, funescape );
+			match[3] = ( match[3] || match[4] || match[5] || "" ).replace( runescape, funescape );
 
 			if ( match[2] === "~=" ) {
 				match[3] = " " + match[3] + " ";
@@ -5168,15 +8146,15 @@ Expr = Sizzle.selectors = {
 
 		"PSEUDO": function( match ) {
 			var excess,
-				unquoted = !match[5] && match[2];
+				unquoted = !match[6] && match[2];
 
 			if ( matchExpr["CHILD"].test( match[0] ) ) {
 				return null;
 			}
 
 			// Accept quoted arguments as-is
-			if ( match[3] && match[4] !== undefined ) {
-				match[2] = match[4];
+			if ( match[3] ) {
+				match[2] = match[4] || match[5] || "";
 
 			// Strip excess characters from unquoted arguments
 			} else if ( unquoted && rpseudo.test( unquoted ) &&
@@ -5212,7 +8190,7 @@ Expr = Sizzle.selectors = {
 			return pattern ||
 				(pattern = new RegExp( "(^|" + whitespace + ")" + className + "(" + whitespace + "|$)" )) &&
 				classCache( className, function( elem ) {
-					return pattern.test( typeof elem.className === "string" && elem.className || typeof elem.getAttribute !== strundefined && elem.getAttribute("class") || "" );
+					return pattern.test( typeof elem.className === "string" && elem.className || typeof elem.getAttribute !== "undefined" && elem.getAttribute("class") || "" );
 				});
 		},
 
@@ -5234,7 +8212,7 @@ Expr = Sizzle.selectors = {
 					operator === "^=" ? check && result.indexOf( check ) === 0 :
 					operator === "*=" ? check && result.indexOf( check ) > -1 :
 					operator === "$=" ? check && result.slice( -check.length ) === check :
-					operator === "~=" ? ( " " + result + " " ).indexOf( check ) > -1 :
+					operator === "~=" ? ( " " + result.replace( rwhitespace, " " ) + " " ).indexOf( check ) > -1 :
 					operator === "|=" ? result === check || result.slice( 0, check.length + 1 ) === check + "-" :
 					false;
 			};
@@ -5354,7 +8332,7 @@ Expr = Sizzle.selectors = {
 							matched = fn( seed, argument ),
 							i = matched.length;
 						while ( i-- ) {
-							idx = indexOf.call( seed, matched[i] );
+							idx = indexOf( seed, matched[i] );
 							seed[ idx ] = !( matches[ idx ] = matched[i] );
 						}
 					}) :
@@ -5393,6 +8371,8 @@ Expr = Sizzle.selectors = {
 				function( elem, context, xml ) {
 					input[0] = elem;
 					matcher( input, null, xml, results );
+					// Don't keep the element (issue #299)
+					input[0] = null;
 					return !results.pop();
 				};
 		}),
@@ -5404,6 +8384,7 @@ Expr = Sizzle.selectors = {
 		}),
 
 		"contains": markFunction(function( text ) {
+			text = text.replace( runescape, funescape );
 			return function( elem ) {
 				return ( elem.textContent || elem.innerText || getText( elem ) ).indexOf( text ) > -1;
 			};
@@ -5581,7 +8562,7 @@ function setFilters() {}
 setFilters.prototype = Expr.filters = Expr.pseudos;
 Expr.setFilters = new setFilters();
 
-function tokenize( selector, parseOnly ) {
+tokenize = Sizzle.tokenize = function( selector, parseOnly ) {
 	var matched, match, tokens, type,
 		soFar, groups, preFilters,
 		cached = tokenCache[ selector + " " ];
@@ -5646,7 +8627,7 @@ function tokenize( selector, parseOnly ) {
 			Sizzle.error( selector ) :
 			// Cache the tokens
 			tokenCache( selector, groups ).slice( 0 );
-}
+};
 
 function toSelector( tokens ) {
 	var i = 0,
@@ -5723,6 +8704,15 @@ function elementMatcher( matchers ) {
 			return true;
 		} :
 		matchers[0];
+}
+
+function multipleContexts( selector, contexts, results ) {
+	var i = 0,
+		len = contexts.length;
+	for ( ; i < len; i++ ) {
+		Sizzle( selector, contexts[i], results );
+	}
+	return results;
 }
 
 function condense( unmatched, map, filter, context, xml ) {
@@ -5816,7 +8806,7 @@ function setMatcher( preFilter, selector, matcher, postFilter, postFinder, postS
 				i = matcherOut.length;
 				while ( i-- ) {
 					if ( (elem = matcherOut[i]) &&
-						(temp = postFinder ? indexOf.call( seed, elem ) : preMap[i]) > -1 ) {
+						(temp = postFinder ? indexOf( seed, elem ) : preMap[i]) > -1 ) {
 
 						seed[temp] = !(results[temp] = elem);
 					}
@@ -5851,13 +8841,16 @@ function matcherFromTokens( tokens ) {
 			return elem === checkContext;
 		}, implicitRelative, true ),
 		matchAnyContext = addCombinator( function( elem ) {
-			return indexOf.call( checkContext, elem ) > -1;
+			return indexOf( checkContext, elem ) > -1;
 		}, implicitRelative, true ),
 		matchers = [ function( elem, context, xml ) {
-			return ( !leadingRelative && ( xml || context !== outermostContext ) ) || (
+			var ret = ( !leadingRelative && ( xml || context !== outermostContext ) ) || (
 				(checkContext = context).nodeType ?
 					matchContext( elem, context, xml ) :
 					matchAnyContext( elem, context, xml ) );
+			// Avoid hanging onto element (issue #299)
+			checkContext = null;
+			return ret;
 		} ];
 
 	for ( ; i < len; i++ ) {
@@ -5993,7 +8986,7 @@ function matcherFromGroupMatchers( elementMatchers, setMatchers ) {
 		superMatcher;
 }
 
-compile = Sizzle.compile = function( selector, group /* Internal Use Only */ ) {
+compile = Sizzle.compile = function( selector, match /* Internal Use Only */ ) {
 	var i,
 		setMatchers = [],
 		elementMatchers = [],
@@ -6001,12 +8994,12 @@ compile = Sizzle.compile = function( selector, group /* Internal Use Only */ ) {
 
 	if ( !cached ) {
 		// Generate a function of recursive functions that can be used to check each element
-		if ( !group ) {
-			group = tokenize( selector );
+		if ( !match ) {
+			match = tokenize( selector );
 		}
-		i = group.length;
+		i = match.length;
 		while ( i-- ) {
-			cached = matcherFromTokens( group[i] );
+			cached = matcherFromTokens( match[i] );
 			if ( cached[ expando ] ) {
 				setMatchers.push( cached );
 			} else {
@@ -6016,74 +9009,83 @@ compile = Sizzle.compile = function( selector, group /* Internal Use Only */ ) {
 
 		// Cache the compiled function
 		cached = compilerCache( selector, matcherFromGroupMatchers( elementMatchers, setMatchers ) );
+
+		// Save selector and tokenization
+		cached.selector = selector;
 	}
 	return cached;
 };
 
-function multipleContexts( selector, contexts, results ) {
-	var i = 0,
-		len = contexts.length;
-	for ( ; i < len; i++ ) {
-		Sizzle( selector, contexts[i], results );
-	}
-	return results;
-}
-
-function select( selector, context, results, seed ) {
+/**
+ * A low-level selection function that works with Sizzle's compiled
+ *  selector functions
+ * @param {String|Function} selector A selector or a pre-compiled
+ *  selector function built with Sizzle.compile
+ * @param {Element} context
+ * @param {Array} [results]
+ * @param {Array} [seed] A set of elements to match against
+ */
+select = Sizzle.select = function( selector, context, results, seed ) {
 	var i, tokens, token, type, find,
-		match = tokenize( selector );
+		compiled = typeof selector === "function" && selector,
+		match = !seed && tokenize( (selector = compiled.selector || selector) );
 
-	if ( !seed ) {
-		// Try to minimize operations if there is only one group
-		if ( match.length === 1 ) {
+	results = results || [];
 
-			// Take a shortcut and set the context if the root selector is an ID
-			tokens = match[0] = match[0].slice( 0 );
-			if ( tokens.length > 2 && (token = tokens[0]).type === "ID" &&
-					support.getById && context.nodeType === 9 && documentIsHTML &&
-					Expr.relative[ tokens[1].type ] ) {
+	// Try to minimize operations if there is no seed and only one group
+	if ( match.length === 1 ) {
 
-				context = ( Expr.find["ID"]( token.matches[0].replace(runescape, funescape), context ) || [] )[0];
-				if ( !context ) {
-					return results;
-				}
-				selector = selector.slice( tokens.shift().value.length );
+		// Take a shortcut and set the context if the root selector is an ID
+		tokens = match[0] = match[0].slice( 0 );
+		if ( tokens.length > 2 && (token = tokens[0]).type === "ID" &&
+				support.getById && context.nodeType === 9 && documentIsHTML &&
+				Expr.relative[ tokens[1].type ] ) {
+
+			context = ( Expr.find["ID"]( token.matches[0].replace(runescape, funescape), context ) || [] )[0];
+			if ( !context ) {
+				return results;
+
+			// Precompiled matchers will still verify ancestry, so step up a level
+			} else if ( compiled ) {
+				context = context.parentNode;
 			}
 
-			// Fetch a seed set for right-to-left matching
-			i = matchExpr["needsContext"].test( selector ) ? 0 : tokens.length;
-			while ( i-- ) {
-				token = tokens[i];
+			selector = selector.slice( tokens.shift().value.length );
+		}
 
-				// Abort if we hit a combinator
-				if ( Expr.relative[ (type = token.type) ] ) {
-					break;
-				}
-				if ( (find = Expr.find[ type ]) ) {
-					// Search, expanding context for leading sibling combinators
-					if ( (seed = find(
-						token.matches[0].replace( runescape, funescape ),
-						rsibling.test( tokens[0].type ) && testContext( context.parentNode ) || context
-					)) ) {
+		// Fetch a seed set for right-to-left matching
+		i = matchExpr["needsContext"].test( selector ) ? 0 : tokens.length;
+		while ( i-- ) {
+			token = tokens[i];
 
-						// If seed is empty or no tokens remain, we can return early
-						tokens.splice( i, 1 );
-						selector = seed.length && toSelector( tokens );
-						if ( !selector ) {
-							push.apply( results, seed );
-							return results;
-						}
+			// Abort if we hit a combinator
+			if ( Expr.relative[ (type = token.type) ] ) {
+				break;
+			}
+			if ( (find = Expr.find[ type ]) ) {
+				// Search, expanding context for leading sibling combinators
+				if ( (seed = find(
+					token.matches[0].replace( runescape, funescape ),
+					rsibling.test( tokens[0].type ) && testContext( context.parentNode ) || context
+				)) ) {
 
-						break;
+					// If seed is empty or no tokens remain, we can return early
+					tokens.splice( i, 1 );
+					selector = seed.length && toSelector( tokens );
+					if ( !selector ) {
+						push.apply( results, seed );
+						return results;
 					}
+
+					break;
 				}
 			}
 		}
 	}
 
-	// Compile and execute a filtering function
+	// Compile and execute a filtering function if one is not provided
 	// Provide `match` to avoid retokenization if we modified the selector above
-	compile( selector, match )(
+	( compiled || compile( selector, match ) )(
 		seed,
 		context,
 		!documentIsHTML,
@@ -6091,14 +9093,14 @@ function select( selector, context, results, seed ) {
 		rsibling.test( selector ) && testContext( context.parentNode ) || context
 	);
 	return results;
-}
+};
 
 // One-time assignments
 
 // Sort stability
 support.sortStable = expando.split("").sort( sortOrder ).join("") === expando;
 
-// Support: Chrome<14
+// Support: Chrome 14-35+
 // Always assume duplicates if they aren't passed to the comparison function
 support.detectDuplicates = !!hasDuplicate;
 
@@ -6307,7 +9309,7 @@ var rootjQuery,
 				if ( match[1] ) {
 					context = context instanceof jQuery ? context[0] : context;
 
-					// scripts is true for back-compat
+					// Option to run scripts is true for back-compat
 					// Intentionally let the error be thrown if parseHTML is not present
 					jQuery.merge( this, jQuery.parseHTML(
 						match[1],
@@ -6335,8 +9337,8 @@ var rootjQuery,
 				} else {
 					elem = document.getElementById( match[2] );
 
-					// Check parentNode to catch when Blackberry 4.6 returns
-					// nodes that are no longer in the document #6963
+					// Support: Blackberry 4.6
+					// gEBID returns nodes no longer in the document (#6963)
 					if ( elem && elem.parentNode ) {
 						// Inject the element directly into the jQuery object
 						this.length = 1;
@@ -6389,7 +9391,7 @@ rootjQuery = jQuery( document );
 
 
 var rparentsprev = /^(?:parents|prev(?:Until|All))/,
-	// methods guaranteed to produce a unique set when starting from a unique set
+	// Methods guaranteed to produce a unique set when starting from a unique set
 	guaranteedUnique = {
 		children: true,
 		contents: true,
@@ -6469,8 +9471,7 @@ jQuery.fn.extend({
 		return this.pushStack( matched.length > 1 ? jQuery.unique( matched ) : matched );
 	},
 
-	// Determine the position of an element within
-	// the matched set of elements
+	// Determine the position of an element within the set
 	index: function( elem ) {
 
 		// No argument, return index in parent
@@ -6478,7 +9479,7 @@ jQuery.fn.extend({
 			return ( this[ 0 ] && this[ 0 ].parentNode ) ? this.first().prevAll().length : -1;
 		}
 
-		// index in selector
+		// Index in selector
 		if ( typeof elem === "string" ) {
 			return indexOf.call( jQuery( elem ), this[ 0 ] );
 		}
@@ -6894,7 +9895,7 @@ jQuery.extend({
 
 			progressValues, progressContexts, resolveContexts;
 
-		// add listeners to Deferred subordinates; treat others as resolved
+		// Add listeners to Deferred subordinates; treat others as resolved
 		if ( length > 1 ) {
 			progressValues = new Array( length );
 			progressContexts = new Array( length );
@@ -6911,7 +9912,7 @@ jQuery.extend({
 			}
 		}
 
-		// if we're not waiting on anything, resolve the master
+		// If we're not waiting on anything, resolve the master
 		if ( !remaining ) {
 			deferred.resolveWith( resolveContexts, resolveValues );
 		}
@@ -6968,8 +9969,9 @@ jQuery.extend({
 		readyList.resolveWith( document, [ jQuery ] );
 
 		// Trigger any bound ready events
-		if ( jQuery.fn.trigger ) {
-			jQuery( document ).trigger("ready").off("ready");
+		if ( jQuery.fn.triggerHandler ) {
+			jQuery( document ).triggerHandler( "ready" );
+			jQuery( document ).off( "ready" );
 		}
 	}
 });
@@ -6989,7 +9991,7 @@ jQuery.ready.promise = function( obj ) {
 		readyList = jQuery.Deferred();
 
 		// Catch cases where $(document).ready() is called after the browser event has already occurred.
-		// we once tried to use readyState "interactive" here, but it caused issues like the one
+		// We once tried to use readyState "interactive" here, but it caused issues like the one
 		// discovered by ChrisS here: http://bugs.jquery.com/ticket/12282#comment:15
 		if ( document.readyState === "complete" ) {
 			// Handle it asynchronously to allow scripts the opportunity to delay ready
@@ -7083,7 +10085,7 @@ jQuery.acceptData = function( owner ) {
 
 
 function Data() {
-	// Support: Android < 4,
+	// Support: Android<4,
 	// Old WebKit does not have Object.preventExtensions/freeze method,
 	// return new empty object instead with no [[set]] accessor
 	Object.defineProperty( this.cache = {}, 0, {
@@ -7092,7 +10094,7 @@ function Data() {
 		}
 	});
 
-	this.expando = jQuery.expando + Math.random();
+	this.expando = jQuery.expando + Data.uid++;
 }
 
 Data.uid = 1;
@@ -7120,7 +10122,7 @@ Data.prototype = {
 				descriptor[ this.expando ] = { value: unlock };
 				Object.defineProperties( owner, descriptor );
 
-			// Support: Android < 4
+			// Support: Android<4
 			// Fallback to a less secure definition
 			} catch ( e ) {
 				descriptor[ this.expando ] = unlock;
@@ -7260,17 +10262,16 @@ var data_user = new Data();
 
 
 
-/*
-	Implementation Summary
+//	Implementation Summary
+//
+//	1. Enforce API surface and semantic compatibility with 1.9.x branch
+//	2. Improve the module's maintainability by reducing the storage
+//		paths to a single mechanism.
+//	3. Use the same single mechanism to support "private" and "user" data.
+//	4. _Never_ expose "private" data to user code (TODO: Drop _data, _removeData)
+//	5. Avoid exposing implementation details on user objects (eg. expando properties)
+//	6. Provide a clear path for implementation upgrade to WeakMap in 2014
 
-	1. Enforce API surface and semantic compatibility with 1.9.x branch
-	2. Improve the module's maintainability by reducing the storage
-		paths to a single mechanism.
-	3. Use the same single mechanism to support "private" and "user" data.
-	4. _Never_ expose "private" data to user code (TODO: Drop _data, _removeData)
-	5. Avoid exposing implementation details on user objects (eg. expando properties)
-	6. Provide a clear path for implementation upgrade to WeakMap in 2014
-*/
 var rbrace = /^(?:\{[\w\W]*\}|\[[\w\W]*\])$/,
 	rmultiDash = /([A-Z])/g;
 
@@ -7341,11 +10342,15 @@ jQuery.fn.extend({
 				if ( elem.nodeType === 1 && !data_priv.get( elem, "hasDataAttrs" ) ) {
 					i = attrs.length;
 					while ( i-- ) {
-						name = attrs[ i ].name;
 
-						if ( name.indexOf( "data-" ) === 0 ) {
-							name = jQuery.camelCase( name.slice(5) );
-							dataAttr( elem, name, data[ name ] );
+						// Support: IE11+
+						// The attrs elements can be null (#14894)
+						if ( attrs[ i ] ) {
+							name = attrs[ i ].name;
+							if ( name.indexOf( "data-" ) === 0 ) {
+								name = jQuery.camelCase( name.slice(5) );
+								dataAttr( elem, name, data[ name ] );
+							}
 						}
 					}
 					data_priv.set( elem, "hasDataAttrs", true );
@@ -7471,7 +10476,7 @@ jQuery.extend({
 				queue.unshift( "inprogress" );
 			}
 
-			// clear up the last queue stop function
+			// Clear up the last queue stop function
 			delete hooks.stop;
 			fn.call( elem, next, hooks );
 		}
@@ -7481,7 +10486,7 @@ jQuery.extend({
 		}
 	},
 
-	// not intended for public consumption - generates a queueHooks object, or returns the current one
+	// Not public - generate a queueHooks object, or return the current one
 	_queueHooks: function( elem, type ) {
 		var key = type + "queueHooks";
 		return data_priv.get( elem, key ) || data_priv.access( elem, key, {
@@ -7511,7 +10516,7 @@ jQuery.fn.extend({
 			this.each(function() {
 				var queue = jQuery.queue( this, type, data );
 
-				// ensure a hooks for this queue
+				// Ensure a hooks for this queue
 				jQuery._queueHooks( this, type );
 
 				if ( type === "fx" && queue[0] !== "inprogress" ) {
@@ -7575,17 +10580,25 @@ var rcheckableType = (/^(?:checkbox|radio)$/i);
 
 (function() {
 	var fragment = document.createDocumentFragment(),
-		div = fragment.appendChild( document.createElement( "div" ) );
+		div = fragment.appendChild( document.createElement( "div" ) ),
+		input = document.createElement( "input" );
 
-	// #11217 - WebKit loses check when the name is after the checked attribute
-	div.innerHTML = "<input type='radio' checked='checked' name='t'/>";
+	// Support: Safari<=5.1
+	// Check state lost if the name is set (#11217)
+	// Support: Windows Web Apps (WWA)
+	// `name` and `type` must use .setAttribute for WWA (#14901)
+	input.setAttribute( "type", "radio" );
+	input.setAttribute( "checked", "checked" );
+	input.setAttribute( "name", "t" );
 
-	// Support: Safari 5.1, iOS 5.1, Android 4.x, Android 2.3
-	// old WebKit doesn't clone checked state correctly in fragments
+	div.appendChild( input );
+
+	// Support: Safari<=5.1, Android<4.2
+	// Older WebKit doesn't clone checked state correctly in fragments
 	support.checkClone = div.cloneNode( true ).cloneNode( true ).lastChild.checked;
 
+	// Support: IE<=11+
 	// Make sure textarea (and checkbox) defaultValue is properly cloned
-	// Support: IE9-IE11+
 	div.innerHTML = "<textarea>x</textarea>";
 	support.noCloneChecked = !!div.cloneNode( true ).lastChild.defaultValue;
 })();
@@ -7598,7 +10611,7 @@ support.focusinBubbles = "onfocusin" in window;
 
 var
 	rkeyEvent = /^key/,
-	rmouseEvent = /^(?:mouse|contextmenu)|click/,
+	rmouseEvent = /^(?:mouse|pointer|contextmenu)|click/,
 	rfocusMorph = /^(?:focusinfocus|focusoutblur)$/,
 	rtypenamespace = /^([^.]*)(?:\.(.+)|)$/;
 
@@ -7963,8 +10976,8 @@ jQuery.event = {
 			j = 0;
 			while ( (handleObj = matched.handlers[ j++ ]) && !event.isImmediatePropagationStopped() ) {
 
-				// Triggered event must either 1) have no namespace, or
-				// 2) have namespace(s) a subset or equal to those in the bound event (both can have no namespace).
+				// Triggered event must either 1) have no namespace, or 2) have namespace(s)
+				// a subset or equal to those in the bound event (both can have no namespace).
 				if ( !event.namespace_re || event.namespace_re.test( handleObj.namespace ) ) {
 
 					event.handleObj = handleObj;
@@ -8114,7 +11127,7 @@ jQuery.event = {
 			event.target = document;
 		}
 
-		// Support: Safari 6.0+, Chrome < 28
+		// Support: Safari 6.0+, Chrome<28
 		// Target should not be a text node (#504, #13143)
 		if ( event.target.nodeType === 3 ) {
 			event.target = event.target.parentNode;
@@ -8167,7 +11180,7 @@ jQuery.event = {
 
 				// Support: Firefox 20+
 				// Firefox doesn't alert if the returnValue field is not set.
-				if ( event.result !== undefined ) {
+				if ( event.result !== undefined && event.originalEvent ) {
 					event.originalEvent.returnValue = event.result;
 				}
 			}
@@ -8218,9 +11231,9 @@ jQuery.Event = function( src, props ) {
 		// Events bubbling up the document may have been marked as prevented
 		// by a handler lower down the tree; reflect the correct value.
 		this.isDefaultPrevented = src.defaultPrevented ||
-				// Support: Android < 4.0
 				src.defaultPrevented === undefined &&
-				src.getPreventDefault && src.getPreventDefault() ?
+				// Support: Android<4.0
+				src.returnValue === false ?
 			returnTrue :
 			returnFalse;
 
@@ -8267,7 +11280,14 @@ jQuery.Event.prototype = {
 		}
 	},
 	stopImmediatePropagation: function() {
+		var e = this.originalEvent;
+
 		this.isImmediatePropagationStopped = returnTrue;
+
+		if ( e && e.stopImmediatePropagation ) {
+			e.stopImmediatePropagation();
+		}
+
 		this.stopPropagation();
 	}
 };
@@ -8276,7 +11296,9 @@ jQuery.Event.prototype = {
 // Support: Chrome 15+
 jQuery.each({
 	mouseenter: "mouseover",
-	mouseleave: "mouseout"
+	mouseleave: "mouseout",
+	pointerenter: "pointerover",
+	pointerleave: "pointerout"
 }, function( orig, fix ) {
 	jQuery.event.special[ orig ] = {
 		delegateType: fix,
@@ -8300,8 +11322,8 @@ jQuery.each({
 	};
 });
 
-// Create "bubbling" focus and blur events
 // Support: Firefox, Chrome, Safari
+// Create "bubbling" focus and blur events
 if ( !support.focusinBubbles ) {
 	jQuery.each({ focus: "focusin", blur: "focusout" }, function( orig, fix ) {
 
@@ -8454,7 +11476,7 @@ var
 	// We have to close these tags to support XHTML (#13200)
 	wrapMap = {
 
-		// Support: IE 9
+		// Support: IE9
 		option: [ 1, "<select multiple='multiple'>", "</select>" ],
 
 		thead: [ 1, "<table>", "</table>" ],
@@ -8465,7 +11487,7 @@ var
 		_default: [ 0, "", "" ]
 	};
 
-// Support: IE 9
+// Support: IE9
 wrapMap.optgroup = wrapMap.option;
 
 wrapMap.tbody = wrapMap.tfoot = wrapMap.colgroup = wrapMap.caption = wrapMap.thead;
@@ -8555,7 +11577,7 @@ function getAll( context, tag ) {
 		ret;
 }
 
-// Support: IE >= 9
+// Fix IE bugs, see support tests
 function fixInput( src, dest ) {
 	var nodeName = dest.nodeName.toLowerCase();
 
@@ -8575,8 +11597,7 @@ jQuery.extend({
 			clone = elem.cloneNode( true ),
 			inPage = jQuery.contains( elem.ownerDocument, elem );
 
-		// Support: IE >= 9
-		// Fix Cloning issues
+		// Fix IE cloning issues
 		if ( !support.noCloneChecked && ( elem.nodeType === 1 || elem.nodeType === 11 ) &&
 				!jQuery.isXMLDoc( elem ) ) {
 
@@ -8627,8 +11648,8 @@ jQuery.extend({
 
 				// Add nodes directly
 				if ( jQuery.type( elem ) === "object" ) {
-					// Support: QtWebKit
-					// jQuery.merge because push.apply(_, arraylike) throws
+					// Support: QtWebKit, PhantomJS
+					// push.apply(_, arraylike) throws on ancient WebKit
 					jQuery.merge( nodes, elem.nodeType ? [ elem ] : elem );
 
 				// Convert non-html into a text node
@@ -8650,15 +11671,14 @@ jQuery.extend({
 						tmp = tmp.lastChild;
 					}
 
-					// Support: QtWebKit
-					// jQuery.merge because push.apply(_, arraylike) throws
+					// Support: QtWebKit, PhantomJS
+					// push.apply(_, arraylike) throws on ancient WebKit
 					jQuery.merge( nodes, tmp.childNodes );
 
 					// Remember the top-level container
 					tmp = fragment.firstChild;
 
-					// Fixes #12346
-					// Support: Webkit, IE
+					// Ensure the created nodes are orphaned (#12392)
 					tmp.textContent = "";
 				}
 			}
@@ -8701,7 +11721,7 @@ jQuery.extend({
 	},
 
 	cleanData: function( elems ) {
-		var data, elem, events, type, key, j,
+		var data, elem, type, key,
 			special = jQuery.event.special,
 			i = 0;
 
@@ -8710,9 +11730,8 @@ jQuery.extend({
 				key = elem[ data_priv.expando ];
 
 				if ( key && (data = data_priv.cache[ key ]) ) {
-					events = Object.keys( data.events || {} );
-					if ( events.length ) {
-						for ( j = 0; (type = events[j]) !== undefined; j++ ) {
+					if ( data.events ) {
+						for ( type in data.events ) {
 							if ( special[ type ] ) {
 								jQuery.event.remove( elem, type );
 
@@ -9015,14 +12034,15 @@ var iframe,
  */
 // Called only from within defaultDisplay
 function actualDisplay( name, doc ) {
-	var elem = jQuery( doc.createElement( name ) ).appendTo( doc.body ),
+	var style,
+		elem = jQuery( doc.createElement( name ) ).appendTo( doc.body ),
 
 		// getDefaultComputedStyle might be reliably used only on attached element
-		display = window.getDefaultComputedStyle ?
+		display = window.getDefaultComputedStyle && ( style = window.getDefaultComputedStyle( elem[ 0 ] ) ) ?
 
-			// Use of this method is a temporary fix (more like optmization) until something better comes along,
+			// Use of this method is a temporary fix (more like optimization) until something better comes along,
 			// since it was removed from specification and supported only in FF
-			window.getDefaultComputedStyle( elem[ 0 ] ).display : jQuery.css( elem[ 0 ], "display" );
+			style.display : jQuery.css( elem[ 0 ], "display" );
 
 	// We don't have any data stored on the element,
 	// so use "detach" method as fast way to get rid of the element
@@ -9070,7 +12090,14 @@ var rmargin = (/^margin/);
 var rnumnonpx = new RegExp( "^(" + pnum + ")(?!px)[a-z%]+$", "i" );
 
 var getStyles = function( elem ) {
-		return elem.ownerDocument.defaultView.getComputedStyle( elem, null );
+		// Support: IE<=11+, Firefox<=30+ (#15098, #14150)
+		// IE throws on elements created in popups
+		// FF meanwhile throws on frame elements through "defaultView.getComputedStyle"
+		if ( elem.ownerDocument.defaultView.opener ) {
+			return elem.ownerDocument.defaultView.getComputedStyle( elem, null );
+		}
+
+		return window.getComputedStyle( elem, null );
 	};
 
 
@@ -9082,7 +12109,7 @@ function curCSS( elem, name, computed ) {
 	computed = computed || getStyles( elem );
 
 	// Support: IE9
-	// getPropertyValue is only needed for .css('filter') in IE9, see #12537
+	// getPropertyValue is only needed for .css('filter') (#12537)
 	if ( computed ) {
 		ret = computed.getPropertyValue( name ) || computed[ name ];
 	}
@@ -9128,15 +12155,13 @@ function addGetHookIf( conditionFn, hookFn ) {
 	return {
 		get: function() {
 			if ( conditionFn() ) {
-				// Hook not needed (or it's not possible to use it due to missing dependency),
-				// remove it.
-				// Since there are no other hooks for marginRight, remove the whole object.
+				// Hook not needed (or it's not possible to use it due
+				// to missing dependency), remove it.
 				delete this.get;
 				return;
 			}
 
 			// Hook needed; redefine it so that the support test is not executed again.
-
 			return (this.get = hookFn).apply( this, arguments );
 		}
 	};
@@ -9145,28 +12170,34 @@ function addGetHookIf( conditionFn, hookFn ) {
 
 (function() {
 	var pixelPositionVal, boxSizingReliableVal,
-		// Support: Firefox, Android 2.3 (Prefixed box-sizing versions).
-		divReset = "padding:0;margin:0;border:0;display:block;-webkit-box-sizing:content-box;" +
-			"-moz-box-sizing:content-box;box-sizing:content-box",
 		docElem = document.documentElement,
 		container = document.createElement( "div" ),
 		div = document.createElement( "div" );
 
+	if ( !div.style ) {
+		return;
+	}
+
+	// Support: IE9-11+
+	// Style of cloned element affects source element cloned (#8908)
 	div.style.backgroundClip = "content-box";
 	div.cloneNode( true ).style.backgroundClip = "";
 	support.clearCloneStyle = div.style.backgroundClip === "content-box";
 
-	container.style.cssText = "border:0;width:0;height:0;position:absolute;top:0;left:-9999px;" +
-		"margin-top:1px";
+	container.style.cssText = "border:0;width:0;height:0;top:0;left:-9999px;margin-top:1px;" +
+		"position:absolute";
 	container.appendChild( div );
 
 	// Executing both pixelPosition & boxSizingReliable tests require only one layout
 	// so they're executed at the same time to save the second computation.
 	function computePixelPositionAndBoxSizingReliable() {
-		// Support: Firefox, Android 2.3 (Prefixed box-sizing versions).
-		div.style.cssText = "-webkit-box-sizing:border-box;-moz-box-sizing:border-box;" +
-			"box-sizing:border-box;padding:1px;border:1px;display:block;width:4px;margin-top:1%;" +
-			"position:absolute;top:1%";
+		div.style.cssText =
+			// Support: Firefox<29, Android 2.3
+			// Vendor-prefix box-sizing
+			"-webkit-box-sizing:border-box;-moz-box-sizing:border-box;" +
+			"box-sizing:border-box;display:block;margin-top:1%;top:1%;" +
+			"border:1px;padding:1px;width:4px;position:absolute";
+		div.innerHTML = "";
 		docElem.appendChild( container );
 
 		var divStyle = window.getComputedStyle( div, null );
@@ -9176,10 +12207,12 @@ function addGetHookIf( conditionFn, hookFn ) {
 		docElem.removeChild( container );
 	}
 
-	// Use window.getComputedStyle because jsdom on node.js will break without it.
+	// Support: node.js jsdom
+	// Don't assume that getComputedStyle is a property of the global object
 	if ( window.getComputedStyle ) {
-		jQuery.extend(support, {
+		jQuery.extend( support, {
 			pixelPosition: function() {
+
 				// This test is executed only once but we still do memoizing
 				// since we can use the boxSizingReliable pre-computing.
 				// No need to check if the test was already performed, though.
@@ -9193,6 +12226,7 @@ function addGetHookIf( conditionFn, hookFn ) {
 				return boxSizingReliableVal;
 			},
 			reliableMarginRight: function() {
+
 				// Support: Android 2.3
 				// Check if div with explicit width and no margin-right incorrectly
 				// gets computed margin-right based on width of container. (#3333)
@@ -9200,7 +12234,13 @@ function addGetHookIf( conditionFn, hookFn ) {
 				// This support function is only executed once so no memoizing is needed.
 				var ret,
 					marginDiv = div.appendChild( document.createElement( "div" ) );
-				marginDiv.style.cssText = div.style.cssText = divReset;
+
+				// Reset CSS: box-sizing; display; margin; border; padding
+				marginDiv.style.cssText = div.style.cssText =
+					// Support: Firefox<29, Android 2.3
+					// Vendor-prefix box-sizing
+					"-webkit-box-sizing:content-box;-moz-box-sizing:content-box;" +
+					"box-sizing:content-box;display:block;margin:0;border:0;padding:0";
 				marginDiv.style.marginRight = marginDiv.style.width = "0";
 				div.style.width = "1px";
 				docElem.appendChild( container );
@@ -9208,9 +12248,7 @@ function addGetHookIf( conditionFn, hookFn ) {
 				ret = !parseFloat( window.getComputedStyle( marginDiv, null ).marginRight );
 
 				docElem.removeChild( container );
-
-				// Clean up the div for other support tests.
-				div.innerHTML = "";
+				div.removeChild( marginDiv );
 
 				return ret;
 			}
@@ -9242,29 +12280,29 @@ jQuery.swap = function( elem, options, callback, args ) {
 
 
 var
-	// swappable if display is none or starts with table except "table", "table-cell", or "table-caption"
-	// see here for display values: https://developer.mozilla.org/en-US/docs/CSS/display
+	// Swappable if display is none or starts with table except "table", "table-cell", or "table-caption"
+	// See here for display values: https://developer.mozilla.org/en-US/docs/CSS/display
 	rdisplayswap = /^(none|table(?!-c[ea]).+)/,
 	rnumsplit = new RegExp( "^(" + pnum + ")(.*)$", "i" ),
 	rrelNum = new RegExp( "^([+-])=(" + pnum + ")", "i" ),
 
 	cssShow = { position: "absolute", visibility: "hidden", display: "block" },
 	cssNormalTransform = {
-		letterSpacing: 0,
-		fontWeight: 400
+		letterSpacing: "0",
+		fontWeight: "400"
 	},
 
 	cssPrefixes = [ "Webkit", "O", "Moz", "ms" ];
 
-// return a css property mapped to a potentially vendor prefixed property
+// Return a css property mapped to a potentially vendor prefixed property
 function vendorPropName( style, name ) {
 
-	// shortcut for names that are not vendor prefixed
+	// Shortcut for names that are not vendor prefixed
 	if ( name in style ) {
 		return name;
 	}
 
-	// check for vendor prefixed names
+	// Check for vendor prefixed names
 	var capName = name[0].toUpperCase() + name.slice(1),
 		origName = name,
 		i = cssPrefixes.length;
@@ -9297,7 +12335,7 @@ function augmentWidthOrHeight( elem, name, extra, isBorderBox, styles ) {
 		val = 0;
 
 	for ( ; i < 4; i += 2 ) {
-		// both box models exclude margin, so add it if we want it
+		// Both box models exclude margin, so add it if we want it
 		if ( extra === "margin" ) {
 			val += jQuery.css( elem, extra + cssExpand[ i ], true, styles );
 		}
@@ -9308,15 +12346,15 @@ function augmentWidthOrHeight( elem, name, extra, isBorderBox, styles ) {
 				val -= jQuery.css( elem, "padding" + cssExpand[ i ], true, styles );
 			}
 
-			// at this point, extra isn't border nor margin, so remove border
+			// At this point, extra isn't border nor margin, so remove border
 			if ( extra !== "margin" ) {
 				val -= jQuery.css( elem, "border" + cssExpand[ i ] + "Width", true, styles );
 			}
 		} else {
-			// at this point, extra isn't content, so add padding
+			// At this point, extra isn't content, so add padding
 			val += jQuery.css( elem, "padding" + cssExpand[ i ], true, styles );
 
-			// at this point, extra isn't content nor padding, so add border
+			// At this point, extra isn't content nor padding, so add border
 			if ( extra !== "padding" ) {
 				val += jQuery.css( elem, "border" + cssExpand[ i ] + "Width", true, styles );
 			}
@@ -9334,7 +12372,7 @@ function getWidthOrHeight( elem, name, extra ) {
 		styles = getStyles( elem ),
 		isBorderBox = jQuery.css( elem, "boxSizing", false, styles ) === "border-box";
 
-	// some non-html elements return undefined for offsetWidth, so check for null/undefined
+	// Some non-html elements return undefined for offsetWidth, so check for null/undefined
 	// svg - https://bugzilla.mozilla.org/show_bug.cgi?id=649285
 	// MathML - https://bugzilla.mozilla.org/show_bug.cgi?id=491668
 	if ( val <= 0 || val == null ) {
@@ -9349,7 +12387,7 @@ function getWidthOrHeight( elem, name, extra ) {
 			return val;
 		}
 
-		// we need the check for style in case a browser which returns unreliable values
+		// Check for style in case a browser which returns unreliable values
 		// for getComputedStyle silently falls back to the reliable elem.style
 		valueIsBorderBox = isBorderBox &&
 			( support.boxSizingReliable() || val === elem.style[ name ] );
@@ -9358,7 +12396,7 @@ function getWidthOrHeight( elem, name, extra ) {
 		val = parseFloat( val ) || 0;
 	}
 
-	// use the active box-sizing model to add/subtract irrelevant styles
+	// Use the active box-sizing model to add/subtract irrelevant styles
 	return ( val +
 		augmentWidthOrHeight(
 			elem,
@@ -9398,13 +12436,10 @@ function showHide( elements, show ) {
 				values[ index ] = data_priv.access( elem, "olddisplay", defaultDisplay(elem.nodeName) );
 			}
 		} else {
+			hidden = isHidden( elem );
 
-			if ( !values[ index ] ) {
-				hidden = isHidden( elem );
-
-				if ( display && display !== "none" || !hidden ) {
-					data_priv.set( elem, "olddisplay", hidden ? display : jQuery.css(elem, "display") );
-				}
+			if ( display !== "none" || !hidden ) {
+				data_priv.set( elem, "olddisplay", hidden ? display : jQuery.css( elem, "display" ) );
 			}
 		}
 	}
@@ -9425,12 +12460,14 @@ function showHide( elements, show ) {
 }
 
 jQuery.extend({
+
 	// Add in style property hooks for overriding the default
 	// behavior of getting and setting a style property
 	cssHooks: {
 		opacity: {
 			get: function( elem, computed ) {
 				if ( computed ) {
+
 					// We should always get a number back from opacity
 					var ret = curCSS( elem, "opacity" );
 					return ret === "" ? "1" : ret;
@@ -9443,6 +12480,8 @@ jQuery.extend({
 	cssNumber: {
 		"columnCount": true,
 		"fillOpacity": true,
+		"flexGrow": true,
+		"flexShrink": true,
 		"fontWeight": true,
 		"lineHeight": true,
 		"opacity": true,
@@ -9456,12 +12495,12 @@ jQuery.extend({
 	// Add in properties whose names you wish to fix before
 	// setting or getting the value
 	cssProps: {
-		// normalize float css property
 		"float": "cssFloat"
 	},
 
 	// Get and set the style property on a DOM Node
 	style: function( elem, name, value, extra ) {
+
 		// Don't set styles on text and comment nodes
 		if ( !elem || elem.nodeType === 3 || elem.nodeType === 8 || !elem.style ) {
 			return;
@@ -9474,42 +12513,38 @@ jQuery.extend({
 
 		name = jQuery.cssProps[ origName ] || ( jQuery.cssProps[ origName ] = vendorPropName( style, origName ) );
 
-		// gets hook for the prefixed version
-		// followed by the unprefixed version
+		// Gets hook for the prefixed version, then unprefixed version
 		hooks = jQuery.cssHooks[ name ] || jQuery.cssHooks[ origName ];
 
 		// Check if we're setting a value
 		if ( value !== undefined ) {
 			type = typeof value;
 
-			// convert relative number strings (+= or -=) to relative numbers. #7345
+			// Convert "+=" or "-=" to relative numbers (#7345)
 			if ( type === "string" && (ret = rrelNum.exec( value )) ) {
 				value = ( ret[1] + 1 ) * ret[2] + parseFloat( jQuery.css( elem, name ) );
 				// Fixes bug #9237
 				type = "number";
 			}
 
-			// Make sure that null and NaN values aren't set. See: #7116
+			// Make sure that null and NaN values aren't set (#7116)
 			if ( value == null || value !== value ) {
 				return;
 			}
 
-			// If a number was passed in, add 'px' to the (except for certain CSS properties)
+			// If a number, add 'px' to the (except for certain CSS properties)
 			if ( type === "number" && !jQuery.cssNumber[ origName ] ) {
 				value += "px";
 			}
 
-			// Fixes #8908, it can be done more correctly by specifying setters in cssHooks,
-			// but it would mean to define eight (for every problematic property) identical functions
+			// Support: IE9-11+
+			// background-* props affect original clone's values
 			if ( !support.clearCloneStyle && value === "" && name.indexOf( "background" ) === 0 ) {
 				style[ name ] = "inherit";
 			}
 
 			// If a hook was provided, use that value, otherwise just set the specified value
 			if ( !hooks || !("set" in hooks) || (value = hooks.set( elem, value, extra )) !== undefined ) {
-				// Support: Chrome, Safari
-				// Setting style to blank string required to delete "style: x !important;"
-				style[ name ] = "";
 				style[ name ] = value;
 			}
 
@@ -9531,8 +12566,7 @@ jQuery.extend({
 		// Make sure that we're working with the right name
 		name = jQuery.cssProps[ origName ] || ( jQuery.cssProps[ origName ] = vendorPropName( elem.style, origName ) );
 
-		// gets hook for the prefixed version
-		// followed by the unprefixed version
+		// Try prefixed name followed by the unprefixed name
 		hooks = jQuery.cssHooks[ name ] || jQuery.cssHooks[ origName ];
 
 		// If a hook was provided get the computed value from there
@@ -9545,12 +12579,12 @@ jQuery.extend({
 			val = curCSS( elem, name, styles );
 		}
 
-		//convert "normal" to computed value
+		// Convert "normal" to computed value
 		if ( val === "normal" && name in cssNormalTransform ) {
 			val = cssNormalTransform[ name ];
 		}
 
-		// Return, converting to number if forced or a qualifier was provided and val looks numeric
+		// Make numeric if forced or a qualifier was provided and val looks numeric
 		if ( extra === "" || extra ) {
 			num = parseFloat( val );
 			return extra === true || jQuery.isNumeric( num ) ? num || 0 : val;
@@ -9563,9 +12597,10 @@ jQuery.each([ "height", "width" ], function( i, name ) {
 	jQuery.cssHooks[ name ] = {
 		get: function( elem, computed, extra ) {
 			if ( computed ) {
-				// certain elements can have dimension info if we invisibly show them
-				// however, it must have a current display style that would benefit from this
-				return elem.offsetWidth === 0 && rdisplayswap.test( jQuery.css( elem, "display" ) ) ?
+
+				// Certain elements can have dimension info if we invisibly show them
+				// but it must have a current display style that would benefit
+				return rdisplayswap.test( jQuery.css( elem, "display" ) ) && elem.offsetWidth === 0 ?
 					jQuery.swap( elem, cssShow, function() {
 						return getWidthOrHeight( elem, name, extra );
 					}) :
@@ -9592,8 +12627,6 @@ jQuery.each([ "height", "width" ], function( i, name ) {
 jQuery.cssHooks.marginRight = addGetHookIf( support.reliableMarginRight,
 	function( elem, computed ) {
 		if ( computed ) {
-			// WebKit Bug 13343 - getComputedStyle returns wrong value for margin-right
-			// Work around by temporarily setting element display to inline-block
 			return jQuery.swap( elem, { "display": "inline-block" },
 				curCSS, [ elem, "marginRight" ] );
 		}
@@ -9611,7 +12644,7 @@ jQuery.each({
 			var i = 0,
 				expanded = {},
 
-				// assumes a single number if not a string
+				// Assumes a single number if not a string
 				parts = typeof value === "string" ? value.split(" ") : [ value ];
 
 			for ( ; i < 4; i++ ) {
@@ -9734,17 +12767,18 @@ Tween.propHooks = {
 				return tween.elem[ tween.prop ];
 			}
 
-			// passing an empty string as a 3rd parameter to .css will automatically
-			// attempt a parseFloat and fallback to a string if the parse fails
-			// so, simple values such as "10px" are parsed to Float.
-			// complex values such as "rotate(1rad)" are returned as is.
+			// Passing an empty string as a 3rd parameter to .css will automatically
+			// attempt a parseFloat and fallback to a string if the parse fails.
+			// Simple values such as "10px" are parsed to Float;
+			// complex values such as "rotate(1rad)" are returned as-is.
 			result = jQuery.css( tween.elem, tween.prop, "" );
 			// Empty strings, null, undefined and "auto" are converted to 0.
 			return !result || result === "auto" ? 0 : result;
 		},
 		set: function( tween ) {
-			// use step hook for back compat - use cssHook if its there - use .style if its
-			// available and use plain properties where available
+			// Use step hook for back compat.
+			// Use cssHook if its there.
+			// Use .style if available and use plain properties where available.
 			if ( jQuery.fx.step[ tween.prop ] ) {
 				jQuery.fx.step[ tween.prop ]( tween );
 			} else if ( tween.elem.style && ( tween.elem.style[ jQuery.cssProps[ tween.prop ] ] != null || jQuery.cssHooks[ tween.prop ] ) ) {
@@ -9758,7 +12792,6 @@ Tween.propHooks = {
 
 // Support: IE9
 // Panic based approach to setting things on disconnected nodes
-
 Tween.propHooks.scrollTop = Tween.propHooks.scrollLeft = {
 	set: function( tween ) {
 		if ( tween.elem.nodeType && tween.elem.parentNode ) {
@@ -9814,16 +12847,16 @@ var
 				start = +target || 1;
 
 				do {
-					// If previous iteration zeroed out, double until we get *something*
-					// Use a string for doubling factor so we don't accidentally see scale as unchanged below
+					// If previous iteration zeroed out, double until we get *something*.
+					// Use string for doubling so we don't accidentally see scale as unchanged below
 					scale = scale || ".5";
 
 					// Adjust and apply
 					start = start / scale;
 					jQuery.style( tween.elem, prop, start + unit );
 
-				// Update scale, tolerating zero or NaN from tween.cur()
-				// And breaking the loop if scale is unchanged or perfect, or if we've just had enough
+				// Update scale, tolerating zero or NaN from tween.cur(),
+				// break the loop if scale is unchanged or perfect, or if we've just had enough
 				} while ( scale !== (scale = tween.cur() / target) && scale !== 1 && --maxIterations );
 			}
 
@@ -9855,8 +12888,8 @@ function genFx( type, includeWidth ) {
 		i = 0,
 		attrs = { height: type };
 
-	// if we include width, step value is 1 to do all cssExpand values,
-	// if we don't include width, step value is 2 to skip over Left and Right
+	// If we include width, step value is 1 to do all cssExpand values,
+	// otherwise step value is 2 to skip over Left and Right
 	includeWidth = includeWidth ? 1 : 0;
 	for ( ; i < 4 ; i += 2 - includeWidth ) {
 		which = cssExpand[ i ];
@@ -9878,7 +12911,7 @@ function createTween( value, prop, animation ) {
 	for ( ; index < length; index++ ) {
 		if ( (tween = collection[ index ].call( animation, prop, value )) ) {
 
-			// we're done with this property
+			// We're done with this property
 			return tween;
 		}
 	}
@@ -9886,14 +12919,14 @@ function createTween( value, prop, animation ) {
 
 function defaultPrefilter( elem, props, opts ) {
 	/* jshint validthis: true */
-	var prop, value, toggle, tween, hooks, oldfire, display,
+	var prop, value, toggle, tween, hooks, oldfire, display, checkDisplay,
 		anim = this,
 		orig = {},
 		style = elem.style,
 		hidden = elem.nodeType && isHidden( elem ),
 		dataShow = data_priv.get( elem, "fxshow" );
 
-	// handle queue: false promises
+	// Handle queue: false promises
 	if ( !opts.queue ) {
 		hooks = jQuery._queueHooks( elem, "fx" );
 		if ( hooks.unqueued == null ) {
@@ -9908,8 +12941,7 @@ function defaultPrefilter( elem, props, opts ) {
 		hooks.unqueued++;
 
 		anim.always(function() {
-			// doing this makes sure that the complete handler will be called
-			// before this completes
+			// Ensure the complete handler is called before this completes
 			anim.always(function() {
 				hooks.unqueued--;
 				if ( !jQuery.queue( elem, "fx" ).length ) {
@@ -9919,7 +12951,7 @@ function defaultPrefilter( elem, props, opts ) {
 		});
 	}
 
-	// height/width overflow pass
+	// Height/width overflow pass
 	if ( elem.nodeType === 1 && ( "height" in props || "width" in props ) ) {
 		// Make sure that nothing sneaks out
 		// Record all 3 overflow attributes because IE9-10 do not
@@ -9930,13 +12962,12 @@ function defaultPrefilter( elem, props, opts ) {
 		// Set display property to inline-block for height/width
 		// animations on inline elements that are having width/height animated
 		display = jQuery.css( elem, "display" );
-		// Get default display if display is currently "none"
-		if ( display === "none" ) {
-			display = defaultDisplay( elem.nodeName );
-		}
-		if ( display === "inline" &&
-				jQuery.css( elem, "float" ) === "none" ) {
 
+		// Test default display if display is currently "none"
+		checkDisplay = display === "none" ?
+			data_priv.get( elem, "olddisplay" ) || defaultDisplay( elem.nodeName ) : display;
+
+		if ( checkDisplay === "inline" && jQuery.css( elem, "float" ) === "none" ) {
 			style.display = "inline-block";
 		}
 	}
@@ -9966,6 +12997,10 @@ function defaultPrefilter( elem, props, opts ) {
 				}
 			}
 			orig[ prop ] = dataShow && dataShow[ prop ] || jQuery.style( elem, prop );
+
+		// Any non-fx value stops us from restoring the original display value
+		} else {
+			display = undefined;
 		}
 	}
 
@@ -9978,7 +13013,7 @@ function defaultPrefilter( elem, props, opts ) {
 			dataShow = data_priv.access( elem, "fxshow", {} );
 		}
 
-		// store state if its toggle - enables .stop().toggle() to "reverse"
+		// Store state if its toggle - enables .stop().toggle() to "reverse"
 		if ( toggle ) {
 			dataShow.hidden = !hidden;
 		}
@@ -10008,6 +13043,10 @@ function defaultPrefilter( elem, props, opts ) {
 				}
 			}
 		}
+
+	// If this is a noop like .hide().hide(), restore an overwritten display value
+	} else if ( (display === "none" ? defaultDisplay( elem.nodeName ) : display) === "inline" ) {
+		style.display = display;
 	}
 }
 
@@ -10034,8 +13073,8 @@ function propFilter( props, specialEasing ) {
 			value = hooks.expand( value );
 			delete props[ name ];
 
-			// not quite $.extend, this wont overwrite keys already present.
-			// also - reusing 'index' from above because we have the correct "name"
+			// Not quite $.extend, this won't overwrite existing keys.
+			// Reusing 'index' because we have the correct "name"
 			for ( index in value ) {
 				if ( !( index in props ) ) {
 					props[ index ] = value[ index ];
@@ -10054,7 +13093,7 @@ function Animation( elem, properties, options ) {
 		index = 0,
 		length = animationPrefilters.length,
 		deferred = jQuery.Deferred().always( function() {
-			// don't match elem in the :animated selector
+			// Don't match elem in the :animated selector
 			delete tick.elem;
 		}),
 		tick = function() {
@@ -10063,7 +13102,8 @@ function Animation( elem, properties, options ) {
 			}
 			var currentTime = fxNow || createFxNow(),
 				remaining = Math.max( 0, animation.startTime + animation.duration - currentTime ),
-				// archaic crash bug won't allow us to use 1 - ( 0.5 || 0 ) (#12497)
+				// Support: Android 2.3
+				// Archaic crash bug won't allow us to use `1 - ( 0.5 || 0 )` (#12497)
 				temp = remaining / animation.duration || 0,
 				percent = 1 - temp,
 				index = 0,
@@ -10099,7 +13139,7 @@ function Animation( elem, properties, options ) {
 			},
 			stop: function( gotoEnd ) {
 				var index = 0,
-					// if we are going to the end, we want to run all the tweens
+					// If we are going to the end, we want to run all the tweens
 					// otherwise we skip this part
 					length = gotoEnd ? animation.tweens.length : 0;
 				if ( stopped ) {
@@ -10110,8 +13150,7 @@ function Animation( elem, properties, options ) {
 					animation.tweens[ index ].run( 1 );
 				}
 
-				// resolve when we played the last frame
-				// otherwise, reject
+				// Resolve when we played the last frame; otherwise, reject
 				if ( gotoEnd ) {
 					deferred.resolveWith( elem, [ animation, gotoEnd ] );
 				} else {
@@ -10193,7 +13232,7 @@ jQuery.speed = function( speed, easing, fn ) {
 	opt.duration = jQuery.fx.off ? 0 : typeof opt.duration === "number" ? opt.duration :
 		opt.duration in jQuery.fx.speeds ? jQuery.fx.speeds[ opt.duration ] : jQuery.fx.speeds._default;
 
-	// normalize opt.queue - true/undefined/null -> "fx"
+	// Normalize opt.queue - true/undefined/null -> "fx"
 	if ( opt.queue == null || opt.queue === true ) {
 		opt.queue = "fx";
 	}
@@ -10217,10 +13256,10 @@ jQuery.speed = function( speed, easing, fn ) {
 jQuery.fn.extend({
 	fadeTo: function( speed, to, easing, callback ) {
 
-		// show any hidden elements after setting opacity to 0
+		// Show any hidden elements after setting opacity to 0
 		return this.filter( isHidden ).css( "opacity", 0 ).show()
 
-			// animate to the value specified
+			// Animate to the value specified
 			.end().animate({ opacity: to }, speed, easing, callback );
 	},
 	animate: function( prop, speed, easing, callback ) {
@@ -10283,9 +13322,9 @@ jQuery.fn.extend({
 				}
 			}
 
-			// start the next in the queue if the last step wasn't forced
-			// timers currently will call their complete callbacks, which will dequeue
-			// but only if they were gotoEnd
+			// Start the next in the queue if the last step wasn't forced.
+			// Timers currently will call their complete callbacks, which
+			// will dequeue but only if they were gotoEnd.
 			if ( dequeue || !gotoEnd ) {
 				jQuery.dequeue( this, type );
 			}
@@ -10303,17 +13342,17 @@ jQuery.fn.extend({
 				timers = jQuery.timers,
 				length = queue ? queue.length : 0;
 
-			// enable finishing flag on private data
+			// Enable finishing flag on private data
 			data.finish = true;
 
-			// empty the queue first
+			// Empty the queue first
 			jQuery.queue( this, type, [] );
 
 			if ( hooks && hooks.stop ) {
 				hooks.stop.call( this, true );
 			}
 
-			// look for any active animations, and finish them
+			// Look for any active animations, and finish them
 			for ( index = timers.length; index--; ) {
 				if ( timers[ index ].elem === this && timers[ index ].queue === type ) {
 					timers[ index ].anim.stop( true );
@@ -10321,14 +13360,14 @@ jQuery.fn.extend({
 				}
 			}
 
-			// look for any animations in the old queue and finish them
+			// Look for any animations in the old queue and finish them
 			for ( index = 0; index < length; index++ ) {
 				if ( queue[ index ] && queue[ index ].finish ) {
 					queue[ index ].finish.call( this );
 				}
 			}
 
-			// turn off finishing flag
+			// Turn off finishing flag
 			delete data.finish;
 		});
 	}
@@ -10431,21 +13470,21 @@ jQuery.fn.delay = function( time, type ) {
 
 	input.type = "checkbox";
 
-	// Support: iOS 5.1, Android 4.x, Android 2.3
-	// Check the default checkbox/radio value ("" on old WebKit; "on" elsewhere)
+	// Support: iOS<=5.1, Android<=4.2+
+	// Default value for a checkbox should be "on"
 	support.checkOn = input.value !== "";
 
-	// Must access the parent to make an option select properly
-	// Support: IE9, IE10
+	// Support: IE<=11+
+	// Must access selectedIndex to make default options select
 	support.optSelected = opt.selected;
 
-	// Make sure that the options inside disabled selects aren't marked as disabled
-	// (WebKit marks them as disabled)
+	// Support: Android<=2.3
+	// Options inside disabled selects are incorrectly marked as disabled
 	select.disabled = true;
 	support.optDisabled = !opt.disabled;
 
-	// Check if an input maintains its value after becoming a radio
-	// Support: IE9, IE10
+	// Support: IE<=11+
+	// An input loses its value after becoming a radio
 	input = document.createElement( "input" );
 	input.value = "t";
 	input.type = "radio";
@@ -10542,8 +13581,6 @@ jQuery.extend({
 			set: function( elem, value ) {
 				if ( !support.radioValue && value === "radio" &&
 					jQuery.nodeName( elem, "input" ) ) {
-					// Setting the type on a radio button after the value resets the value in IE6-9
-					// Reset value to default in case type is set after value during creation
 					var val = elem.value;
 					elem.setAttribute( "type", value );
 					if ( val ) {
@@ -10613,7 +13650,7 @@ jQuery.extend({
 		var ret, hooks, notxml,
 			nType = elem.nodeType;
 
-		// don't get/set properties on text, comment and attribute nodes
+		// Don't get/set properties on text, comment and attribute nodes
 		if ( !elem || nType === 3 || nType === 8 || nType === 2 ) {
 			return;
 		}
@@ -10649,8 +13686,6 @@ jQuery.extend({
 	}
 });
 
-// Support: IE9+
-// Selectedness for an option in an optgroup can be inaccurate
 if ( !support.optSelected ) {
 	jQuery.propHooks.selected = {
 		get: function( elem ) {
@@ -10758,7 +13793,7 @@ jQuery.fn.extend({
 						}
 					}
 
-					// only assign if different to avoid unneeded rendering.
+					// Only assign if different to avoid unneeded rendering.
 					finalValue = value ? jQuery.trim( cur ) : "";
 					if ( elem.className !== finalValue ) {
 						elem.className = finalValue;
@@ -10785,14 +13820,14 @@ jQuery.fn.extend({
 
 		return this.each(function() {
 			if ( type === "string" ) {
-				// toggle individual class names
+				// Toggle individual class names
 				var className,
 					i = 0,
 					self = jQuery( this ),
 					classNames = value.match( rnotwhite ) || [];
 
 				while ( (className = classNames[ i++ ]) ) {
-					// check each className given, space separated list
+					// Check each className given, space separated list
 					if ( self.hasClass( className ) ) {
 						self.removeClass( className );
 					} else {
@@ -10807,7 +13842,7 @@ jQuery.fn.extend({
 					data_priv.set( this, "__className__", this.className );
 				}
 
-				// If the element has a class name or if we're passed "false",
+				// If the element has a class name or if we're passed `false`,
 				// then remove the whole classname (if there was one, the above saved it).
 				// Otherwise bring back whatever was previously saved (if anything),
 				// falling back to the empty string if nothing was stored.
@@ -10851,9 +13886,9 @@ jQuery.fn.extend({
 				ret = elem.value;
 
 				return typeof ret === "string" ?
-					// handle most common string cases
+					// Handle most common string cases
 					ret.replace(rreturn, "") :
-					// handle cases where value is null/undef or number
+					// Handle cases where value is null/undef or number
 					ret == null ? "" : ret;
 			}
 
@@ -10900,6 +13935,16 @@ jQuery.fn.extend({
 
 jQuery.extend({
 	valHooks: {
+		option: {
+			get: function( elem ) {
+				var val = jQuery.find.attr( elem, "value" );
+				return val != null ?
+					val :
+					// Support: IE10-11+
+					// option.text throws exceptions (#14686, #14858)
+					jQuery.trim( jQuery.text( elem ) );
+			}
+		},
 		select: {
 			get: function( elem ) {
 				var value, option,
@@ -10946,12 +13991,12 @@ jQuery.extend({
 
 				while ( i-- ) {
 					option = options[ i ];
-					if ( (option.selected = jQuery.inArray( jQuery(option).val(), values ) >= 0) ) {
+					if ( (option.selected = jQuery.inArray( option.value, values ) >= 0) ) {
 						optionSet = true;
 					}
 				}
 
-				// force browsers to behave consistently when non-matching value is set
+				// Force browsers to behave consistently when non-matching value is set
 				if ( !optionSet ) {
 					elem.selectedIndex = -1;
 				}
@@ -10972,8 +14017,6 @@ jQuery.each([ "radio", "checkbox" ], function() {
 	};
 	if ( !support.checkOn ) {
 		jQuery.valHooks[ this ].get = function( elem ) {
-			// Support: Webkit
-			// "" is returned instead of "on" if a value isn't specified
 			return elem.getAttribute("value") === null ? "on" : elem.value;
 		};
 	}
@@ -11055,10 +14098,6 @@ jQuery.parseXML = function( data ) {
 
 
 var
-	// Document location
-	ajaxLocParts,
-	ajaxLocation,
-
 	rhash = /#.*$/,
 	rts = /([?&])_=[^&]*/,
 	rheaders = /^(.*?):[ \t]*([^\r\n]*)$/mg,
@@ -11087,22 +14126,13 @@ var
 	transports = {},
 
 	// Avoid comment-prolog char sequence (#10098); must appease lint and evade compression
-	allTypes = "*/".concat("*");
+	allTypes = "*/".concat( "*" ),
 
-// #8138, IE may throw an exception when accessing
-// a field from window.location if document.domain has been set
-try {
-	ajaxLocation = location.href;
-} catch( e ) {
-	// Use the href attribute of an A element
-	// since IE will modify it given document.location
-	ajaxLocation = document.createElement( "a" );
-	ajaxLocation.href = "";
-	ajaxLocation = ajaxLocation.href;
-}
+	// Document location
+	ajaxLocation = window.location.href,
 
-// Segment location into parts
-ajaxLocParts = rurl.exec( ajaxLocation.toLowerCase() ) || [];
+	// Segment location into parts
+	ajaxLocParts = rurl.exec( ajaxLocation.toLowerCase() ) || [];
 
 // Base "constructor" for jQuery.ajaxPrefilter and jQuery.ajaxTransport
 function addToPrefiltersOrTransports( structure ) {
@@ -11581,7 +14611,8 @@ jQuery.extend({
 		}
 
 		// We can fire global events as of now if asked to
-		fireGlobals = s.global;
+		// Don't fire events if jQuery.event is undefined in an AMD-usage scenario (#15118)
+		fireGlobals = jQuery.event && s.global;
 
 		// Watch for a new set of requests
 		if ( fireGlobals && jQuery.active++ === 0 ) {
@@ -11654,7 +14685,7 @@ jQuery.extend({
 			return jqXHR.abort();
 		}
 
-		// aborting is no longer a cancellation
+		// Aborting is no longer a cancellation
 		strAbort = "abort";
 
 		// Install callbacks on deferreds
@@ -11766,8 +14797,7 @@ jQuery.extend({
 					isSuccess = !error;
 				}
 			} else {
-				// We extract error from statusText
-				// then normalize statusText and status for non-aborts
+				// Extract error from statusText and normalize for non-aborts
 				error = statusText;
 				if ( status || !statusText ) {
 					statusText = "error";
@@ -11823,7 +14853,7 @@ jQuery.extend({
 
 jQuery.each( [ "get", "post" ], function( i, method ) {
 	jQuery[ method ] = function( url, data, callback, type ) {
-		// shift arguments if data argument was omitted
+		// Shift arguments if data argument was omitted
 		if ( jQuery.isFunction( data ) ) {
 			type = type || callback;
 			callback = data;
@@ -11837,13 +14867,6 @@ jQuery.each( [ "get", "post" ], function( i, method ) {
 			data: data,
 			success: callback
 		});
-	};
-});
-
-// Attach a bunch of functions for handling common AJAX events
-jQuery.each( [ "ajaxStart", "ajaxStop", "ajaxComplete", "ajaxError", "ajaxSuccess", "ajaxSend" ], function( i, type ) {
-	jQuery.fn[ type ] = function( fn ) {
-		return this.on( type, fn );
 	};
 });
 
@@ -12064,8 +15087,9 @@ var xhrId = 0,
 
 // Support: IE9
 // Open requests must be manually aborted on unload (#5280)
-if ( window.ActiveXObject ) {
-	jQuery( window ).on( "unload", function() {
+// See https://support.microsoft.com/kb/2856746 for more info
+if ( window.attachEvent ) {
+	window.attachEvent( "onunload", function() {
 		for ( var key in xhrCallbacks ) {
 			xhrCallbacks[ key ]();
 		}
@@ -12153,10 +15177,15 @@ jQuery.ajaxTransport(function( options ) {
 				// Create the abort callback
 				callback = xhrCallbacks[ id ] = callback("abort");
 
-				// Do send the request
-				// This may raise an exception which is actually
-				// handled in jQuery.ajax (so no try/catch here)
-				xhr.send( options.hasContent && options.data || null );
+				try {
+					// Do send the request (this may raise an exception)
+					xhr.send( options.hasContent && options.data || null );
+				} catch ( e ) {
+					// #14683: Only rethrow if this hasn't been notified as an error yet
+					if ( callback ) {
+						throw e;
+					}
+				}
 			},
 
 			abort: function() {
@@ -12363,7 +15392,7 @@ jQuery.fn.load = function( url, params, callback ) {
 		off = url.indexOf(" ");
 
 	if ( off >= 0 ) {
-		selector = url.slice( off );
+		selector = jQuery.trim( url.slice( off ) );
 		url = url.slice( 0, off );
 	}
 
@@ -12413,6 +15442,16 @@ jQuery.fn.load = function( url, params, callback ) {
 
 
 
+// Attach a bunch of functions for handling common AJAX events
+jQuery.each( [ "ajaxStart", "ajaxStop", "ajaxComplete", "ajaxError", "ajaxSuccess", "ajaxSend" ], function( i, type ) {
+	jQuery.fn[ type ] = function( fn ) {
+		return this.on( type, fn );
+	};
+});
+
+
+
+
 jQuery.expr.filters.animated = function( elem ) {
 	return jQuery.grep(jQuery.timers, function( fn ) {
 		return elem === fn.elem;
@@ -12449,7 +15488,8 @@ jQuery.offset = {
 		calculatePosition = ( position === "absolute" || position === "fixed" ) &&
 			( curCSSTop + curCSSLeft ).indexOf("auto") > -1;
 
-		// Need to be able to calculate position if either top or left is auto and position is either absolute or fixed
+		// Need to be able to calculate position if either
+		// top or left is auto and position is either absolute or fixed
 		if ( calculatePosition ) {
 			curPosition = curElem.position();
 			curTop = curPosition.top;
@@ -12506,8 +15546,8 @@ jQuery.fn.extend({
 			return box;
 		}
 
+		// Support: BlackBerry 5, iOS 3 (original iPhone)
 		// If we don't have gBCR, just use 0,0 rather than error
-		// BlackBerry 5, iOS 3 (original iPhone)
 		if ( typeof elem.getBoundingClientRect !== strundefined ) {
 			box = elem.getBoundingClientRect();
 		}
@@ -12529,7 +15569,7 @@ jQuery.fn.extend({
 
 		// Fixed elements are offset from window (parentOffset = {top:0, left: 0}, because it is its only offset parent
 		if ( jQuery.css( elem, "position" ) === "fixed" ) {
-			// We assume that getBoundingClientRect is available when computed position is fixed
+			// Assume getBoundingClientRect is there when computed position is fixed
 			offset = elem.getBoundingClientRect();
 
 		} else {
@@ -12592,16 +15632,18 @@ jQuery.each( { scrollLeft: "pageXOffset", scrollTop: "pageYOffset" }, function( 
 	};
 });
 
+// Support: Safari<7+, Chrome<37+
 // Add the top/left cssHooks using jQuery.fn.position
 // Webkit bug: https://bugs.webkit.org/show_bug.cgi?id=29084
-// getComputedStyle returns percent when specified for top/left/bottom/right
-// rather than make the css module depend on the offset module, we just check for it here
+// Blink bug: https://code.google.com/p/chromium/issues/detail?id=229280
+// getComputedStyle returns percent when specified for top/left/bottom/right;
+// rather than make the css module depend on the offset module, just check for it here
 jQuery.each( [ "top", "left" ], function( i, prop ) {
 	jQuery.cssHooks[ prop ] = addGetHookIf( support.pixelPosition,
 		function( elem, computed ) {
 			if ( computed ) {
 				computed = curCSS( elem, prop );
-				// if curCSS returns percentage, fallback to offset
+				// If curCSS returns percentage, fallback to offset
 				return rnumnonpx.test( computed ) ?
 					jQuery( elem ).position()[ prop ] + "px" :
 					computed;
@@ -12614,7 +15656,7 @@ jQuery.each( [ "top", "left" ], function( i, prop ) {
 // Create innerHeight, innerWidth, height, width, outerHeight and outerWidth methods
 jQuery.each( { Height: "height", Width: "width" }, function( name, type ) {
 	jQuery.each( { padding: "inner" + name, content: type, "": "outer" + name }, function( defaultExtra, funcName ) {
-		// margin is only for outerHeight, outerWidth
+		// Margin is only for outerHeight, outerWidth
 		jQuery.fn[ funcName ] = function( margin, value ) {
 			var chainable = arguments.length && ( defaultExtra || typeof margin !== "boolean" ),
 				extra = defaultExtra || ( margin === true || value === true ? "margin" : "border" );
@@ -12671,6 +15713,12 @@ jQuery.fn.andSelf = jQuery.fn.addBack;
 // derived from file names, and jQuery is normally delivered in a lowercase
 // file name. Do this after creating the global so that if an AMD module wants
 // to call noConflict to hide this version of jQuery, it will work.
+
+// Note that for maximum portability, libraries that are not jQuery should
+// declare themselves as anonymous modules, and avoid setting a global if an
+// AMD loader is present. jQuery is a special case. For more information, see
+// https://github.com/jrburke/requirejs/wiki/Updating-existing-libraries#wiki-anon
+
 if ( typeof define === "function" && define.amd ) {
 	define( "jquery", [], function() {
 		return jQuery;
@@ -12699,8 +15747,8 @@ jQuery.noConflict = function( deep ) {
 	return jQuery;
 };
 
-// Expose jQuery and $ identifiers, even in
-// AMD (#7102#comment:10, https://github.com/jquery/jquery/pull/557)
+// Expose jQuery and $ identifiers, even in AMD
+// (#7102#comment:10, https://github.com/jquery/jquery/pull/557)
 // and CommonJS for browser emulators (#13566)
 if ( typeof noGlobal === strundefined ) {
 	window.jQuery = window.$ = jQuery;
@@ -12713,7 +15761,7 @@ return jQuery;
 
 }));
 
-},{}],13:[function(require,module,exports){
+},{}],28:[function(require,module,exports){
 //! moment.js
 //! version : 2.5.1
 //! authors : Tim Wood, Iskren Chernev, Moment.js contributors
@@ -15115,7 +18163,7 @@ return jQuery;
     }
 }).call(this);
 
-},{}],14:[function(require,module,exports){
+},{}],29:[function(require,module,exports){
 // Middleware that injects the shared data and sharify script
 module.exports = function(req, res, next) {
 
@@ -15160,7 +18208,7 @@ var bootstrapOnClient = module.exports.bootstrapOnClient = function() {
 };
 bootstrapOnClient();
 
-},{}],15:[function(require,module,exports){
+},{}],30:[function(require,module,exports){
 (function () {var io = module.exports;/*! Socket.IO.js build:0.8.6, development. Copyright(c) 2011 LearnBoost <dev@learnboost.com> MIT Licensed */
 
 /**
@@ -18912,6 +21960,1349 @@ var swfobject=function(){var D="undefined",r="object",S="Shockwave Flash",W="Sho
   , this
 );
 }).call(window)
-},{}],16:[function(require,module,exports){
-module.exports=require(9)
+},{}],31:[function(require,module,exports){
+//     Underscore.js 1.6.0
+//     http://underscorejs.org
+//     (c) 2009-2014 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
+//     Underscore may be freely distributed under the MIT license.
+
+(function() {
+
+  // Baseline setup
+  // --------------
+
+  // Establish the root object, `window` in the browser, or `exports` on the server.
+  var root = this;
+
+  // Save the previous value of the `_` variable.
+  var previousUnderscore = root._;
+
+  // Establish the object that gets returned to break out of a loop iteration.
+  var breaker = {};
+
+  // Save bytes in the minified (but not gzipped) version:
+  var ArrayProto = Array.prototype, ObjProto = Object.prototype, FuncProto = Function.prototype;
+
+  // Create quick reference variables for speed access to core prototypes.
+  var
+    push             = ArrayProto.push,
+    slice            = ArrayProto.slice,
+    concat           = ArrayProto.concat,
+    toString         = ObjProto.toString,
+    hasOwnProperty   = ObjProto.hasOwnProperty;
+
+  // All **ECMAScript 5** native function implementations that we hope to use
+  // are declared here.
+  var
+    nativeForEach      = ArrayProto.forEach,
+    nativeMap          = ArrayProto.map,
+    nativeReduce       = ArrayProto.reduce,
+    nativeReduceRight  = ArrayProto.reduceRight,
+    nativeFilter       = ArrayProto.filter,
+    nativeEvery        = ArrayProto.every,
+    nativeSome         = ArrayProto.some,
+    nativeIndexOf      = ArrayProto.indexOf,
+    nativeLastIndexOf  = ArrayProto.lastIndexOf,
+    nativeIsArray      = Array.isArray,
+    nativeKeys         = Object.keys,
+    nativeBind         = FuncProto.bind;
+
+  // Create a safe reference to the Underscore object for use below.
+  var _ = function(obj) {
+    if (obj instanceof _) return obj;
+    if (!(this instanceof _)) return new _(obj);
+    this._wrapped = obj;
+  };
+
+  // Export the Underscore object for **Node.js**, with
+  // backwards-compatibility for the old `require()` API. If we're in
+  // the browser, add `_` as a global object via a string identifier,
+  // for Closure Compiler "advanced" mode.
+  if (typeof exports !== 'undefined') {
+    if (typeof module !== 'undefined' && module.exports) {
+      exports = module.exports = _;
+    }
+    exports._ = _;
+  } else {
+    root._ = _;
+  }
+
+  // Current version.
+  _.VERSION = '1.6.0';
+
+  // Collection Functions
+  // --------------------
+
+  // The cornerstone, an `each` implementation, aka `forEach`.
+  // Handles objects with the built-in `forEach`, arrays, and raw objects.
+  // Delegates to **ECMAScript 5**'s native `forEach` if available.
+  var each = _.each = _.forEach = function(obj, iterator, context) {
+    if (obj == null) return obj;
+    if (nativeForEach && obj.forEach === nativeForEach) {
+      obj.forEach(iterator, context);
+    } else if (obj.length === +obj.length) {
+      for (var i = 0, length = obj.length; i < length; i++) {
+        if (iterator.call(context, obj[i], i, obj) === breaker) return;
+      }
+    } else {
+      var keys = _.keys(obj);
+      for (var i = 0, length = keys.length; i < length; i++) {
+        if (iterator.call(context, obj[keys[i]], keys[i], obj) === breaker) return;
+      }
+    }
+    return obj;
+  };
+
+  // Return the results of applying the iterator to each element.
+  // Delegates to **ECMAScript 5**'s native `map` if available.
+  _.map = _.collect = function(obj, iterator, context) {
+    var results = [];
+    if (obj == null) return results;
+    if (nativeMap && obj.map === nativeMap) return obj.map(iterator, context);
+    each(obj, function(value, index, list) {
+      results.push(iterator.call(context, value, index, list));
+    });
+    return results;
+  };
+
+  var reduceError = 'Reduce of empty array with no initial value';
+
+  // **Reduce** builds up a single result from a list of values, aka `inject`,
+  // or `foldl`. Delegates to **ECMAScript 5**'s native `reduce` if available.
+  _.reduce = _.foldl = _.inject = function(obj, iterator, memo, context) {
+    var initial = arguments.length > 2;
+    if (obj == null) obj = [];
+    if (nativeReduce && obj.reduce === nativeReduce) {
+      if (context) iterator = _.bind(iterator, context);
+      return initial ? obj.reduce(iterator, memo) : obj.reduce(iterator);
+    }
+    each(obj, function(value, index, list) {
+      if (!initial) {
+        memo = value;
+        initial = true;
+      } else {
+        memo = iterator.call(context, memo, value, index, list);
+      }
+    });
+    if (!initial) throw new TypeError(reduceError);
+    return memo;
+  };
+
+  // The right-associative version of reduce, also known as `foldr`.
+  // Delegates to **ECMAScript 5**'s native `reduceRight` if available.
+  _.reduceRight = _.foldr = function(obj, iterator, memo, context) {
+    var initial = arguments.length > 2;
+    if (obj == null) obj = [];
+    if (nativeReduceRight && obj.reduceRight === nativeReduceRight) {
+      if (context) iterator = _.bind(iterator, context);
+      return initial ? obj.reduceRight(iterator, memo) : obj.reduceRight(iterator);
+    }
+    var length = obj.length;
+    if (length !== +length) {
+      var keys = _.keys(obj);
+      length = keys.length;
+    }
+    each(obj, function(value, index, list) {
+      index = keys ? keys[--length] : --length;
+      if (!initial) {
+        memo = obj[index];
+        initial = true;
+      } else {
+        memo = iterator.call(context, memo, obj[index], index, list);
+      }
+    });
+    if (!initial) throw new TypeError(reduceError);
+    return memo;
+  };
+
+  // Return the first value which passes a truth test. Aliased as `detect`.
+  _.find = _.detect = function(obj, predicate, context) {
+    var result;
+    any(obj, function(value, index, list) {
+      if (predicate.call(context, value, index, list)) {
+        result = value;
+        return true;
+      }
+    });
+    return result;
+  };
+
+  // Return all the elements that pass a truth test.
+  // Delegates to **ECMAScript 5**'s native `filter` if available.
+  // Aliased as `select`.
+  _.filter = _.select = function(obj, predicate, context) {
+    var results = [];
+    if (obj == null) return results;
+    if (nativeFilter && obj.filter === nativeFilter) return obj.filter(predicate, context);
+    each(obj, function(value, index, list) {
+      if (predicate.call(context, value, index, list)) results.push(value);
+    });
+    return results;
+  };
+
+  // Return all the elements for which a truth test fails.
+  _.reject = function(obj, predicate, context) {
+    return _.filter(obj, function(value, index, list) {
+      return !predicate.call(context, value, index, list);
+    }, context);
+  };
+
+  // Determine whether all of the elements match a truth test.
+  // Delegates to **ECMAScript 5**'s native `every` if available.
+  // Aliased as `all`.
+  _.every = _.all = function(obj, predicate, context) {
+    predicate || (predicate = _.identity);
+    var result = true;
+    if (obj == null) return result;
+    if (nativeEvery && obj.every === nativeEvery) return obj.every(predicate, context);
+    each(obj, function(value, index, list) {
+      if (!(result = result && predicate.call(context, value, index, list))) return breaker;
+    });
+    return !!result;
+  };
+
+  // Determine if at least one element in the object matches a truth test.
+  // Delegates to **ECMAScript 5**'s native `some` if available.
+  // Aliased as `any`.
+  var any = _.some = _.any = function(obj, predicate, context) {
+    predicate || (predicate = _.identity);
+    var result = false;
+    if (obj == null) return result;
+    if (nativeSome && obj.some === nativeSome) return obj.some(predicate, context);
+    each(obj, function(value, index, list) {
+      if (result || (result = predicate.call(context, value, index, list))) return breaker;
+    });
+    return !!result;
+  };
+
+  // Determine if the array or object contains a given value (using `===`).
+  // Aliased as `include`.
+  _.contains = _.include = function(obj, target) {
+    if (obj == null) return false;
+    if (nativeIndexOf && obj.indexOf === nativeIndexOf) return obj.indexOf(target) != -1;
+    return any(obj, function(value) {
+      return value === target;
+    });
+  };
+
+  // Invoke a method (with arguments) on every item in a collection.
+  _.invoke = function(obj, method) {
+    var args = slice.call(arguments, 2);
+    var isFunc = _.isFunction(method);
+    return _.map(obj, function(value) {
+      return (isFunc ? method : value[method]).apply(value, args);
+    });
+  };
+
+  // Convenience version of a common use case of `map`: fetching a property.
+  _.pluck = function(obj, key) {
+    return _.map(obj, _.property(key));
+  };
+
+  // Convenience version of a common use case of `filter`: selecting only objects
+  // containing specific `key:value` pairs.
+  _.where = function(obj, attrs) {
+    return _.filter(obj, _.matches(attrs));
+  };
+
+  // Convenience version of a common use case of `find`: getting the first object
+  // containing specific `key:value` pairs.
+  _.findWhere = function(obj, attrs) {
+    return _.find(obj, _.matches(attrs));
+  };
+
+  // Return the maximum element or (element-based computation).
+  // Can't optimize arrays of integers longer than 65,535 elements.
+  // See [WebKit Bug 80797](https://bugs.webkit.org/show_bug.cgi?id=80797)
+  _.max = function(obj, iterator, context) {
+    if (!iterator && _.isArray(obj) && obj[0] === +obj[0] && obj.length < 65535) {
+      return Math.max.apply(Math, obj);
+    }
+    var result = -Infinity, lastComputed = -Infinity;
+    each(obj, function(value, index, list) {
+      var computed = iterator ? iterator.call(context, value, index, list) : value;
+      if (computed > lastComputed) {
+        result = value;
+        lastComputed = computed;
+      }
+    });
+    return result;
+  };
+
+  // Return the minimum element (or element-based computation).
+  _.min = function(obj, iterator, context) {
+    if (!iterator && _.isArray(obj) && obj[0] === +obj[0] && obj.length < 65535) {
+      return Math.min.apply(Math, obj);
+    }
+    var result = Infinity, lastComputed = Infinity;
+    each(obj, function(value, index, list) {
+      var computed = iterator ? iterator.call(context, value, index, list) : value;
+      if (computed < lastComputed) {
+        result = value;
+        lastComputed = computed;
+      }
+    });
+    return result;
+  };
+
+  // Shuffle an array, using the modern version of the
+  // [Fisher-Yates shuffle](http://en.wikipedia.org/wiki/Fisher–Yates_shuffle).
+  _.shuffle = function(obj) {
+    var rand;
+    var index = 0;
+    var shuffled = [];
+    each(obj, function(value) {
+      rand = _.random(index++);
+      shuffled[index - 1] = shuffled[rand];
+      shuffled[rand] = value;
+    });
+    return shuffled;
+  };
+
+  // Sample **n** random values from a collection.
+  // If **n** is not specified, returns a single random element.
+  // The internal `guard` argument allows it to work with `map`.
+  _.sample = function(obj, n, guard) {
+    if (n == null || guard) {
+      if (obj.length !== +obj.length) obj = _.values(obj);
+      return obj[_.random(obj.length - 1)];
+    }
+    return _.shuffle(obj).slice(0, Math.max(0, n));
+  };
+
+  // An internal function to generate lookup iterators.
+  var lookupIterator = function(value) {
+    if (value == null) return _.identity;
+    if (_.isFunction(value)) return value;
+    return _.property(value);
+  };
+
+  // Sort the object's values by a criterion produced by an iterator.
+  _.sortBy = function(obj, iterator, context) {
+    iterator = lookupIterator(iterator);
+    return _.pluck(_.map(obj, function(value, index, list) {
+      return {
+        value: value,
+        index: index,
+        criteria: iterator.call(context, value, index, list)
+      };
+    }).sort(function(left, right) {
+      var a = left.criteria;
+      var b = right.criteria;
+      if (a !== b) {
+        if (a > b || a === void 0) return 1;
+        if (a < b || b === void 0) return -1;
+      }
+      return left.index - right.index;
+    }), 'value');
+  };
+
+  // An internal function used for aggregate "group by" operations.
+  var group = function(behavior) {
+    return function(obj, iterator, context) {
+      var result = {};
+      iterator = lookupIterator(iterator);
+      each(obj, function(value, index) {
+        var key = iterator.call(context, value, index, obj);
+        behavior(result, key, value);
+      });
+      return result;
+    };
+  };
+
+  // Groups the object's values by a criterion. Pass either a string attribute
+  // to group by, or a function that returns the criterion.
+  _.groupBy = group(function(result, key, value) {
+    _.has(result, key) ? result[key].push(value) : result[key] = [value];
+  });
+
+  // Indexes the object's values by a criterion, similar to `groupBy`, but for
+  // when you know that your index values will be unique.
+  _.indexBy = group(function(result, key, value) {
+    result[key] = value;
+  });
+
+  // Counts instances of an object that group by a certain criterion. Pass
+  // either a string attribute to count by, or a function that returns the
+  // criterion.
+  _.countBy = group(function(result, key) {
+    _.has(result, key) ? result[key]++ : result[key] = 1;
+  });
+
+  // Use a comparator function to figure out the smallest index at which
+  // an object should be inserted so as to maintain order. Uses binary search.
+  _.sortedIndex = function(array, obj, iterator, context) {
+    iterator = lookupIterator(iterator);
+    var value = iterator.call(context, obj);
+    var low = 0, high = array.length;
+    while (low < high) {
+      var mid = (low + high) >>> 1;
+      iterator.call(context, array[mid]) < value ? low = mid + 1 : high = mid;
+    }
+    return low;
+  };
+
+  // Safely create a real, live array from anything iterable.
+  _.toArray = function(obj) {
+    if (!obj) return [];
+    if (_.isArray(obj)) return slice.call(obj);
+    if (obj.length === +obj.length) return _.map(obj, _.identity);
+    return _.values(obj);
+  };
+
+  // Return the number of elements in an object.
+  _.size = function(obj) {
+    if (obj == null) return 0;
+    return (obj.length === +obj.length) ? obj.length : _.keys(obj).length;
+  };
+
+  // Array Functions
+  // ---------------
+
+  // Get the first element of an array. Passing **n** will return the first N
+  // values in the array. Aliased as `head` and `take`. The **guard** check
+  // allows it to work with `_.map`.
+  _.first = _.head = _.take = function(array, n, guard) {
+    if (array == null) return void 0;
+    if ((n == null) || guard) return array[0];
+    if (n < 0) return [];
+    return slice.call(array, 0, n);
+  };
+
+  // Returns everything but the last entry of the array. Especially useful on
+  // the arguments object. Passing **n** will return all the values in
+  // the array, excluding the last N. The **guard** check allows it to work with
+  // `_.map`.
+  _.initial = function(array, n, guard) {
+    return slice.call(array, 0, array.length - ((n == null) || guard ? 1 : n));
+  };
+
+  // Get the last element of an array. Passing **n** will return the last N
+  // values in the array. The **guard** check allows it to work with `_.map`.
+  _.last = function(array, n, guard) {
+    if (array == null) return void 0;
+    if ((n == null) || guard) return array[array.length - 1];
+    return slice.call(array, Math.max(array.length - n, 0));
+  };
+
+  // Returns everything but the first entry of the array. Aliased as `tail` and `drop`.
+  // Especially useful on the arguments object. Passing an **n** will return
+  // the rest N values in the array. The **guard**
+  // check allows it to work with `_.map`.
+  _.rest = _.tail = _.drop = function(array, n, guard) {
+    return slice.call(array, (n == null) || guard ? 1 : n);
+  };
+
+  // Trim out all falsy values from an array.
+  _.compact = function(array) {
+    return _.filter(array, _.identity);
+  };
+
+  // Internal implementation of a recursive `flatten` function.
+  var flatten = function(input, shallow, output) {
+    if (shallow && _.every(input, _.isArray)) {
+      return concat.apply(output, input);
+    }
+    each(input, function(value) {
+      if (_.isArray(value) || _.isArguments(value)) {
+        shallow ? push.apply(output, value) : flatten(value, shallow, output);
+      } else {
+        output.push(value);
+      }
+    });
+    return output;
+  };
+
+  // Flatten out an array, either recursively (by default), or just one level.
+  _.flatten = function(array, shallow) {
+    return flatten(array, shallow, []);
+  };
+
+  // Return a version of the array that does not contain the specified value(s).
+  _.without = function(array) {
+    return _.difference(array, slice.call(arguments, 1));
+  };
+
+  // Split an array into two arrays: one whose elements all satisfy the given
+  // predicate, and one whose elements all do not satisfy the predicate.
+  _.partition = function(array, predicate) {
+    var pass = [], fail = [];
+    each(array, function(elem) {
+      (predicate(elem) ? pass : fail).push(elem);
+    });
+    return [pass, fail];
+  };
+
+  // Produce a duplicate-free version of the array. If the array has already
+  // been sorted, you have the option of using a faster algorithm.
+  // Aliased as `unique`.
+  _.uniq = _.unique = function(array, isSorted, iterator, context) {
+    if (_.isFunction(isSorted)) {
+      context = iterator;
+      iterator = isSorted;
+      isSorted = false;
+    }
+    var initial = iterator ? _.map(array, iterator, context) : array;
+    var results = [];
+    var seen = [];
+    each(initial, function(value, index) {
+      if (isSorted ? (!index || seen[seen.length - 1] !== value) : !_.contains(seen, value)) {
+        seen.push(value);
+        results.push(array[index]);
+      }
+    });
+    return results;
+  };
+
+  // Produce an array that contains the union: each distinct element from all of
+  // the passed-in arrays.
+  _.union = function() {
+    return _.uniq(_.flatten(arguments, true));
+  };
+
+  // Produce an array that contains every item shared between all the
+  // passed-in arrays.
+  _.intersection = function(array) {
+    var rest = slice.call(arguments, 1);
+    return _.filter(_.uniq(array), function(item) {
+      return _.every(rest, function(other) {
+        return _.contains(other, item);
+      });
+    });
+  };
+
+  // Take the difference between one array and a number of other arrays.
+  // Only the elements present in just the first array will remain.
+  _.difference = function(array) {
+    var rest = concat.apply(ArrayProto, slice.call(arguments, 1));
+    return _.filter(array, function(value){ return !_.contains(rest, value); });
+  };
+
+  // Zip together multiple lists into a single array -- elements that share
+  // an index go together.
+  _.zip = function() {
+    var length = _.max(_.pluck(arguments, 'length').concat(0));
+    var results = new Array(length);
+    for (var i = 0; i < length; i++) {
+      results[i] = _.pluck(arguments, '' + i);
+    }
+    return results;
+  };
+
+  // Converts lists into objects. Pass either a single array of `[key, value]`
+  // pairs, or two parallel arrays of the same length -- one of keys, and one of
+  // the corresponding values.
+  _.object = function(list, values) {
+    if (list == null) return {};
+    var result = {};
+    for (var i = 0, length = list.length; i < length; i++) {
+      if (values) {
+        result[list[i]] = values[i];
+      } else {
+        result[list[i][0]] = list[i][1];
+      }
+    }
+    return result;
+  };
+
+  // If the browser doesn't supply us with indexOf (I'm looking at you, **MSIE**),
+  // we need this function. Return the position of the first occurrence of an
+  // item in an array, or -1 if the item is not included in the array.
+  // Delegates to **ECMAScript 5**'s native `indexOf` if available.
+  // If the array is large and already in sort order, pass `true`
+  // for **isSorted** to use binary search.
+  _.indexOf = function(array, item, isSorted) {
+    if (array == null) return -1;
+    var i = 0, length = array.length;
+    if (isSorted) {
+      if (typeof isSorted == 'number') {
+        i = (isSorted < 0 ? Math.max(0, length + isSorted) : isSorted);
+      } else {
+        i = _.sortedIndex(array, item);
+        return array[i] === item ? i : -1;
+      }
+    }
+    if (nativeIndexOf && array.indexOf === nativeIndexOf) return array.indexOf(item, isSorted);
+    for (; i < length; i++) if (array[i] === item) return i;
+    return -1;
+  };
+
+  // Delegates to **ECMAScript 5**'s native `lastIndexOf` if available.
+  _.lastIndexOf = function(array, item, from) {
+    if (array == null) return -1;
+    var hasIndex = from != null;
+    if (nativeLastIndexOf && array.lastIndexOf === nativeLastIndexOf) {
+      return hasIndex ? array.lastIndexOf(item, from) : array.lastIndexOf(item);
+    }
+    var i = (hasIndex ? from : array.length);
+    while (i--) if (array[i] === item) return i;
+    return -1;
+  };
+
+  // Generate an integer Array containing an arithmetic progression. A port of
+  // the native Python `range()` function. See
+  // [the Python documentation](http://docs.python.org/library/functions.html#range).
+  _.range = function(start, stop, step) {
+    if (arguments.length <= 1) {
+      stop = start || 0;
+      start = 0;
+    }
+    step = arguments[2] || 1;
+
+    var length = Math.max(Math.ceil((stop - start) / step), 0);
+    var idx = 0;
+    var range = new Array(length);
+
+    while(idx < length) {
+      range[idx++] = start;
+      start += step;
+    }
+
+    return range;
+  };
+
+  // Function (ahem) Functions
+  // ------------------
+
+  // Reusable constructor function for prototype setting.
+  var ctor = function(){};
+
+  // Create a function bound to a given object (assigning `this`, and arguments,
+  // optionally). Delegates to **ECMAScript 5**'s native `Function.bind` if
+  // available.
+  _.bind = function(func, context) {
+    var args, bound;
+    if (nativeBind && func.bind === nativeBind) return nativeBind.apply(func, slice.call(arguments, 1));
+    if (!_.isFunction(func)) throw new TypeError;
+    args = slice.call(arguments, 2);
+    return bound = function() {
+      if (!(this instanceof bound)) return func.apply(context, args.concat(slice.call(arguments)));
+      ctor.prototype = func.prototype;
+      var self = new ctor;
+      ctor.prototype = null;
+      var result = func.apply(self, args.concat(slice.call(arguments)));
+      if (Object(result) === result) return result;
+      return self;
+    };
+  };
+
+  // Partially apply a function by creating a version that has had some of its
+  // arguments pre-filled, without changing its dynamic `this` context. _ acts
+  // as a placeholder, allowing any combination of arguments to be pre-filled.
+  _.partial = function(func) {
+    var boundArgs = slice.call(arguments, 1);
+    return function() {
+      var position = 0;
+      var args = boundArgs.slice();
+      for (var i = 0, length = args.length; i < length; i++) {
+        if (args[i] === _) args[i] = arguments[position++];
+      }
+      while (position < arguments.length) args.push(arguments[position++]);
+      return func.apply(this, args);
+    };
+  };
+
+  // Bind a number of an object's methods to that object. Remaining arguments
+  // are the method names to be bound. Useful for ensuring that all callbacks
+  // defined on an object belong to it.
+  _.bindAll = function(obj) {
+    var funcs = slice.call(arguments, 1);
+    if (funcs.length === 0) throw new Error('bindAll must be passed function names');
+    each(funcs, function(f) { obj[f] = _.bind(obj[f], obj); });
+    return obj;
+  };
+
+  // Memoize an expensive function by storing its results.
+  _.memoize = function(func, hasher) {
+    var memo = {};
+    hasher || (hasher = _.identity);
+    return function() {
+      var key = hasher.apply(this, arguments);
+      return _.has(memo, key) ? memo[key] : (memo[key] = func.apply(this, arguments));
+    };
+  };
+
+  // Delays a function for the given number of milliseconds, and then calls
+  // it with the arguments supplied.
+  _.delay = function(func, wait) {
+    var args = slice.call(arguments, 2);
+    return setTimeout(function(){ return func.apply(null, args); }, wait);
+  };
+
+  // Defers a function, scheduling it to run after the current call stack has
+  // cleared.
+  _.defer = function(func) {
+    return _.delay.apply(_, [func, 1].concat(slice.call(arguments, 1)));
+  };
+
+  // Returns a function, that, when invoked, will only be triggered at most once
+  // during a given window of time. Normally, the throttled function will run
+  // as much as it can, without ever going more than once per `wait` duration;
+  // but if you'd like to disable the execution on the leading edge, pass
+  // `{leading: false}`. To disable execution on the trailing edge, ditto.
+  _.throttle = function(func, wait, options) {
+    var context, args, result;
+    var timeout = null;
+    var previous = 0;
+    options || (options = {});
+    var later = function() {
+      previous = options.leading === false ? 0 : _.now();
+      timeout = null;
+      result = func.apply(context, args);
+      context = args = null;
+    };
+    return function() {
+      var now = _.now();
+      if (!previous && options.leading === false) previous = now;
+      var remaining = wait - (now - previous);
+      context = this;
+      args = arguments;
+      if (remaining <= 0) {
+        clearTimeout(timeout);
+        timeout = null;
+        previous = now;
+        result = func.apply(context, args);
+        context = args = null;
+      } else if (!timeout && options.trailing !== false) {
+        timeout = setTimeout(later, remaining);
+      }
+      return result;
+    };
+  };
+
+  // Returns a function, that, as long as it continues to be invoked, will not
+  // be triggered. The function will be called after it stops being called for
+  // N milliseconds. If `immediate` is passed, trigger the function on the
+  // leading edge, instead of the trailing.
+  _.debounce = function(func, wait, immediate) {
+    var timeout, args, context, timestamp, result;
+
+    var later = function() {
+      var last = _.now() - timestamp;
+      if (last < wait) {
+        timeout = setTimeout(later, wait - last);
+      } else {
+        timeout = null;
+        if (!immediate) {
+          result = func.apply(context, args);
+          context = args = null;
+        }
+      }
+    };
+
+    return function() {
+      context = this;
+      args = arguments;
+      timestamp = _.now();
+      var callNow = immediate && !timeout;
+      if (!timeout) {
+        timeout = setTimeout(later, wait);
+      }
+      if (callNow) {
+        result = func.apply(context, args);
+        context = args = null;
+      }
+
+      return result;
+    };
+  };
+
+  // Returns a function that will be executed at most one time, no matter how
+  // often you call it. Useful for lazy initialization.
+  _.once = function(func) {
+    var ran = false, memo;
+    return function() {
+      if (ran) return memo;
+      ran = true;
+      memo = func.apply(this, arguments);
+      func = null;
+      return memo;
+    };
+  };
+
+  // Returns the first function passed as an argument to the second,
+  // allowing you to adjust arguments, run code before and after, and
+  // conditionally execute the original function.
+  _.wrap = function(func, wrapper) {
+    return _.partial(wrapper, func);
+  };
+
+  // Returns a function that is the composition of a list of functions, each
+  // consuming the return value of the function that follows.
+  _.compose = function() {
+    var funcs = arguments;
+    return function() {
+      var args = arguments;
+      for (var i = funcs.length - 1; i >= 0; i--) {
+        args = [funcs[i].apply(this, args)];
+      }
+      return args[0];
+    };
+  };
+
+  // Returns a function that will only be executed after being called N times.
+  _.after = function(times, func) {
+    return function() {
+      if (--times < 1) {
+        return func.apply(this, arguments);
+      }
+    };
+  };
+
+  // Object Functions
+  // ----------------
+
+  // Retrieve the names of an object's properties.
+  // Delegates to **ECMAScript 5**'s native `Object.keys`
+  _.keys = function(obj) {
+    if (!_.isObject(obj)) return [];
+    if (nativeKeys) return nativeKeys(obj);
+    var keys = [];
+    for (var key in obj) if (_.has(obj, key)) keys.push(key);
+    return keys;
+  };
+
+  // Retrieve the values of an object's properties.
+  _.values = function(obj) {
+    var keys = _.keys(obj);
+    var length = keys.length;
+    var values = new Array(length);
+    for (var i = 0; i < length; i++) {
+      values[i] = obj[keys[i]];
+    }
+    return values;
+  };
+
+  // Convert an object into a list of `[key, value]` pairs.
+  _.pairs = function(obj) {
+    var keys = _.keys(obj);
+    var length = keys.length;
+    var pairs = new Array(length);
+    for (var i = 0; i < length; i++) {
+      pairs[i] = [keys[i], obj[keys[i]]];
+    }
+    return pairs;
+  };
+
+  // Invert the keys and values of an object. The values must be serializable.
+  _.invert = function(obj) {
+    var result = {};
+    var keys = _.keys(obj);
+    for (var i = 0, length = keys.length; i < length; i++) {
+      result[obj[keys[i]]] = keys[i];
+    }
+    return result;
+  };
+
+  // Return a sorted list of the function names available on the object.
+  // Aliased as `methods`
+  _.functions = _.methods = function(obj) {
+    var names = [];
+    for (var key in obj) {
+      if (_.isFunction(obj[key])) names.push(key);
+    }
+    return names.sort();
+  };
+
+  // Extend a given object with all the properties in passed-in object(s).
+  _.extend = function(obj) {
+    each(slice.call(arguments, 1), function(source) {
+      if (source) {
+        for (var prop in source) {
+          obj[prop] = source[prop];
+        }
+      }
+    });
+    return obj;
+  };
+
+  // Return a copy of the object only containing the whitelisted properties.
+  _.pick = function(obj) {
+    var copy = {};
+    var keys = concat.apply(ArrayProto, slice.call(arguments, 1));
+    each(keys, function(key) {
+      if (key in obj) copy[key] = obj[key];
+    });
+    return copy;
+  };
+
+   // Return a copy of the object without the blacklisted properties.
+  _.omit = function(obj) {
+    var copy = {};
+    var keys = concat.apply(ArrayProto, slice.call(arguments, 1));
+    for (var key in obj) {
+      if (!_.contains(keys, key)) copy[key] = obj[key];
+    }
+    return copy;
+  };
+
+  // Fill in a given object with default properties.
+  _.defaults = function(obj) {
+    each(slice.call(arguments, 1), function(source) {
+      if (source) {
+        for (var prop in source) {
+          if (obj[prop] === void 0) obj[prop] = source[prop];
+        }
+      }
+    });
+    return obj;
+  };
+
+  // Create a (shallow-cloned) duplicate of an object.
+  _.clone = function(obj) {
+    if (!_.isObject(obj)) return obj;
+    return _.isArray(obj) ? obj.slice() : _.extend({}, obj);
+  };
+
+  // Invokes interceptor with the obj, and then returns obj.
+  // The primary purpose of this method is to "tap into" a method chain, in
+  // order to perform operations on intermediate results within the chain.
+  _.tap = function(obj, interceptor) {
+    interceptor(obj);
+    return obj;
+  };
+
+  // Internal recursive comparison function for `isEqual`.
+  var eq = function(a, b, aStack, bStack) {
+    // Identical objects are equal. `0 === -0`, but they aren't identical.
+    // See the [Harmony `egal` proposal](http://wiki.ecmascript.org/doku.php?id=harmony:egal).
+    if (a === b) return a !== 0 || 1 / a == 1 / b;
+    // A strict comparison is necessary because `null == undefined`.
+    if (a == null || b == null) return a === b;
+    // Unwrap any wrapped objects.
+    if (a instanceof _) a = a._wrapped;
+    if (b instanceof _) b = b._wrapped;
+    // Compare `[[Class]]` names.
+    var className = toString.call(a);
+    if (className != toString.call(b)) return false;
+    switch (className) {
+      // Strings, numbers, dates, and booleans are compared by value.
+      case '[object String]':
+        // Primitives and their corresponding object wrappers are equivalent; thus, `"5"` is
+        // equivalent to `new String("5")`.
+        return a == String(b);
+      case '[object Number]':
+        // `NaN`s are equivalent, but non-reflexive. An `egal` comparison is performed for
+        // other numeric values.
+        return a != +a ? b != +b : (a == 0 ? 1 / a == 1 / b : a == +b);
+      case '[object Date]':
+      case '[object Boolean]':
+        // Coerce dates and booleans to numeric primitive values. Dates are compared by their
+        // millisecond representations. Note that invalid dates with millisecond representations
+        // of `NaN` are not equivalent.
+        return +a == +b;
+      // RegExps are compared by their source patterns and flags.
+      case '[object RegExp]':
+        return a.source == b.source &&
+               a.global == b.global &&
+               a.multiline == b.multiline &&
+               a.ignoreCase == b.ignoreCase;
+    }
+    if (typeof a != 'object' || typeof b != 'object') return false;
+    // Assume equality for cyclic structures. The algorithm for detecting cyclic
+    // structures is adapted from ES 5.1 section 15.12.3, abstract operation `JO`.
+    var length = aStack.length;
+    while (length--) {
+      // Linear search. Performance is inversely proportional to the number of
+      // unique nested structures.
+      if (aStack[length] == a) return bStack[length] == b;
+    }
+    // Objects with different constructors are not equivalent, but `Object`s
+    // from different frames are.
+    var aCtor = a.constructor, bCtor = b.constructor;
+    if (aCtor !== bCtor && !(_.isFunction(aCtor) && (aCtor instanceof aCtor) &&
+                             _.isFunction(bCtor) && (bCtor instanceof bCtor))
+                        && ('constructor' in a && 'constructor' in b)) {
+      return false;
+    }
+    // Add the first object to the stack of traversed objects.
+    aStack.push(a);
+    bStack.push(b);
+    var size = 0, result = true;
+    // Recursively compare objects and arrays.
+    if (className == '[object Array]') {
+      // Compare array lengths to determine if a deep comparison is necessary.
+      size = a.length;
+      result = size == b.length;
+      if (result) {
+        // Deep compare the contents, ignoring non-numeric properties.
+        while (size--) {
+          if (!(result = eq(a[size], b[size], aStack, bStack))) break;
+        }
+      }
+    } else {
+      // Deep compare objects.
+      for (var key in a) {
+        if (_.has(a, key)) {
+          // Count the expected number of properties.
+          size++;
+          // Deep compare each member.
+          if (!(result = _.has(b, key) && eq(a[key], b[key], aStack, bStack))) break;
+        }
+      }
+      // Ensure that both objects contain the same number of properties.
+      if (result) {
+        for (key in b) {
+          if (_.has(b, key) && !(size--)) break;
+        }
+        result = !size;
+      }
+    }
+    // Remove the first object from the stack of traversed objects.
+    aStack.pop();
+    bStack.pop();
+    return result;
+  };
+
+  // Perform a deep comparison to check if two objects are equal.
+  _.isEqual = function(a, b) {
+    return eq(a, b, [], []);
+  };
+
+  // Is a given array, string, or object empty?
+  // An "empty" object has no enumerable own-properties.
+  _.isEmpty = function(obj) {
+    if (obj == null) return true;
+    if (_.isArray(obj) || _.isString(obj)) return obj.length === 0;
+    for (var key in obj) if (_.has(obj, key)) return false;
+    return true;
+  };
+
+  // Is a given value a DOM element?
+  _.isElement = function(obj) {
+    return !!(obj && obj.nodeType === 1);
+  };
+
+  // Is a given value an array?
+  // Delegates to ECMA5's native Array.isArray
+  _.isArray = nativeIsArray || function(obj) {
+    return toString.call(obj) == '[object Array]';
+  };
+
+  // Is a given variable an object?
+  _.isObject = function(obj) {
+    return obj === Object(obj);
+  };
+
+  // Add some isType methods: isArguments, isFunction, isString, isNumber, isDate, isRegExp.
+  each(['Arguments', 'Function', 'String', 'Number', 'Date', 'RegExp'], function(name) {
+    _['is' + name] = function(obj) {
+      return toString.call(obj) == '[object ' + name + ']';
+    };
+  });
+
+  // Define a fallback version of the method in browsers (ahem, IE), where
+  // there isn't any inspectable "Arguments" type.
+  if (!_.isArguments(arguments)) {
+    _.isArguments = function(obj) {
+      return !!(obj && _.has(obj, 'callee'));
+    };
+  }
+
+  // Optimize `isFunction` if appropriate.
+  if (typeof (/./) !== 'function') {
+    _.isFunction = function(obj) {
+      return typeof obj === 'function';
+    };
+  }
+
+  // Is a given object a finite number?
+  _.isFinite = function(obj) {
+    return isFinite(obj) && !isNaN(parseFloat(obj));
+  };
+
+  // Is the given value `NaN`? (NaN is the only number which does not equal itself).
+  _.isNaN = function(obj) {
+    return _.isNumber(obj) && obj != +obj;
+  };
+
+  // Is a given value a boolean?
+  _.isBoolean = function(obj) {
+    return obj === true || obj === false || toString.call(obj) == '[object Boolean]';
+  };
+
+  // Is a given value equal to null?
+  _.isNull = function(obj) {
+    return obj === null;
+  };
+
+  // Is a given variable undefined?
+  _.isUndefined = function(obj) {
+    return obj === void 0;
+  };
+
+  // Shortcut function for checking if an object has a given property directly
+  // on itself (in other words, not on a prototype).
+  _.has = function(obj, key) {
+    return hasOwnProperty.call(obj, key);
+  };
+
+  // Utility Functions
+  // -----------------
+
+  // Run Underscore.js in *noConflict* mode, returning the `_` variable to its
+  // previous owner. Returns a reference to the Underscore object.
+  _.noConflict = function() {
+    root._ = previousUnderscore;
+    return this;
+  };
+
+  // Keep the identity function around for default iterators.
+  _.identity = function(value) {
+    return value;
+  };
+
+  _.constant = function(value) {
+    return function () {
+      return value;
+    };
+  };
+
+  _.property = function(key) {
+    return function(obj) {
+      return obj[key];
+    };
+  };
+
+  // Returns a predicate for checking whether an object has a given set of `key:value` pairs.
+  _.matches = function(attrs) {
+    return function(obj) {
+      if (obj === attrs) return true; //avoid comparing an object to itself.
+      for (var key in attrs) {
+        if (attrs[key] !== obj[key])
+          return false;
+      }
+      return true;
+    }
+  };
+
+  // Run a function **n** times.
+  _.times = function(n, iterator, context) {
+    var accum = Array(Math.max(0, n));
+    for (var i = 0; i < n; i++) accum[i] = iterator.call(context, i);
+    return accum;
+  };
+
+  // Return a random integer between min and max (inclusive).
+  _.random = function(min, max) {
+    if (max == null) {
+      max = min;
+      min = 0;
+    }
+    return min + Math.floor(Math.random() * (max - min + 1));
+  };
+
+  // A (possibly faster) way to get the current timestamp as an integer.
+  _.now = Date.now || function() { return new Date().getTime(); };
+
+  // List of HTML entities for escaping.
+  var entityMap = {
+    escape: {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#x27;'
+    }
+  };
+  entityMap.unescape = _.invert(entityMap.escape);
+
+  // Regexes containing the keys and values listed immediately above.
+  var entityRegexes = {
+    escape:   new RegExp('[' + _.keys(entityMap.escape).join('') + ']', 'g'),
+    unescape: new RegExp('(' + _.keys(entityMap.unescape).join('|') + ')', 'g')
+  };
+
+  // Functions for escaping and unescaping strings to/from HTML interpolation.
+  _.each(['escape', 'unescape'], function(method) {
+    _[method] = function(string) {
+      if (string == null) return '';
+      return ('' + string).replace(entityRegexes[method], function(match) {
+        return entityMap[method][match];
+      });
+    };
+  });
+
+  // If the value of the named `property` is a function then invoke it with the
+  // `object` as context; otherwise, return it.
+  _.result = function(object, property) {
+    if (object == null) return void 0;
+    var value = object[property];
+    return _.isFunction(value) ? value.call(object) : value;
+  };
+
+  // Add your own custom functions to the Underscore object.
+  _.mixin = function(obj) {
+    each(_.functions(obj), function(name) {
+      var func = _[name] = obj[name];
+      _.prototype[name] = function() {
+        var args = [this._wrapped];
+        push.apply(args, arguments);
+        return result.call(this, func.apply(_, args));
+      };
+    });
+  };
+
+  // Generate a unique integer id (unique within the entire client session).
+  // Useful for temporary DOM ids.
+  var idCounter = 0;
+  _.uniqueId = function(prefix) {
+    var id = ++idCounter + '';
+    return prefix ? prefix + id : id;
+  };
+
+  // By default, Underscore uses ERB-style template delimiters, change the
+  // following template settings to use alternative delimiters.
+  _.templateSettings = {
+    evaluate    : /<%([\s\S]+?)%>/g,
+    interpolate : /<%=([\s\S]+?)%>/g,
+    escape      : /<%-([\s\S]+?)%>/g
+  };
+
+  // When customizing `templateSettings`, if you don't want to define an
+  // interpolation, evaluation or escaping regex, we need one that is
+  // guaranteed not to match.
+  var noMatch = /(.)^/;
+
+  // Certain characters need to be escaped so that they can be put into a
+  // string literal.
+  var escapes = {
+    "'":      "'",
+    '\\':     '\\',
+    '\r':     'r',
+    '\n':     'n',
+    '\t':     't',
+    '\u2028': 'u2028',
+    '\u2029': 'u2029'
+  };
+
+  var escaper = /\\|'|\r|\n|\t|\u2028|\u2029/g;
+
+  // JavaScript micro-templating, similar to John Resig's implementation.
+  // Underscore templating handles arbitrary delimiters, preserves whitespace,
+  // and correctly escapes quotes within interpolated code.
+  _.template = function(text, data, settings) {
+    var render;
+    settings = _.defaults({}, settings, _.templateSettings);
+
+    // Combine delimiters into one regular expression via alternation.
+    var matcher = new RegExp([
+      (settings.escape || noMatch).source,
+      (settings.interpolate || noMatch).source,
+      (settings.evaluate || noMatch).source
+    ].join('|') + '|$', 'g');
+
+    // Compile the template source, escaping string literals appropriately.
+    var index = 0;
+    var source = "__p+='";
+    text.replace(matcher, function(match, escape, interpolate, evaluate, offset) {
+      source += text.slice(index, offset)
+        .replace(escaper, function(match) { return '\\' + escapes[match]; });
+
+      if (escape) {
+        source += "'+\n((__t=(" + escape + "))==null?'':_.escape(__t))+\n'";
+      }
+      if (interpolate) {
+        source += "'+\n((__t=(" + interpolate + "))==null?'':__t)+\n'";
+      }
+      if (evaluate) {
+        source += "';\n" + evaluate + "\n__p+='";
+      }
+      index = offset + match.length;
+      return match;
+    });
+    source += "';\n";
+
+    // If a variable is not specified, place data values in local scope.
+    if (!settings.variable) source = 'with(obj||{}){\n' + source + '}\n';
+
+    source = "var __t,__p='',__j=Array.prototype.join," +
+      "print=function(){__p+=__j.call(arguments,'');};\n" +
+      source + "return __p;\n";
+
+    try {
+      render = new Function(settings.variable || 'obj', '_', source);
+    } catch (e) {
+      e.source = source;
+      throw e;
+    }
+
+    if (data) return render(data, _);
+    var template = function(data) {
+      return render.call(this, data, _);
+    };
+
+    // Provide the compiled function source as a convenience for precompilation.
+    template.source = 'function(' + (settings.variable || 'obj') + '){\n' + source + '}';
+
+    return template;
+  };
+
+  // Add a "chain" function, which will delegate to the wrapper.
+  _.chain = function(obj) {
+    return _(obj).chain();
+  };
+
+  // OOP
+  // ---------------
+  // If Underscore is called as a function, it returns a wrapped object that
+  // can be used OO-style. This wrapper holds altered versions of all the
+  // underscore functions. Wrapped objects may be chained.
+
+  // Helper function to continue chaining intermediate results.
+  var result = function(obj) {
+    return this._chain ? _(obj).chain() : obj;
+  };
+
+  // Add all of the Underscore functions to the wrapper object.
+  _.mixin(_);
+
+  // Add all mutator Array functions to the wrapper.
+  each(['pop', 'push', 'reverse', 'shift', 'sort', 'splice', 'unshift'], function(name) {
+    var method = ArrayProto[name];
+    _.prototype[name] = function() {
+      var obj = this._wrapped;
+      method.apply(obj, arguments);
+      if ((name == 'shift' || name == 'splice') && obj.length === 0) delete obj[0];
+      return result.call(this, obj);
+    };
+  });
+
+  // Add all accessor Array functions to the wrapper.
+  each(['concat', 'join', 'slice'], function(name) {
+    var method = ArrayProto[name];
+    _.prototype[name] = function() {
+      return result.call(this, method.apply(this._wrapped, arguments));
+    };
+  });
+
+  _.extend(_.prototype, {
+
+    // Start chaining a wrapped Underscore object.
+    chain: function() {
+      this._chain = true;
+      return this;
+    },
+
+    // Extracts the result from a wrapped and chained object.
+    value: function() {
+      return this._wrapped;
+    }
+
+  });
+
+  // AMD registration happens at the end for compatibility with AMD loaders
+  // that may not enforce next-turn semantics on modules. Even though general
+  // practice for AMD registration is to be anonymous, underscore registers
+  // as a named module because, like jQuery, it is a base library that is
+  // popular enough to be bundled in a third party lib, but not be part of
+  // an AMD load request. Those cases could generate an error when an
+  // anonymous define() is called outside of a loader request.
+  if (typeof define === 'function' && define.amd) {
+    define('underscore', [], function() {
+      return _;
+    });
+  }
+}).call(this);
+
 },{}]},{},[5])

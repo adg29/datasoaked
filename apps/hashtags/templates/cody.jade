@@ -1,0 +1,168 @@
+doctype html
+meta(charset="utf-8")
+html.csstransforms3d
+  head
+    meta(name="viewport",content="width=device-width, initial-scale=1.0")
+    title
+      != '#'+sd.hashtagList.join(' & #') + ' posts, realtime updates via Instagram & DataSoaked'
+    //- link( type='text/css', rel='stylesheet', href=('/assets/hashtags' + sd.CSS_EXT) )
+    link( type='text/css', rel='stylesheet', href=('/assets/cody' + sd.CSS_EXT) )
+  body.container
+    header.cd-header
+      section#update-status
+        nav#cl-effect-2.cl-effect-2
+          a.updates-tag
+            span(data-hover="via @Galan_EtAl")
+              != 'Datasoaked: Realtime Instagram Updates'
+          #morphsearch.morphsearch
+            form.morphsearch-form
+                label #
+                input.morphsearch-input(type='search', placeholder='Add Tags...')
+                button.morphsearch-submit(type='submit') +Tags
+              .morphsearch-content
+                .dummy-column.related-people
+                  h2 People
+                  ul.items
+                .dummy-column.related-tags
+                  h2 Related 
+                  ul.items
+                .dummy-column
+                  h2 Upcoming 
+                  ul.items
+                    li
+                      a.menutag(href='/tag/museumweek')
+                        h3 MuseumWeek
+                    li
+                      a.menutag(href='/tag/sxsw')
+                        h3 SXSW
+                    li
+                      a.menutag(href='/tag/wmc2015')
+                        h3 WMC2015
+
+            span.morphsearch-close.hello
+    main.cd-main-content
+      .cd-tab-filter-wrapper
+        .cd-tab-filter
+          ul.cd-filters
+            li.placeholder
+              a(data-type='*', href='#0') All
+              // selected option on mobile
+            |                 
+            li.filter
+              a.selected(href='#0', data-type='*') All
+            |                 
+            for t in sd.hashtagList
+              li.filter(data-filter='.'+t)
+                a(href='#0', data-type=t)
+                  != '#' + t
+          // cd-filters
+        // cd-tab-filter
+      // cd-tab-filter-wrapper
+      section.cd-gallery
+        for item in hashtags
+          if item instanceof models.InstagramItem  
+            div(data-created=item.get('created_time'),data-uid=item.get('id'),class='element ' + item.get('tags').join(' '))
+              figure
+                div
+                  img(src=item.get('images').low_resolution.url)
+                figcaption.item-time
+                  h4
+                    a.insta(href=(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'),title=(item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username,target="_blank")
+                      != moment.unix(parseInt(item.get('created_time'))).fromNoww()
+                figcaption.item-meta
+                  h3!= (item.get('caption')!=null && item.get('tags').length < 7 ? item.get('tags').join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : item.get('tags').join(' ')) 
+                  span #{item.get('user').username}
+                  div
+                    a(href=(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "instagram://media?id="+item.get('id') : item.get('link'),title=(item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').username,target="_blank") Take a Look
+          if false && item instanceof models.TwitterItem   
+            - tags = _.map(item.get('entities').hashtags, function(h){ return h.text; })
+            .element
+              figure
+                div
+                  if item.get('entities').media && item.get('entities').media[0] && item.get('entities').media[0].sizes.medium
+                    img(src=item.get('entities').media[0].media_url)
+                  .tweet= item.get('text')
+                figcaption.item-time
+                  h4
+                    a.twit(href=(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'),title=(item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name,target="_blank")
+                      != moment(item.get('created_at')).fromNoww()
+                figcaption.item-meta
+                  h3!= (item.get('caption')!=null && tags.length < 7 ? tags.join(' ') + ' <br/><small> ' + item.get('caption').text + ' </small> ' : tags.join(' ')) 
+                  span.byline-twit @#{item.get('user').screen_name}
+                  div
+                    a(href=(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) ) ? "twitter://status?id="+item.get('id') : 'http://twitter.com/'+item.get('user').screen_name+'/status/'+item.get('id'),title=(item.get('caption')==null?"":item.get('text'))+" via "+item.get('user').screen_name,target="_blank") Take a Look
+                      // .created= moment(item.get('created_at')).format("dddd, MMMM Do YYYY, h:mm:ss a") 
+
+
+        //- .cd-fail-message No results found
+      // cd-gallery
+      .cd-filter
+        form#input-filter
+          .cd-filter-block
+            h4 Filter 
+            |                                                                 
+            .cd-filter-content
+              input(type='search', placeholder='Try #'+hashtagsRelated[Math.floor(Math.random() * hashtagsRelated.length)])
+            // cd-filter-content
+          // cd-filter-block
+          .cd-filter-block
+            h4#filter-related 
+              != 'Related Hashtags'
+            ul.cd-filter-content.cd-filters.list
+              li.filter-related-clear &#10006; clear
+              for h in hashtagsRelated
+                li
+                  input.filter(id='checkbox-'+h,data-filter='.'+h, type='checkbox')
+                  |                                                                                 
+                  label.checkbox-label(for='checkbox-'+h) 
+                    != '#' + h
+            // cd-filter-content
+          // cd-filter-block
+            .cd-filter-block
+              h4 Select
+              |                                                                                 
+              .cd-filter-content
+                .cd-select.cd-filters
+                  select#selectThis.filter(name='selectThis')
+                    option(value='') Choose an option
+                    |                                                                                             
+                    option(value='.option1') Option 1
+                    |                                                                                             
+                    option(value='.option2') Option 2
+                    |                                                                                             
+                    option(value='.option3') Option 3
+                    |                                                                                             
+                    option(value='.option4') Option 4
+                // cd-select
+              // cd-filter-content
+          // cd-filter-block
+          .cd-filter-block
+            h4 Influence Threshold
+            |                                                                                 
+            ul.cd-filter-content.cd-filters.list
+              li
+                input#radio1.filter(data-filter='', type='radio', name='radioButton', checked='')
+                |                                                                                             
+                label.radio-label(for='radio1') All
+              |                                                                                         
+              li
+                input#radio2.filter(data-filter='.radio2', type='radio', name='radioButton')
+                |                                                                                                 
+                label.radio-label(for='radio2') Choice 2
+              |                                                                                             
+              li
+                input#radio3.filter(data-filter='.radio3', type='radio', name='radioButton')
+                |                                                                                                     
+                label.radio-label(for='radio3') Choice 3
+            // cd-filter-content
+          // cd-filter-block
+        |                                                                                     
+        a.cd-close(href='#0') Close
+      // cd-filter
+      a.cd-filter-trigger(href='#0') Filters
+    // cd-main-content
+
+
+!= sharify.script()
+script( src='/assets/hashtags' + sd.JS_EXT )
+script( src='/socket.io/socket.io.js', type="text/javascript")
