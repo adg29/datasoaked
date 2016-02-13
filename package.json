@@ -15,9 +15,9 @@
     "async": "0.6.2",
     "url": "0.7.9",
     "http": "0.0.0",
-    "socket.io": "0.9.16",
+    "socket.io": "1.4.5",
     "socket.io-browserify": "0.9.6",
-    "socket.io-client": "0.9.16",
+    "socket.io-client": "1.4.5",
     "msgpack": "0.2.2",
     "hiredis": "0.1.16",
     "nodetime": "0.8.15"
